@@ -51,6 +51,8 @@ final class NotchController {
     private var devReadyDismissItem: DispatchWorkItem?
     private var devReadyCoalesceItem: DispatchWorkItem?
     private var pendingDevReadyAlerts: [DevReadyAlert] = []
+    private var recentDevReadyFingerprints: [(String, Date)] = []
+    private let devReadyDedupInterval: TimeInterval = 12
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -595,6 +597,12 @@ final class NotchController {
 
     private func presentDevReady(_ alert: DevReadyAlert) {
         guard AppSettings.shared.showDevReadyPings else { return }
+        let fingerprint = "\(alert.title)|\(alert.subtitle ?? "")"
+        let now = Date()
+        recentDevReadyFingerprints.removeAll { now.timeIntervalSince($0.1) > devReadyDedupInterval }
+        if recentDevReadyFingerprints.contains(where: { $0.0 == fingerprint }) { return }
+        recentDevReadyFingerprints.append((fingerprint, now))
+
         pendingDevReadyAlerts.append(alert)
         devReadyCoalesceItem?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.flushDevReadyBatch() }

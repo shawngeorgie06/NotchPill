@@ -1,18 +1,14 @@
 ---
-description: Ping NotchPill when the agent finishes a reply.
+description: Ping NotchPill when the agent finishes a reply or needs user input.
 alwaysApply: true
 ---
 
-**Every time you finish a reply**, run this as your **last shell command**:
+When your turn is **done**, run **one** notify (not queue + notify — that causes doubles):
 
 ```bash
 ./Scripts/notify-notchpill.sh "Short title" "What you finished or answered" Cursor com.todesktop.230313mzl4w4u92 "YOUR_MODEL_NAME"
 ```
 
-Also queue for the stop hook backup:
-
-```bash
-./Scripts/queue-notchpill-notify.sh "Short title" "What you finished" Cursor com.todesktop.230313mzl4w4u92 "YOUR_MODEL_NAME"
-```
+The stop hook is a backup only if you forget. Question hooks ping automatically when you use **AskQuestion** or end with a `?`.
 
 Always notify — including short answers. Use your real model name for the badge.

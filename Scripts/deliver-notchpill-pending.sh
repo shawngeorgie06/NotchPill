@@ -47,7 +47,11 @@ else
   done
 fi
 
-notify="/Users/shawngeorgie/Projects/NotchPill/Scripts/notify-notchpill.sh"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+notify="$ROOT/Scripts/notify-notchpill.sh"
+DEDUP="$ROOT/Scripts/notchpill-dedup.sh"
+# shellcheck source=notchpill-dedup.sh
+[[ -f "$DEDUP" ]] && source "$DEDUP"
 if [[ ! -x "$notify" ]]; then
   notify="$(command -v notchpill-notify || true)"
 fi
@@ -58,6 +62,9 @@ send_notify() {
   local source="$3"
   local bundle_id="$4"
   local agent="$5"
+  if [[ -f "${DEDUP:-}" ]] && notchpill_should_skip_notify "$title" "$subtitle"; then
+    return 0
+  fi
   if [[ -n "$notify" && -x "$notify" ]]; then
     "$notify" "$title" "$subtitle" "$source" "$bundle_id" "$agent" || true
   fi

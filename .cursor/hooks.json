@@ -1,6 +1,19 @@
 {
   "version": 1,
   "hooks": {
+    "postToolUse": [
+      {
+        "command": ".cursor/hooks/notchpill-agent-question.sh",
+        "matcher": "AskQuestion",
+        "timeout": 10
+      }
+    ],
+    "afterAgentResponse": [
+      {
+        "command": ".cursor/hooks/notchpill-agent-response-question.sh",
+        "timeout": 10
+      }
+    ],
     "stop": [
       {
         "command": ".cursor/hooks/notchpill-dev-ready-stop.sh",
