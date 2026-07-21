@@ -23,9 +23,53 @@ struct NotchMetricsTests {
         #expect(abs(m.expandedHeight - 123.5) < 0.001) // 190 * 0.65
         #expect(m.designContentSize == CGSize(width: 680, height: 190))
     }
+
+    @Test("collapsed preview grows with chip count")
+    func collapsedPreview() {
+        let m = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                             designExpandedWidth: 640, designExpandedHeight: 190, scale: 0.65)
+        #expect(m.collapsedPreviewSize(chipCount: 0) == m.collapsedSize)
+        #expect(m.collapsedPreviewSize(chipCount: 2).width > m.collapsedSize.width)
+        #expect(m.collapsedPreviewSize(chipCount: 2).height > m.collapsedSize.height)
+    }
 }
 
-// MARK: - Activity priority
+@Suite("ExpandedActivityBuilder")
+struct ExpandedActivityBuilderTests {
+    @Test("builds live status cards without calendar or shelf")
+    func liveCards() {
+        let np = NowPlaying(title: "Song", artist: "Artist", isPlaying: true, artwork: nil)
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: np,
+            appSwitchHint: nil,
+            frontmostApp: "Safari",
+            systemVolume: 42
+        )
+        #expect(items.contains(.media(np)))
+        #expect(items.contains(.activeApp(name: "Safari")))
+        #expect(items.contains(.volume(42)))
+        #expect(items.contains(.clock))
+        #expect(items.count == 4)
+    }
+}
+
+@Suite("CollapsedChipBuilder")
+struct CollapsedChipBuilderTests {
+    @Test("builds multiple chips at once")
+    func multiple() {
+        let np = NowPlaying(title: "Song", artist: "Artist", isPlaying: true, artwork: nil)
+        let event = CalendarEvent(title: "Standup", start: Date().addingTimeInterval(900), location: nil, isAllDay: false)
+        let chips = CollapsedChipBuilder.chips(
+            nowPlaying: np,
+            nextEvent: event,
+            shelfCount: 2,
+            appSwitchHint: nil,
+            showCalendar: true,
+            showShelf: true
+        )
+        #expect(chips.count == 3)
+    }
+}
 
 @Suite("NotchActivity priority")
 struct NotchActivityTests {
@@ -112,23 +156,20 @@ struct NotchStateTests {
         #expect(emissions == ["media"])
     }
 
-    @Test("app-switch burst => single appSwitch render, then reverts to media")
+    @Test("app-switch hint appears alongside media")
     func appSwitchBurst() async throws {
         let state = NotchState()
-        var emissions: [String] = []
-        let cancellable = state.$activity.dropFirst().sink { emissions.append($0.transitionKey) }
+        var hints: [String?] = []
+        let cancellable = state.$appSwitchHint.dropFirst().sink { hints.append($0) }
         defer { cancellable.cancel() }
 
-        // Establish media first.
         state.notifyMediaChanged(NowPlaying(title: "A", artist: "x", isPlaying: true, artwork: nil))
         try await Task.sleep(nanoseconds: 300_000_000)
-        // Rapid app switches.
         state.notifyAppSwitched("Xcode")
         try await Task.sleep(nanoseconds: 80_000_000)
         state.notifyAppSwitched("Safari")
         try await Task.sleep(nanoseconds: 400_000_000)
 
-        #expect(emissions.filter { $0 == "media" }.count == 1)
-        #expect(emissions.filter { $0 == "appSwitch" }.count == 1)
+        #expect(hints.contains("Safari"))
     }
 }

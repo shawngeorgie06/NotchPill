@@ -24,6 +24,42 @@ struct CalendarEvent: Equatable {
     var isAllDay: Bool
 }
 
+/// Compact chip shown in the collapsed pill preview.
+enum CollapsedChip: Equatable, Identifiable {
+    case media(NowPlaying)
+    case calendar(CalendarEvent)
+    case shelf(count: Int)
+    case appSwitch(String)
+
+    var id: String {
+        switch self {
+        case .media(let np): return "media-\(np.title)-\(np.artist)"
+        case .calendar(let e): return "cal-\(e.title)-\(e.start.timeIntervalSince1970)"
+        case .shelf(let count): return "shelf-\(count)"
+        case .appSwitch(let name): return "app-\(name)"
+        }
+    }
+}
+
+/// Live activity shown in the expanded pill (status cards, not utility panels).
+enum ExpandedActivity: Equatable, Identifiable {
+    case media(NowPlaying)
+    case appSwitch(String)
+    case activeApp(name: String)
+    case volume(Int)
+    case clock
+
+    var id: String {
+        switch self {
+        case .media(let np): return "media-\(np.title)-\(np.artist)-\(np.isPlaying)"
+        case .appSwitch(let name): return "switch-\(name)"
+        case .activeApp(let name): return "app-\(name)"
+        case .volume(let level): return "vol-\(level)"
+        case .clock: return "clock"
+        }
+    }
+}
+
 /// What the collapsed notch is presenting right now. Resolved by the single
 /// state manager from priority + debounce logic.
 enum NotchActivity: Equatable {

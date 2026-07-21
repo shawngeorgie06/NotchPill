@@ -8,10 +8,9 @@ final class AppSettings: ObservableObject {
 
     @AppStorage("showCalendar") var showCalendar = true
     @AppStorage("showFileShelf") var showFileShelf = true
-    /// When off (default), the collapsed notch stays clean and everything is
-    /// revealed on hover. When on, a compact live activity (now-playing /
-    /// app-switch) hangs below the notch while collapsed.
-    @AppStorage("showCollapsedActivity") var showCollapsedActivity = false
+    /// When on, the collapsed pill grows to show live chips (media, calendar,
+    /// shelf). When off, the notch stays invisible until hover.
+    @AppStorage("showCollapsedActivity") var showCollapsedActivity = true
 
     /// Launch-at-login is backed by SMAppService, not UserDefaults; this mirror
     /// keeps the menu checkmark in sync.

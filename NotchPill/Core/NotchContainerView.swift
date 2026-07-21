@@ -42,25 +42,30 @@ final class NotchContainerView: NSView {
                       width: nw, height: metrics.notchHeight)
     }
 
+    /// True for the full menu-bar height at the top of the window — always click-through.
+    private func isMenuBarStrip(_ local: NSPoint) -> Bool {
+        local.y >= bounds.height - metrics.notchHeight
+    }
+
     /// Hot rect in this view's (non-flipped, bottom-left origin) coordinates.
-    /// The notch/pill hug the top edge, centered horizontally. Menu bar icons
-    /// flanking the notch are intentionally excluded so they stay clickable.
+    /// Excludes the menu-bar strip so status items stay clickable; only the pill
+    /// body and collapsed preview row below the notch receive pointer events.
     var hotRect: CGRect {
         let w = bounds.width
         let h = bounds.height
-        let notch = physicalNotchRect
+        let nw = metrics.notchWidth
         if isExpandedProvider() {
             let pw = min(metrics.expandedWidth, w)
-            let pillBody = CGRect(x: (w - pw) / 2, y: 0, width: pw,
-                                  height: max(0, h - metrics.notchHeight))
-            return notch.union(pillBody)
+            return CGRect(x: (w - pw) / 2, y: 0, width: pw,
+                          height: max(0, h - metrics.notchHeight))
         }
-        return notch
-    }
-
-    /// True when a point lies in the menu bar strip beside the notch cutout.
-    private func isMenuBarFlank(_ local: NSPoint) -> Bool {
-        local.y >= bounds.height - metrics.notchHeight && !physicalNotchRect.contains(local)
+        // Collapsed: center notch cutout + preview chip row beneath it.
+        let notch = CGRect(x: (w - nw) / 2, y: h - metrics.notchHeight, width: nw, height: metrics.notchHeight)
+        let previewWidth = min(metrics.expandedWidth, max(nw + 24, metrics.collapsedPreviewSize(chipCount: 3).width))
+        let chipHeight = max(0, metrics.collapsedPreviewSize(chipCount: 1).height - metrics.notchHeight)
+        let chipRow = CGRect(x: (w - previewWidth) / 2, y: h - metrics.notchHeight - chipHeight,
+                             width: previewWidth, height: chipHeight)
+        return notch.union(chipRow)
     }
 
     /// Whether the pointer is currently inside the hot zone (notch or pill).
@@ -72,8 +77,8 @@ final class NotchContainerView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
-        // Pass clicks through to menu bar icons on either side of the notch.
-        if isMenuBarFlank(local) { return nil }
+        // Never intercept the menu bar strip — status items must stay clickable.
+        if isMenuBarStrip(local) { return nil }
         guard hotRect.contains(local) else { return nil }
         return super.hitTest(point)
     }

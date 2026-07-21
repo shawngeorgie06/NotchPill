@@ -35,6 +35,9 @@ final class NotchController {
     private var collapsedHotZone: CGRect = .zero
     private var expandedHotZone: CGRect = .zero
 
+    /// Screen-space menu bar strip on the built-in display, if present.
+    private var menuBarStrip: CGRect = .zero
+
     private var cancellables = Set<AnyCancellable>()
 
     func start() {
@@ -49,6 +52,7 @@ final class NotchController {
         hoverMonitor.onExit = { [weak self] in self?.pointerExitedHot() }
         hoverMonitor.onTick = { [weak self] inside in
             self?.hotZoneKeys.updatePointerInHotZone(inside)
+            self?.updateMousePassthrough(pointerInHotZone: inside)
         }
         hoverMonitor.hotZoneScreenRect = { [weak self] in self?.hotZoneScreenRect() ?? .zero }
         hoverMonitor.start()
@@ -81,10 +85,21 @@ final class NotchController {
         nowPlaying.onUpdate = { [weak self] np in self?.state.notifyMediaChanged(np) }
         calendar.onUpdate = { [weak self] event in self?.state.nextEvent = event }
         airDrop.onUpdate = { [weak self] status in self?.state.airDrop = status }
-        appSwitch.onSwitch = { [weak self] name in self?.state.notifyAppSwitched(name) }
+        appSwitch.onFrontmostApp = { [weak self] name, icon in self?.state.setFrontmostApp(name, icon: icon) }
+        appSwitch.onSwitch = { [weak self] name, icon in self?.state.notifyAppSwitched(name, icon: icon) }
 
         nowPlaying.start(); calendar.start(); airDrop.start(); appSwitch.start()
+        if let level = volume.currentVolume() { state.refreshSystemVolume(level) }
         volume.onVolumeChanged = { [weak self] level in self?.state.showVolume(level) }
+
+        state.$isExpanded
+            .removeDuplicates()
+            .filter { $0 }
+            .sink { [weak self] _ in
+                guard let self, let level = self.volume.currentVolume() else { return }
+                self.state.refreshSystemVolume(level)
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Display handling
@@ -155,6 +170,7 @@ final class NotchController {
 
         window?.setFrame(frame, display: true)
         window?.orderFrontRegardless()
+        window?.ignoresMouseEvents = true
         container?.refreshTracking()
 
         // Screenshot/inspection aid: start expanded so the pill is visible.
@@ -201,24 +217,39 @@ final class NotchController {
     }
 
     private func updateHotZones(geometry: NotchGeometry, windowFrame: CGRect) {
-        // Slightly inflate the notch target so hover is easy to hit.
-        collapsedHotZone = geometry.notchRect.insetBy(dx: -10, dy: -6)
+        menuBarStrip = NotchGeometry.menuBarStrip(for: geometry.screen)
 
-        let notchInWindow = geometry.notchRectInWindow(windowFrame)
+        // Collapsed: center notch + chip row below — not the menu-bar flanks.
+        let previewWidth = min(NotchGeometry.expandedWidth * NotchGeometry.expandedScale,
+                               geometry.notchRect.width + 220)
+        let chipRowHeight: CGFloat = 34
+        let chipRow = CGRect(
+            x: geometry.notchRect.midX - previewWidth / 2,
+            y: geometry.notchRect.minY - chipRowHeight,
+            width: previewWidth,
+            height: chipRowHeight
+        )
+        collapsedHotZone = geometry.notchRect.union(chipRow).insetBy(dx: -8, dy: -4)
+
+        // Expanded: pill body only — menu bar strip is excluded.
         let pillWidth = min(NotchGeometry.expandedWidth * NotchGeometry.expandedScale, windowFrame.width)
-        let pillBody = CGRect(
-            x: (windowFrame.width - pillWidth) / 2,
-            y: 0,
-            width: pillWidth,
-            height: max(0, windowFrame.height - geometry.notchRect.height))
-        let local = notchInWindow.union(pillBody)
         expandedHotZone = CGRect(
-            x: windowFrame.minX + local.minX,
-            y: windowFrame.minY + local.minY,
-            width: local.width,
-            height: local.height)
+            x: windowFrame.minX + (windowFrame.width - pillWidth) / 2,
+            y: windowFrame.minY,
+            width: pillWidth,
+            height: max(0, windowFrame.height - geometry.notchRect.height)
+        ).insetBy(dx: -8, dy: -4)
+
         if Self.logHover {
-            print("HOTZONE collapsed=\(collapsedHotZone) expanded=\(expandedHotZone)")
+            print("HOTZONE collapsed=\(collapsedHotZone) expanded=\(expandedHotZone) menuBar=\(menuBarStrip)")
         }
+        updateMousePassthrough(pointerInHotZone: hotZoneScreenRect().contains(NSEvent.mouseLocation))
+    }
+
+    /// Lets clicks reach menu-bar status items unless the pointer is in the pill hot zone.
+    private func updateMousePassthrough(pointerInHotZone: Bool) {
+        let mouse = NSEvent.mouseLocation
+        let overMenuBar = menuBarStrip.contains(mouse)
+        window?.ignoresMouseEvents = overMenuBar || !pointerInHotZone
     }
 }

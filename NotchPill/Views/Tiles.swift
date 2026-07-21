@@ -1,6 +1,70 @@
 import SwiftUI
 
-// MARK: - Now Playing
+/// Compact media row for the top of the expanded pill.
+struct ExpandedMediaRow: View {
+    let nowPlaying: NowPlaying?
+    let actions: NotchActions
+
+    var body: some View {
+        HStack(spacing: 10) {
+            artwork
+            VStack(alignment: .leading, spacing: 1) {
+                Text(nowPlaying?.title ?? "Nothing playing")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(nowPlaying?.artist ?? "—")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            controls
+        }
+    }
+
+    private var artwork: some View {
+        Group {
+            if let image = nowPlaying?.artwork {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .id(ObjectIdentifier(image))
+            } else {
+                ZStack {
+                    Rectangle().fill(.white.opacity(0.08))
+                    Image(systemName: "play.rectangle.fill")
+                        .foregroundStyle(.white.opacity(0.45))
+                        .font(.system(size: 14))
+                }
+            }
+        }
+        .frame(width: 36, height: 36)
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
+    private var controls: some View {
+        HStack(spacing: 12) {
+            transportButton("backward.fill", action: actions.previous)
+            transportButton(nowPlaying?.isPlaying == true ? "pause.fill" : "play.fill",
+                            size: 17, action: actions.togglePlayPause)
+            transportButton("forward.fill", action: actions.next)
+        }
+    }
+
+    private func transportButton(_ symbol: String, size: CGFloat = 15, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: size, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Now Playing (legacy full tile — kept for reference/tests)
 
 struct NowPlayingTile: View {
     let nowPlaying: NowPlaying?
@@ -69,6 +133,21 @@ struct NowPlayingTile: View {
 
 // MARK: - Calendar
 
+struct CalendarPlaceholderTile: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label("Calendar", systemImage: "calendar")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.orange.opacity(0.7))
+            Text("No upcoming events")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+}
+
 struct CalendarTile: View {
     let event: CalendarEvent
 
@@ -86,7 +165,7 @@ struct CalendarTile: View {
                 .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.6))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
     private var relativeStart: String {
@@ -251,36 +330,303 @@ struct VolumeHUD: View {
     }
 }
 
-// MARK: - Collapsed live-activity indicator
+// MARK: - Expanded live-activity cards
 
-/// Compact indicator that hangs just below the notch when there is activity.
+/// Builds the status cards shown when the pill is expanded.
+enum ExpandedActivityBuilder {
+    static func activities(
+        nowPlaying: NowPlaying?,
+        appSwitchHint: String?,
+        frontmostApp: String?,
+        systemVolume: Int?
+    ) -> [ExpandedActivity] {
+        var items: [ExpandedActivity] = []
+        if let np = nowPlaying, !np.isEmpty { items.append(.media(np)) }
+        if let hint = appSwitchHint {
+            items.append(.appSwitch(hint))
+        } else if let app = frontmostApp {
+            items.append(.activeApp(name: app))
+        }
+        if let volume = systemVolume { items.append(.volume(volume)) }
+        items.append(.clock)
+        return items
+    }
+}
+
+struct ExpandedActivityCard: View {
+    let activity: ExpandedActivity
+    let appIcon: NSImage?
+    let actions: NotchActions
+    var prefersWide: Bool = false
+
+    var body: some View {
+        Group {
+            switch activity {
+            case .media(let np):
+                mediaCard(np)
+            case .appSwitch(let name):
+                appCard(title: "Switched to", name: name)
+            case .activeApp(let name):
+                appCard(title: "Active", name: name)
+            case .volume(let level):
+                volumeCard(level)
+            case .clock:
+                clockCard
+            }
+        }
+        .frame(minWidth: prefersWide ? nil : 88, maxWidth: prefersWide ? .infinity : nil, alignment: .leading)
+        .layoutPriority(prefersWide ? 1 : 0)
+    }
+
+    private func mediaCard(_ np: NowPlaying) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                mediaArtwork(np)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(np.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(np.artist)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
+                if np.isPlaying { EqualizerBars() }
+            }
+            HStack(spacing: 14) {
+                transportButton("backward.fill", action: actions.previous)
+                transportButton(np.isPlaying ? "pause.fill" : "play.fill", size: 16, action: actions.togglePlayPause)
+                transportButton("forward.fill", action: actions.next)
+            }
+        }
+    }
+
+    private func mediaArtwork(_ np: NowPlaying) -> some View {
+        Group {
+            if let image = np.artwork {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .id(ObjectIdentifier(image))
+            } else {
+                ZStack {
+                    Rectangle().fill(.white.opacity(0.08))
+                    Image(systemName: "play.rectangle.fill")
+                        .foregroundStyle(.white.opacity(0.45))
+                        .font(.system(size: 12))
+                }
+            }
+        }
+        .frame(width: 32, height: 32)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
+    private func appCard(title: String, name: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+            HStack(spacing: 6) {
+                if let appIcon {
+                    Image(nsImage: appIcon)
+                        .resizable()
+                        .frame(width: 22, height: 22)
+                } else {
+                    Image(systemName: "app.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                Text(name)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+    }
+
+    private func volumeCard(_ level: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Volume", systemImage: level == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+            Text("\(level)%")
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .monospacedDigit()
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.15))
+                    Capsule()
+                        .fill(.white)
+                        .frame(width: geo.size.width * CGFloat(level) / 100)
+                }
+            }
+            .frame(height: 4)
+        }
+        .frame(width: 72)
+    }
+
+    private var clockCard: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(alignment: .leading, spacing: 4) {
+                Text(timeString(context.date))
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+                Text(dateString(context.date))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .lineLimit(1)
+            }
+            .frame(width: 72, alignment: .leading)
+        }
+    }
+
+    private func timeString(_ date: Date) -> String {
+        let df = DateFormatter()
+        df.timeStyle = .short
+        df.dateStyle = .none
+        return df.string(from: date)
+    }
+
+    private func dateString(_ date: Date) -> String {
+        let df = DateFormatter()
+        df.setLocalizedDateFormatFromTemplate("EEE MMM d")
+        return df.string(from: date)
+    }
+
+    private func transportButton(_ symbol: String, size: CGFloat = 14, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: size, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Collapsed live-activity chips
+
+/// Builds the set of compact chips to show while collapsed.
+enum CollapsedChipBuilder {
+    static func chips(
+        nowPlaying: NowPlaying?,
+        nextEvent: CalendarEvent?,
+        shelfCount: Int,
+        appSwitchHint: String?,
+        showCalendar: Bool,
+        showShelf: Bool
+    ) -> [CollapsedChip] {
+        var chips: [CollapsedChip] = []
+        if let app = appSwitchHint { chips.append(.appSwitch(app)) }
+        if let np = nowPlaying, !np.isEmpty { chips.append(.media(np)) }
+        if showCalendar, let event = nextEvent { chips.append(.calendar(event)) }
+        if showShelf, shelfCount > 0 { chips.append(.shelf(count: shelfCount)) }
+        return chips
+    }
+}
+
+/// Row of compact chips inside the collapsed pill (media + calendar + shelf, etc.).
+struct CollapsedIndicatorsRow: View {
+    let chips: [CollapsedChip]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(chips) { chip in
+                CollapsedChipView(chip: chip)
+                if chip.id != chips.last?.id {
+                    divider
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 5)
+    }
+
+    private var divider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.14))
+            .frame(width: 1, height: 14)
+    }
+}
+
+struct CollapsedChipView: View {
+    let chip: CollapsedChip
+
+    var body: some View {
+        HStack(spacing: 5) {
+            leading
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .foregroundStyle(.white)
+            if case .media(let np) = chip, np.isPlaying {
+                EqualizerBars()
+            }
+        }
+    }
+
+    @ViewBuilder private var leading: some View {
+        switch chip {
+        case .media(let np):
+            if let image = np.artwork {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 16, height: 16)
+                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+            } else {
+                Image(systemName: "play.rectangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        case .calendar:
+            Image(systemName: "calendar")
+                .font(.system(size: 10))
+                .foregroundStyle(.orange)
+        case .shelf:
+            Image(systemName: "tray.full")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.7))
+        case .appSwitch:
+            Image(systemName: "square.stack.3d.up.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.7))
+        }
+    }
+
+    private var label: String {
+        switch chip {
+        case .media(let np): return np.title
+        case .calendar(let event): return event.title
+        case .shelf(let count): return count == 1 ? "1 file" : "\(count) files"
+        case .appSwitch(let name): return name
+        }
+    }
+}
+
+/// Legacy single-chip indicator (kept for transition helpers).
 struct CollapsedIndicator: View {
     let activity: NotchActivity
 
     var body: some View {
-        content
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(.black))
+        if let chip = chip(from: activity) {
+            CollapsedChipView(chip: chip)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(.black))
+        }
     }
 
-    @ViewBuilder private var content: some View {
+    private func chip(from activity: NotchActivity) -> CollapsedChip? {
         switch activity {
-        case .idle:
-            EmptyView()
-        case .media(let np):
-            HStack(spacing: 6) {
-                Image(systemName: "music.note").font(.system(size: 10))
-                Text(np.title).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                EqualizerBars()
-            }
-            .foregroundStyle(.white)
-        case .appSwitch(let name):
-            HStack(spacing: 6) {
-                Image(systemName: "square.stack.3d.up.fill").font(.system(size: 10))
-                Text(name).font(.system(size: 11, weight: .medium)).lineLimit(1)
-            }
-            .foregroundStyle(.white)
+        case .idle: return nil
+        case .media(let np): return .media(np)
+        case .appSwitch(let name): return .appSwitch(name)
         }
     }
 }

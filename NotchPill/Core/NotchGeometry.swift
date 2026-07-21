@@ -11,8 +11,8 @@ struct NotchGeometry {
 
     // Expanded overlay *design* dimensions (before shrink). The pill hangs below
     // the notch, wider than it. `expandedScale` shrinks the whole pill uniformly.
-    static let expandedWidth: CGFloat = 680
-    static let expandedHeight: CGFloat = 122
+    static let expandedWidth: CGFloat = 720
+    static let expandedHeight: CGFloat = 132
     static let expandedScale: CGFloat = 0.58
     /// Extra gap (render points) between the notch and the content, so the top
     /// row sits clear of the notch.
@@ -20,6 +20,15 @@ struct NotchGeometry {
     // Extra horizontal slack around the pill so the hosting window can host the
     // full expanded pill even when the notch is narrow.
     static let horizontalPadding: CGFloat = 40
+
+    /// Screen-space menu bar strip (full width) — clicks here must reach status items.
+    static func menuBarStrip(for screen: NSScreen) -> CGRect {
+        let height = max(screen.safeAreaInsets.top, NSStatusBar.system.thickness)
+        return CGRect(x: screen.frame.minX,
+                      y: screen.frame.maxY - height,
+                      width: screen.frame.width,
+                      height: height)
+    }
 
     /// Finds the built-in notched screen, if the current hardware/arrangement has one.
     static func current() -> NotchGeometry? {

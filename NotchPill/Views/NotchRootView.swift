@@ -11,8 +11,24 @@ struct NotchRootView: View {
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// When the user prefers reduced motion, swap springs/crossfades for a very
-    /// short, near-instant opacity change (SwiftUI still needs a value to key on).
+    private var collapsedChips: [CollapsedChip] {
+        guard settings.showCollapsedActivity else { return [] }
+        return CollapsedChipBuilder.chips(
+            nowPlaying: state.nowPlaying,
+            nextEvent: state.nextEvent,
+            shelfCount: shelf.items.count,
+            appSwitchHint: state.appSwitchHint,
+            showCalendar: settings.showCalendar,
+            showShelf: settings.showFileShelf
+        )
+    }
+
+    private var frameSize: CGSize {
+        if state.isExpanded { return metrics.expandedSize }
+        if collapsedChips.isEmpty { return metrics.collapsedSize }
+        return metrics.collapsedPreviewSize(chipCount: collapsedChips.count)
+    }
+
     private var expandAnimation: Animation {
         reduceMotion ? .linear(duration: 0.01) : .spring(response: 0.26, dampingFraction: 0.86)
     }
@@ -21,28 +37,17 @@ struct NotchRootView: View {
     }
 
     var body: some View {
-        let size = state.isExpanded ? metrics.expandedSize : metrics.collapsedSize
-
         ZStack(alignment: .top) {
-            NotchShape(bottomRadius: state.isExpanded ? 24 : max(6, metrics.notchHeight / 2))
+            NotchShape(bottomRadius: state.isExpanded ? 24 : collapsedBottomRadius)
                 .fill(Color.black)
-                .frame(width: size.width, height: size.height)
+                .frame(width: frameSize.width, height: frameSize.height)
                 .overlay(alignment: .top) {
                     if state.isExpanded {
-                        VStack(spacing: 0) {
-                            // Physical notch area plus a small gap, unscaled, so
-                            // the content clears the notch.
-                            Color.clear.frame(height: metrics.notchHeight + metrics.topGap)
-                            // Content is laid out at its full design size, then the
-                            // whole pill is shrunk uniformly by `metrics.scale`.
-                            ExpandedView(state: state, shelf: shelf, actions: actions)
-                                .frame(width: metrics.designContentSize.width,
-                                       height: metrics.designContentSize.height)
-                                .scaleEffect(metrics.scale, anchor: .top)
-                                .frame(width: metrics.expandedWidth, height: metrics.expandedHeight)
-                        }
-                        .frame(width: size.width, height: size.height, alignment: .top)
-                        .transition(.opacity)
+                        expandedContent
+                            .transition(.opacity)
+                    } else if !collapsedChips.isEmpty {
+                        collapsedContent
+                            .transition(.opacity)
                     }
                 }
                 .overlay {
@@ -51,59 +56,79 @@ struct NotchRootView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
                 }
-
-            // Collapsed live activity is opt-in; by default the notch stays clean
-            // and everything is revealed on hover.
-            if !state.isExpanded, settings.showCollapsedActivity {
-                CollapsedIndicator(activity: state.activity)
-                    .id(state.activity.transitionKey)
-                    .transition(.opacity)
-                    .opacity(state.activity == .idle ? 0 : 1)
-                    .offset(y: metrics.notchHeight + 3)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // Expand/collapse settles well within the 300ms budget.
         .animation(expandAnimation, value: state.isExpanded)
-        // Content changes crossfade rather than pop.
+        .animation(expandAnimation, value: collapsedChips.map(\.id))
         .animation(contentAnimation, value: state.activity)
         .animation(contentAnimation, value: state.volumeLevel)
     }
+
+    private var collapsedBottomRadius: CGFloat {
+        collapsedChips.isEmpty ? max(6, metrics.notchHeight / 2) : 14
+    }
+
+    private var expandedContent: some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: metrics.notchHeight + metrics.topGap)
+            ExpandedView(state: state, actions: actions)
+                .frame(width: metrics.designContentSize.width,
+                       height: metrics.designContentSize.height)
+                .scaleEffect(metrics.scale, anchor: .top)
+                .frame(width: metrics.expandedWidth, height: metrics.expandedHeight)
+        }
+        .frame(width: metrics.expandedSize.width, height: metrics.expandedSize.height, alignment: .top)
+    }
+
+    private var collapsedContent: some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: metrics.notchHeight)
+            CollapsedIndicatorsRow(chips: collapsedChips)
+        }
+        .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+    }
 }
 
-/// The expanded pill body: now-playing + controls, next event, and file shelf.
+/// Expanded pill: live status cards (media, app, volume, clock).
 struct ExpandedView: View {
     @ObservedObject var state: NotchState
-    @ObservedObject var shelf: ShelfStore
     let actions: NotchActions
-    @ObservedObject private var settings = AppSettings.shared
+
+    private var activities: [ExpandedActivity] {
+        ExpandedActivityBuilder.activities(
+            nowPlaying: state.nowPlaying,
+            appSwitchHint: state.appSwitchHint,
+            frontmostApp: state.frontmostApp,
+            systemVolume: state.systemVolume
+        )
+    }
 
     var body: some View {
-        HStack(spacing: 14) {
-            NowPlayingTile(nowPlaying: state.nowPlaying, actions: actions)
-                .frame(maxWidth: .infinity)
-
-            if settings.showCalendar, let event = state.nextEvent {
-                Divider().overlay(Color.white.opacity(0.12))
-                CalendarTile(event: event)
-                    .frame(width: 138)
-                    .transition(.opacity)
-            }
-
-            if settings.showFileShelf {
-                Divider().overlay(Color.white.opacity(0.12))
-                ShelfTile(shelf: shelf)
-                    .frame(width: 150)
-                    .transition(.opacity)
+        HStack(spacing: 10) {
+            ForEach(Array(activities.enumerated()), id: \.element.id) { index, activity in
+                ExpandedActivityCard(
+                    activity: activity,
+                    appIcon: state.frontmostAppIcon,
+                    actions: actions,
+                    prefersWide: {
+                        if case .media = activity { return true }
+                        return false
+                    }()
+                )
+                if index < activities.count - 1 {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.1))
+                        .frame(width: 1)
+                        .padding(.vertical, 4)
+                }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 18)
-        .padding(.top, 8)
-        // Any tile-data swap crossfades too.
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+        .padding(.top, 6)
         .animation(.easeInOut(duration: 0.25), value: state.nowPlaying)
-        .animation(.easeInOut(duration: 0.25), value: state.nextEvent)
-        .animation(.easeInOut(duration: 0.2), value: shelf.items)
-        .animation(.easeInOut(duration: 0.15), value: shelf.isDropTargeted)
+        .animation(.easeInOut(duration: 0.2), value: state.appSwitchHint)
+        .animation(.easeInOut(duration: 0.2), value: state.frontmostApp)
+        .animation(.easeInOut(duration: 0.15), value: state.systemVolume)
     }
 }

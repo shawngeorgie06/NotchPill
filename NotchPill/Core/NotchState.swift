@@ -11,12 +11,21 @@ final class NotchState: ObservableObject {
     // Hover expansion.
     @Published private(set) var isExpanded = false
 
-    // The resolved collapsed-notch activity (crossfaded between).
+    // The resolved collapsed-notch activity (legacy primary chip for transitions).
     @Published private(set) var activity: NotchActivity = .idle
+
+    /// Brief app-switch banner shown alongside other collapsed chips.
+    @Published private(set) var appSwitchHint: String?
+
+    /// The current frontmost app (persists after the switch banner clears).
+    @Published private(set) var frontmostApp: String?
+    @Published private(set) var frontmostAppIcon: NSImage?
 
     // Tile data.
     @Published var nowPlaying: NowPlaying?
     @Published var nextEvent: CalendarEvent?
+    /// Last known system output volume (0–100).
+    @Published private(set) var systemVolume: Int?
     /// Transient volume HUD level (0–100), nil when hidden.
     @Published private(set) var volumeLevel: Int? = nil
     // AirDrop is intentionally always nil: no reliable public API exists to read
@@ -30,7 +39,6 @@ final class NotchState: ObservableObject {
     private var appSwitchRevertItem: DispatchWorkItem?
 
     // Pending inputs the resolver reads when it fires.
-    private var pendingAppSwitch: String?
     private var volumeHideItem: DispatchWorkItem?
 
     // MARK: - Hover
@@ -42,6 +50,7 @@ final class NotchState: ObservableObject {
 
     /// Shows the volume HUD briefly after a keyboard adjustment.
     func showVolume(_ level: Int) {
+        systemVolume = level
         volumeLevel = level
         volumeHideItem?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.volumeLevel = nil }
@@ -49,12 +58,24 @@ final class NotchState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: item)
     }
 
+    /// Updates the stored volume without flashing the HUD.
+    func refreshSystemVolume(_ level: Int) {
+        systemVolume = level
+    }
+
     // MARK: - Event intake (debounced)
 
-    /// A frontmost-application change. Shows a transient app-switch chip.
-    func notifyAppSwitched(_ appName: String) {
-        pendingAppSwitch = appName
+    /// A frontmost-application change. Shows a transient banner chip.
+    func notifyAppSwitched(_ appName: String, icon: NSImage? = nil) {
+        appSwitchHint = appName
+        setFrontmostApp(appName, icon: icon)
         scheduleResolve()
+        scheduleAppSwitchRevert()
+    }
+
+    func setFrontmostApp(_ appName: String, icon: NSImage? = nil) {
+        frontmostApp = appName
+        frontmostAppIcon = icon
     }
 
     /// Media metadata or playback state changed.
@@ -72,32 +93,23 @@ final class NotchState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: item)
     }
 
-    /// Picks the highest-priority activity from current inputs and publishes it
-    /// once. SwiftUI animates the difference as a crossfade.
+    /// Updates the primary collapsed activity used for crossfade transitions.
     private func resolve() {
-        var candidates: [NotchActivity] = [.idle]
-
-        if let np = nowPlaying, np.isPlaying, !np.isEmpty {
-            candidates.append(.media(np))
+        var resolved: NotchActivity = .idle
+        if let np = nowPlaying, !np.isEmpty {
+            resolved = .media(np)
+        } else if let app = appSwitchHint {
+            resolved = .appSwitch(app)
         }
-        if let app = pendingAppSwitch {
-            candidates.append(.appSwitch(app))
-            scheduleAppSwitchRevert()
-            pendingAppSwitch = nil
-        }
-
-        let resolved = candidates.max { $0.priority < $1.priority } ?? .idle
-        if resolved != activity {
-            activity = resolved
-        }
+        if resolved != activity { activity = resolved }
     }
 
-    /// An app-switch chip is transient; after a short display it yields back to
-    /// media/idle by re-resolving.
+    /// Clears the transient app-switch banner and re-resolves activity.
     private func scheduleAppSwitchRevert() {
         appSwitchRevertItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            self.appSwitchHint = nil
             self.resolve()
         }
         appSwitchRevertItem = item
