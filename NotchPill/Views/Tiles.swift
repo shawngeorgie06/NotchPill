@@ -138,6 +138,102 @@ struct CalendarTile: View {
     }
 }
 
+// MARK: - File shelf
+
+/// Drag files onto the notch to stash them here; drag them back out to Finder,
+/// AirDrop, Mail, etc. Highlights while a drag hovers the drop zone.
+struct ShelfTile: View {
+    @ObservedObject var shelf: ShelfStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "tray.full").font(.system(size: 10))
+                Text("Shelf").font(.system(size: 11, weight: .medium))
+                Spacer(minLength: 0)
+                if !shelf.items.isEmpty {
+                    Button { shelf.clear() } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+            .foregroundStyle(.white.opacity(0.6))
+
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var content: some View {
+        if shelf.items.isEmpty {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
+                .foregroundStyle(shelf.isDropTargeted ? Color.accentColor : .white.opacity(0.25))
+                .overlay(
+                    Text("Drop files")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.4))
+                )
+                .frame(height: 44)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(shelf.isDropTargeted ? Color.accentColor.opacity(0.15) : .clear)
+                )
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(shelf.items) { item in
+                        ShelfChip(item: item) { shelf.remove(item) }
+                    }
+                }
+            }
+            .frame(height: 44)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(shelf.isDropTargeted ? Color.accentColor : .clear, lineWidth: 1.5)
+            )
+        }
+    }
+}
+
+/// A single stashed file: icon + name, draggable out, removable.
+struct ShelfChip: View {
+    let item: ShelfStore.Item
+    let onRemove: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Image(nsImage: item.icon)
+                .resizable()
+                .frame(width: 30, height: 30)
+            Text(item.name)
+                .font(.system(size: 8))
+                .foregroundStyle(.white.opacity(0.7))
+                .lineLimit(1)
+                .frame(width: 40)
+        }
+        .padding(4)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.06)))
+        .overlay(alignment: .topTrailing) {
+            if hovering {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white, .black)
+                }
+                .buttonStyle(.plain)
+                .offset(x: 4, y: -4)
+            }
+        }
+        .onHover { hovering = $0 }
+        // Drag the real file back out to Finder / AirDrop / any drop target.
+        .onDrag { NSItemProvider(contentsOf: item.url) ?? NSItemProvider() }
+    }
+}
+
 // MARK: - Collapsed live-activity indicator
 
 /// Compact indicator that hangs just below the notch when there is activity.

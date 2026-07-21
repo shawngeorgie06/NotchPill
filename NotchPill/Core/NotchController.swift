@@ -8,6 +8,7 @@ import Combine
 @MainActor
 final class NotchController {
     private let state = NotchState()
+    private let shelf = ShelfStore()
     private var window: NotchWindow?
     private var container: NotchContainerView?
     private var metrics = NotchMetrics(notchWidth: 200, notchHeight: 32,
@@ -85,7 +86,7 @@ final class NotchController {
             next: { [weak self] in self?.nowPlaying.next() },
             previous: { [weak self] in self?.nowPlaying.previous() })
 
-        let root = NotchRootView(state: state, metrics: metrics, actions: actions)
+        let root = NotchRootView(state: state, shelf: shelf, metrics: metrics, actions: actions)
 
         if window == nil {
             let win = NotchWindow(contentRect: frame)
@@ -93,6 +94,14 @@ final class NotchController {
             container.isExpandedProvider = { [weak self] in self?.state.isExpanded ?? false }
             container.onHotEntered = { [weak self] in self?.pointerEnteredHot() }
             container.onHotExited = { [weak self] in self?.pointerExitedHot() }
+            container.onDropFiles = { [weak self] urls in self?.shelf.add(urls: urls) }
+            container.onDragTargetingChanged = { [weak self] targeting in
+                guard let self else { return }
+                self.shelf.isDropTargeted = targeting
+                // Keep the pill open while a drag hovers; collapse (with grace)
+                // when it leaves, mirroring hover behavior.
+                targeting ? self.pointerEnteredHot() : self.pointerExitedHot()
+            }
 
             let hosting = NSHostingView(rootView: root)
             hosting.translatesAutoresizingMaskIntoConstraints = false
@@ -120,6 +129,7 @@ final class NotchController {
 
         // Screenshot/inspection aid: start expanded so the pill is visible.
         if Diagnostics.forceExpand { state.setExpanded(true) }
+        Diagnostics.seedShelfIfRequested(shelf)
     }
 
     // MARK: - Hover logic

@@ -9,6 +9,14 @@ enum Diagnostics {
     static var isEnabled: Bool { ProcessInfo.processInfo.environment["NOTCHPILL_DIAG"] == "1" }
     static var forceExpand: Bool { ProcessInfo.processInfo.environment["NOTCHPILL_FORCE_EXPAND"] == "1" }
 
+    /// Seeds the shelf with a couple of real files (from NOTCHPILL_DEMO_SHELF, a
+    /// colon-separated path list) so the populated shelf can be inspected.
+    static func seedShelfIfRequested(_ shelf: ShelfStore) {
+        guard let paths = ProcessInfo.processInfo.environment["NOTCHPILL_DEMO_SHELF"] else { return }
+        let urls = paths.split(separator: ":").map { URL(fileURLWithPath: String($0)) }
+        shelf.add(urls: urls)
+    }
+
     static func run() {
         print("=== NotchPill diagnostics ===")
         printGeometry()

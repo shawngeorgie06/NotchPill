@@ -5,8 +5,19 @@ import SwiftUI
 /// than popping.
 struct NotchRootView: View {
     @ObservedObject var state: NotchState
+    @ObservedObject var shelf: ShelfStore
     let metrics: NotchMetrics
     let actions: NotchActions
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// When the user prefers reduced motion, swap springs/crossfades for a very
+    /// short, near-instant opacity change (SwiftUI still needs a value to key on).
+    private var expandAnimation: Animation {
+        reduceMotion ? .linear(duration: 0.01) : .spring(response: 0.26, dampingFraction: 0.86)
+    }
+    private var contentAnimation: Animation {
+        reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.28)
+    }
 
     var body: some View {
         let size = state.isExpanded ? metrics.expandedSize : metrics.collapsedSize
@@ -17,7 +28,7 @@ struct NotchRootView: View {
                 .frame(width: size.width, height: size.height)
                 .overlay(alignment: .top) {
                     if state.isExpanded {
-                        ExpandedView(state: state, actions: actions)
+                        ExpandedView(state: state, shelf: shelf, actions: actions)
                             .frame(width: size.width, height: size.height, alignment: .top)
                             .padding(.top, metrics.notchHeight)
                             .transition(.opacity)
@@ -34,9 +45,9 @@ struct NotchRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // Expand/collapse settles well within the 300ms budget.
-        .animation(.spring(response: 0.26, dampingFraction: 0.86), value: state.isExpanded)
+        .animation(expandAnimation, value: state.isExpanded)
         // Content changes crossfade rather than pop.
-        .animation(.easeInOut(duration: 0.28), value: state.activity)
+        .animation(contentAnimation, value: state.activity)
     }
 }
 
@@ -44,24 +55,32 @@ struct NotchRootView: View {
 /// with no reliable data (e.g. AirDrop) are omitted rather than faked.
 struct ExpandedView: View {
     @ObservedObject var state: NotchState
+    @ObservedObject var shelf: ShelfStore
     let actions: NotchActions
+    @ObservedObject private var settings = AppSettings.shared
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 14) {
             NowPlayingTile(nowPlaying: state.nowPlaying, actions: actions)
                 .frame(maxWidth: .infinity)
 
-            Divider().overlay(Color.white.opacity(0.12))
-
-            if let battery = state.battery {
+            if settings.showBattery, let battery = state.battery {
+                Divider().overlay(Color.white.opacity(0.12))
                 BatteryTile(battery: battery)
-                    .frame(width: 70)
+                    .frame(width: 64)
                     .transition(.opacity)
             }
 
-            if let event = state.nextEvent {
+            if settings.showCalendar, let event = state.nextEvent {
                 Divider().overlay(Color.white.opacity(0.12))
                 CalendarTile(event: event)
+                    .frame(width: 138)
+                    .transition(.opacity)
+            }
+
+            if settings.showFileShelf {
+                Divider().overlay(Color.white.opacity(0.12))
+                ShelfTile(shelf: shelf)
                     .frame(width: 150)
                     .transition(.opacity)
             }
@@ -73,5 +92,7 @@ struct ExpandedView: View {
         .animation(.easeInOut(duration: 0.25), value: state.nowPlaying)
         .animation(.easeInOut(duration: 0.25), value: state.battery)
         .animation(.easeInOut(duration: 0.25), value: state.nextEvent)
+        .animation(.easeInOut(duration: 0.2), value: shelf.items)
+        .animation(.easeInOut(duration: 0.15), value: shelf.isDropTargeted)
     }
 }

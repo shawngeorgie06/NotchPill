@@ -10,7 +10,7 @@ struct NotchGeometry {
     let notchRect: CGRect
 
     // Expanded overlay dimensions. The pill hangs below the notch, wider than it.
-    static let expandedWidth: CGFloat = 560
+    static let expandedWidth: CGFloat = 680
     static let expandedHeight: CGFloat = 190
     // Extra horizontal slack around the pill so the hosting window can host the
     // full expanded pill even when the notch is narrow.

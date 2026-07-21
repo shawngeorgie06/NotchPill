@@ -18,6 +18,9 @@ now-playing controls, battery, and your next calendar event.
   apps in macOS 15.4).
 - **Battery** — live percentage and charging state via IOKit.
 - **Next calendar event** — via EventKit (asks for Calendar access on first use).
+- **File shelf** — drag files onto the notch to stash them, then drag them back
+  out to Finder, AirDrop, Mail, etc. Replaces the AirDrop tile with something
+  actually actionable.
 - **AirDrop** — intentionally omitted: no reliable public API exists to read
   live transfer state, so the tile is hidden rather than showing fake data.
 - **Crossfade content** — a single state manager resolves media / app-switch
@@ -25,6 +28,10 @@ now-playing controls, battery, and your next calendar event.
   a glitchy double-render.
 - **Multi-display aware** — the overlay only appears on the built-in notched
   display; it hides on external-only / clamshell arrangements.
+- **Menu-bar controls** — a status item to quit, toggle tiles, and enable
+  launch-at-login (`SMAppService`).
+- **Accessibility** — honors Reduce Motion (swaps crossfades/springs for
+  near-instant transitions).
 
 ## Requirements
 
@@ -74,8 +81,20 @@ Environment flags (off by default):
 - `NOTCHPILL_FORCE_EXPAND=1` — starts expanded (useful for screenshots).
 - `NOTCHPILL_LOG_HOVER=1` — logs hover enter/exit and collapse timing.
 
+- `NOTCHPILL_DEMO_SHELF=/path/a:/path/b` — seeds the file shelf (for screenshots).
+
 `tools/mousemove.swift` posts synthetic cursor moves to exercise the hover path
 in a headless/scripted run.
+
+## Tests
+
+A Swift Testing target (`NotchPillTests`) covers the hardware-independent logic:
+state-manager debounce/priority (the no-duplicate-render guarantee), shelf
+add/dedupe/remove, activity priority, and metric math.
+
+```sh
+xcodebuild test -project NotchPill.xcodeproj -scheme NotchPill -destination 'platform=macOS'
+```
 
 ## License
 

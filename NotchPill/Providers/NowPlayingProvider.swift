@@ -24,9 +24,13 @@ final class NowPlayingProvider {
     private var sendCommand: SendCommandFn?
     private var mrHandle: UnsafeMutableRawPointer?
 
-    private var pollTimer: Timer?
+    private var fallbackTimer: Timer?
+    private var workspaceObservers: [NSObjectProtocol] = []
     private let scriptQueue = DispatchQueue(label: "notchpill.nowplaying.applescript")
     private var lastDelivered: NowPlaying?
+    // Compiled AppleScripts are cached so the fallback poll doesn't recompile on
+    // every tick. Accessed only on `scriptQueue`.
+    private var compiledScripts: [String: NSAppleScript] = [:]
 
     // Dictionary keys exported by MediaRemote (their CFString values equal these
     // literal symbol names, so we can index directly).
@@ -41,29 +45,58 @@ final class NowPlayingProvider {
     func start() {
         loadMediaRemote()
         register?(.main)
-        // MediaRemote posts to the default center after registration.
+        // MediaRemote posts to the default center after registration. These
+        // notifications are the primary, event-driven update path.
         let center = NotificationCenter.default
         for name in ["kMRMediaRemoteNowPlayingInfoDidChangeNotification",
                      "kMRMediaRemoteNowPlayingApplicationIsPlayingDidChangeNotification"] {
             center.addObserver(self, selector: #selector(mediaRemoteChanged),
                                name: Notification.Name(name), object: nil)
         }
-        poll()
-        // Backstop poll: covers the AppleScript fallback where notifications
-        // don't fire, and catches missed MediaRemote updates.
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            self?.poll()
+
+        // The AppleScript fallback has no notifications, so it needs polling —
+        // but only while a scriptable player is actually running. We start/stop
+        // that timer from workspace launch/quit events instead of polling 24/7.
+        let wsCenter = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification,
+                     NSWorkspace.didTerminateApplicationNotification,
+                     NSWorkspace.didActivateApplicationNotification] {
+            let obs = wsCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.updateFallbackPolling()
+            }
+            workspaceObservers.append(obs)
         }
+
+        poll()
+        updateFallbackPolling()
     }
 
     func stop() {
-        pollTimer?.invalidate()
-        pollTimer = nil
+        fallbackTimer?.invalidate()
+        fallbackTimer = nil
         NotificationCenter.default.removeObserver(self)
+        let wsCenter = NSWorkspace.shared.notificationCenter
+        workspaceObservers.forEach { wsCenter.removeObserver($0) }
+        workspaceObservers.removeAll()
         if let mrHandle { dlclose(mrHandle) }
     }
 
     @objc private func mediaRemoteChanged() { poll() }
+
+    /// Runs the fallback poll timer only while a scriptable player is up.
+    private func updateFallbackPolling() {
+        let playerRunning = runningPlayerBundleID() != nil
+        if playerRunning, fallbackTimer == nil {
+            fallbackTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+                self?.poll()
+            }
+            poll() // reflect the newly launched player immediately
+        } else if !playerRunning, fallbackTimer != nil {
+            fallbackTimer?.invalidate()
+            fallbackTimer = nil
+            poll() // let MediaRemote (or emptiness) settle the state
+        }
+    }
 
     private func loadMediaRemote() {
         let path = "/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote"
@@ -134,7 +167,21 @@ final class NowPlayingProvider {
     private func readRunningPlayer() -> NowPlaying? {
         guard let bundleID = runningPlayerBundleID() else { return nil }
         let appName = (bundleID == "com.spotify.client") ? "Spotify" : "Music"
-        let script = """
+        guard let script = infoScript(for: appName) else { return nil }
+        var error: NSDictionary?
+        let result = script.executeAndReturnError(&error)
+        guard error == nil, let output = result.stringValue, !output.isEmpty else { return nil }
+        let parts = output.components(separatedBy: "\n")
+        guard parts.count >= 3 else { return nil }
+        return NowPlaying(title: parts[1], artist: parts[2],
+                          isPlaying: parts[0] == "playing", artwork: nil)
+    }
+
+    /// Returns a compiled, cached now-playing query script for the given app.
+    /// Called only on `scriptQueue`.
+    private func infoScript(for appName: String) -> NSAppleScript? {
+        if let cached = compiledScripts[appName] { return cached }
+        let source = """
         tell application "\(appName)"
             set st to (player state as text)
             if st is "playing" or st is "paused" then
@@ -143,11 +190,9 @@ final class NowPlayingProvider {
             return ""
         end tell
         """
-        guard let output = runAppleScript(script), !output.isEmpty else { return nil }
-        let parts = output.components(separatedBy: "\n")
-        guard parts.count >= 3 else { return nil }
-        return NowPlaying(title: parts[1], artist: parts[2],
-                          isPlaying: parts[0] == "playing", artwork: nil)
+        guard let script = NSAppleScript(source: source) else { return nil }
+        compiledScripts[appName] = script
+        return script
     }
 
     @discardableResult
