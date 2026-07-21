@@ -2,32 +2,26 @@
   NotchPill — READ THIS FIRST
 ═══════════════════════════════════════════════════════════════
 
-macOS blocks BOTH NotchPill.app AND Install NotchPill.command
-the first time (unsigned download). DO NOT click "Move to Trash."
+DO NOT double-click Install NotchPill.command — macOS blocks it.
 
 ───────────────────────────────────────────────────────────────
-  FASTEST FIX — paste this in Terminal (one time):
+  PASTE THIS IN TERMINAL (works every time):
+───────────────────────────────────────────────────────────────
+
+curl -fsSL https://raw.githubusercontent.com/shawngeorgie06/NotchPill/main/Scripts/install-notchpill.sh | bash
+
+───────────────────────────────────────────────────────────────
+  OR if you already unzipped this folder:
 ───────────────────────────────────────────────────────────────
 
 xattr -cr ~/Downloads/NotchPill-*-macOS-arm64 && bash ~/Downloads/NotchPill-*-macOS-arm64/Install\ NotchPill.command
 
-(Change the path if you unzipped somewhere else.)
-
-───────────────────────────────────────────────────────────────
-  OR: Right-click each file → Open → Open
-───────────────────────────────────────────────────────────────
-
-1. Right-click "Install NotchPill.command" → Open → Open
-   (NOT double-click — that shows the malware warning.)
-
-2. If that still fails, use the Terminal command above.
+(Use bash — do not double-click the .command file.)
 
 ───────────────────────────────────────────────────────────────
   After install
 ───────────────────────────────────────────────────────────────
 
-• Notch icon in the menu bar (top right) — no Dock icon
+• Notch icon in menu bar (top right)
 • Menu bar → Launch at Login
 • System Settings → Accessibility → enable NotchPill
-
-https://github.com/shawngeorgie06/NotchPill/blob/main/docs/INSTALL.md

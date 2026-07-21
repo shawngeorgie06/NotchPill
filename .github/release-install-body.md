@@ -5,10 +5,18 @@ Gatekeeper blocks **both** `NotchPill.app` and `Install NotchPill.command`. **Do
 ### Fastest install — paste in Terminal
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/shawngeorgie06/NotchPill/main/Scripts/install-notchpill.sh | bash
+```
+
+This downloads, clears quarantine, installs to Applications, and launches — no Finder dialogs.
+
+### If you already unzipped the ZIP
+
+```sh
 xattr -cr ~/Downloads/NotchPill-*-macOS-arm64 && bash ~/Downloads/NotchPill-*-macOS-arm64/Install\ NotchPill.command
 ```
 
-(Adjust the path if you unzipped elsewhere.)
+**Important:** run via `bash` in Terminal — double-clicking `Install NotchPill.command` is still blocked by Gatekeeper.
 
 ### Or: right-click (not double-click)
 
