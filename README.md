@@ -41,13 +41,13 @@ now-playing controls, live status cards, and optional collapsed activity chips.
 
 ## Download
 
-**[Download the latest release](https://github.com/shawngeorgie06/NotchPill/releases/latest)** (macOS 14+, Apple Silicon). Step-by-step install (including Gatekeeper workaround): **[docs/INSTALL.md](docs/INSTALL.md)**.
+**[Download the latest release](https://github.com/shawngeorgie06/NotchPill/releases/latest)** (macOS 14+, Apple Silicon). Step-by-step install: **[docs/INSTALL.md](docs/INSTALL.md)**.
 
-1. Download `NotchPill-*-macOS-arm64.zip` from [Releases](https://github.com/shawngeorgie06/NotchPill/releases) and unzip it.
-2. **Right-click** `NotchPill.app` → **Open** → **Open** (required once for unsigned builds — do not click Move to Trash).
-3. Drag **NotchPill.app** into **Applications** and open it from there.
+1. Download and unzip `NotchPill-*-macOS-arm64.zip`.
+2. **Double-click `Install NotchPill.command`** (easiest — bypasses Gatekeeper automatically).
 
-NotchPill runs as a **background menu bar app** — no Dock icon. Look for the pill icon in the menu bar (top right). Enable **Launch at Login** in the menu or Settings so it starts with macOS.
+   Or if macOS shows *"Apple could not verify NotchPill"*:** right-click `NotchPill.app` → **Open** → **Open** (do **not** click Move to Trash).
+3. Look for the **notch icon in the menu bar** (top right). Enable **Launch at Login** there.
 
 ### First launch (Gatekeeper)
 

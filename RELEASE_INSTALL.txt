@@ -1,0 +1,30 @@
+═══════════════════════════════════════════════════════════════
+  NotchPill — READ THIS FIRST (macOS Gatekeeper)
+═══════════════════════════════════════════════════════════════
+
+macOS may say: "Apple could not verify NotchPill is free of malware."
+
+This is normal for unsigned apps. DO NOT click "Move to Trash."
+
+───────────────────────────────────────────────────────────────
+  EASIEST: Double-click "Install NotchPill.command"
+───────────────────────────────────────────────────────────────
+
+That script removes the quarantine flag and copies NotchPill to
+Applications for you.
+
+───────────────────────────────────────────────────────────────
+  OR: Right-click NotchPill.app → Open → Open
+───────────────────────────────────────────────────────────────
+
+Then drag NotchPill.app into your Applications folder.
+
+───────────────────────────────────────────────────────────────
+  After install
+───────────────────────────────────────────────────────────────
+
+• Look for the notch icon in the menu bar (top right) — no Dock icon
+• Menu bar → Launch at Login
+• System Settings → Privacy & Security → Accessibility → enable NotchPill
+
+Full guide: https://github.com/shawngeorgie06/NotchPill/blob/main/docs/INSTALL.md

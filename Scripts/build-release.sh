@@ -45,15 +45,22 @@ echo "==> Signing for distribution…"
 ./Scripts/sign-and-notarize.sh "$APP"
 
 mkdir -p dist
+STAGE="dist/NotchPill-${VERSION}-macOS-arm64"
+rm -rf "$STAGE"
+mkdir -p "$STAGE"
+cp -R "$APP" "$STAGE/"
+cp RELEASE_INSTALL.txt "$STAGE/READ ME FIRST.txt"
+cp "Scripts/Install NotchPill.command" "$STAGE/Install NotchPill.command"
+chmod +x "$STAGE/Install NotchPill.command"
 ZIP="dist/NotchPill-${VERSION}-macOS-arm64.zip"
 rm -f "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
+ditto -c -k --keepParent "$STAGE" "$ZIP"
 shasum -a 256 "$ZIP" | tee dist/SHA256SUMS.txt
 
 echo ""
 echo "Done: $ZIP"
 if [[ -z "$SIGN_IDENTITY" ]]; then
-  echo "Note: ad-hoc build — recipients must right-click → Open on first launch."
+  echo "Note: ad-hoc build — unzip and double-click Install NotchPill.command"
 else
   echo "Ready to upload to GitHub Releases."
 fi

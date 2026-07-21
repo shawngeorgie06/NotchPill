@@ -103,10 +103,14 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.label }}"
           VERSION="${VERSION#v}"
+          STAGE="dist/NotchPill-${VERSION}-macOS-arm64"
+          mkdir -p "$STAGE"
+          cp -R build/Build/Products/Release/NotchPill.app "$STAGE/"
+          cp RELEASE_INSTALL.txt "$STAGE/READ ME FIRST.txt"
+          cp "Scripts/Install NotchPill.command" "$STAGE/Install NotchPill.command"
+          chmod +x "$STAGE/Install NotchPill.command"
           mkdir -p dist
-          ditto -c -k --keepParent \
-            build/Build/Products/Release/NotchPill.app \
-            "dist/NotchPill-${VERSION}-macOS-arm64.zip"
+          ditto -c -k --keepParent "$STAGE" "dist/NotchPill-${VERSION}-macOS-arm64.zip"
           shasum -a 256 "dist/NotchPill-${VERSION}-macOS-arm64.zip" | tee dist/SHA256SUMS.txt
 
       - name: Upload release assets
@@ -114,7 +118,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: NotchPill ${{ steps.version.outputs.label }}
-          generate_release_notes: true
+          body_path: .github/release-install-body.md
           files: |
             dist/NotchPill-*-macOS-arm64.zip
             dist/SHA256SUMS.txt

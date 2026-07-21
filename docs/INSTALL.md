@@ -5,10 +5,14 @@ NotchPill is not notarized yet, so macOS Gatekeeper blocks the first open. **Do 
 ## Quick install (recommended)
 
 1. Download `NotchPill-*-macOS-arm64.zip` from [Releases](https://github.com/shawngeorgie06/NotchPill/releases) and double-click to unzip.
-2. **Right-click** `NotchPill.app` → **Open**.
-3. In the dialog, click **Open** again (not Move to Trash).
-4. Drag **NotchPill.app** into **Applications** (Finder sidebar → Applications, or `Cmd+Shift+A`).
-5. Eject Downloads copy if you like; open **Applications → NotchPill** from now on.
+2. **Double-click `Install NotchPill.command`** — removes quarantine and copies to Applications automatically.
+3. Look for the notch icon in the **menu bar** (top right).
+
+### Manual install (if the installer won't run)
+
+1. **Right-click** `NotchPill.app` → **Open**.
+2. In the dialog, click **Open** again (not Move to Trash).
+3. Drag **NotchPill.app** into **Applications**.
 
 ## Terminal install
 
