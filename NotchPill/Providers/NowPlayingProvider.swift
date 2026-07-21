@@ -31,6 +31,9 @@ final class NowPlayingProvider {
     // Compiled AppleScripts are cached so the fallback poll doesn't recompile on
     // every tick. Accessed only on `scriptQueue`.
     private var compiledScripts: [String: NSAppleScript] = [:]
+    // Artwork is cached by URL so we don't re-download every poll. `scriptQueue`.
+    private var lastArtworkURL: String?
+    private var lastArtworkImage: NSImage?
 
     // Dictionary keys exported by MediaRemote (their CFString values equal these
     // literal symbol names, so we can index directly).
@@ -166,26 +169,43 @@ final class NowPlayingProvider {
 
     private func readRunningPlayer() -> NowPlaying? {
         guard let bundleID = runningPlayerBundleID() else { return nil }
-        let appName = (bundleID == "com.spotify.client") ? "Spotify" : "Music"
-        guard let script = infoScript(for: appName) else { return nil }
+        let isSpotify = (bundleID == "com.spotify.client")
+        let appName = isSpotify ? "Spotify" : "Music"
+        guard let script = infoScript(for: appName, includeArtworkURL: isSpotify) else { return nil }
         var error: NSDictionary?
         let result = script.executeAndReturnError(&error)
         guard error == nil, let output = result.stringValue, !output.isEmpty else { return nil }
         let parts = output.components(separatedBy: "\n")
         guard parts.count >= 3 else { return nil }
+        var artwork: NSImage?
+        if parts.count >= 4, !parts[3].isEmpty {
+            artwork = artworkImage(forURLString: parts[3])
+        }
         return NowPlaying(title: parts[1], artist: parts[2],
-                          isPlaying: parts[0] == "playing", artwork: nil)
+                          isPlaying: parts[0] == "playing", artwork: artwork)
+    }
+
+    /// Downloads and caches artwork by URL (called only on `scriptQueue`).
+    private func artworkImage(forURLString urlString: String) -> NSImage? {
+        if urlString == lastArtworkURL { return lastArtworkImage }
+        guard let url = URL(string: urlString) else { return nil }
+        let image = NSImage(contentsOf: url)
+        lastArtworkURL = urlString
+        lastArtworkImage = image
+        return image
     }
 
     /// Returns a compiled, cached now-playing query script for the given app.
-    /// Called only on `scriptQueue`.
-    private func infoScript(for appName: String) -> NSAppleScript? {
+    /// Called only on `scriptQueue`. NB: the variable must not be named `st` —
+    /// that is a reserved ordinal token in AppleScript and won't compile.
+    private func infoScript(for appName: String, includeArtworkURL: Bool) -> NSAppleScript? {
         if let cached = compiledScripts[appName] { return cached }
+        let artLine = includeArtworkURL ? " & linefeed & (artwork url of current track)" : ""
         let source = """
         tell application "\(appName)"
-            set st to (player state as text)
-            if st is "playing" or st is "paused" then
-                return st & "\\n" & (name of current track) & "\\n" & (artist of current track)
+            set pstate to (player state as text)
+            if pstate is "playing" or pstate is "paused" then
+                return pstate & linefeed & (name of current track) & linefeed & (artist of current track)\(artLine)
             end if
             return ""
         end tell
