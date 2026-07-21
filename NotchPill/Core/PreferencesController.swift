@@ -15,7 +15,7 @@ final class PreferencesController {
             let win = NSWindow(contentViewController: hosting)
             win.title = "NotchPill"
             win.styleMask = [.titled, .closable, .miniaturizable]
-            win.setContentSize(NSSize(width: 480, height: 580))
+            win.setContentSize(NSSize(width: 520, height: 660))
             win.center()
             win.isReleasedWhenClosed = false
             win.setFrameAutosaveName("NotchPillSettings")

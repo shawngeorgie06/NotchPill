@@ -38,7 +38,7 @@ enum NotchContentLayout {
             maxWidth: maxW,
             fewItemBoost: (2.1, 1.75, 1.45)
         )
-        let rowHeight: CGFloat = 38 * readability
+        let rowHeight: CGFloat = 30 * readability
         let width = min(maxW, max(minW, baseRowWidth * readability))
         return NotchContentLayoutMetrics(
             size: CGSize(width: width, height: metrics.notchHeight + rowHeight),
@@ -58,7 +58,7 @@ enum NotchContentLayout {
             return NotchContentLayoutMetrics(
                 size: CGSize(
                     width: max(metrics.notchWidth, 140),
-                    height: metrics.notchHeight + metrics.topGap + 52
+                    height: metrics.notchHeight + metrics.topGap + 36
                 ),
                 readability: 1,
                 textScale: 1
@@ -67,7 +67,7 @@ enum NotchContentLayout {
 
         let includesMedia = activities.contains(where: { if case .media = $0 { return true }; return false })
         let spacing: CGFloat = 10
-        let padding: CGFloat = 32
+        let padding: CGFloat = 28
         let maxW = metrics.maxExpandedRenderedWidth
         let minW = metrics.notchWidth + 20
 
@@ -82,8 +82,9 @@ enum NotchContentLayout {
             maxWidth: maxW,
             fewItemBoost: (2.2, 1.85, 1.5)
         )
-        let baseContentHeight: CGFloat = includesMedia ? 120 : 84
-        let contentHeight = baseContentHeight * readability
+        let baseContentHeight: CGFloat = includesMedia ? 96 : 66
+        let cornerPad: CGFloat = 4
+        let contentHeight = baseContentHeight * readability + cornerPad
         let width = min(maxW, max(minW, baseRowWidth * readability))
         return NotchContentLayoutMetrics(
             size: CGSize(width: width, height: metrics.notchHeight + metrics.topGap + contentHeight),
@@ -94,6 +95,38 @@ enum NotchContentLayout {
 
     static func expandedSize(metrics: NotchMetrics, activities: [ExpandedActivity]) -> CGSize {
         expandedLayout(metrics: metrics, activities: activities).size
+    }
+
+    // MARK: - Dev ready peek
+
+    static let devReadyRowHeight: CGFloat = 42
+    static let devReadyMaxVisibleRows = 3
+    /// Wider than collapsed/hover chips so agent names and subtitles fit comfortably.
+    static let devReadyMinWidth: CGFloat = 380
+
+    static func devReadyListHeight(rowCount: Int) -> CGFloat {
+        let visible = min(max(1, rowCount), devReadyMaxVisibleRows)
+        let dividers = max(0, visible - 1)
+        return devReadyRowHeight * CGFloat(visible) + CGFloat(dividers)
+    }
+
+    static func devReadyLayout(metrics: NotchMetrics, alerts: [DevReadyAlert]) -> NotchContentLayoutMetrics {
+        let count = max(1, alerts.count)
+        let headerHeight: CGFloat = count > 1 ? 18 : 0
+        let listHeight = devReadyListHeight(rowCount: count)
+        let labelLen = CGFloat(alerts.map { ($0.agent ?? $0.source ?? $0.title).count }.max() ?? 16)
+        let titleLen = CGFloat(alerts.map(\.title.count).max() ?? 16)
+        let contentWidth = 300 + max(labelLen, titleLen) * 2.5
+        let width = min(
+            metrics.maxExpandedRenderedWidth,
+            max(metrics.notchWidth + 168, devReadyMinWidth, contentWidth)
+        )
+        let height = metrics.notchHeight + metrics.topGap + headerHeight + listHeight + 4
+        return NotchContentLayoutMetrics(
+            size: CGSize(width: width, height: height),
+            readability: 1.05,
+            textScale: 1.08
+        )
     }
 
     /// Legacy helper used by tests.

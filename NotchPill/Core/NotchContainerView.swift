@@ -16,6 +16,7 @@ final class NotchContainerView: NSView {
     var browserFlankContains: (NSPoint) -> Bool = { _ in false }
     var onHotEntered: () -> Void = {}
     var onHotExited: () -> Void = {}
+    var onPillEngaged: () -> Void = {}
     var onSpacePressed: () -> Void = {}
     var onDragTargetingChanged: (Bool) -> Void = { _ in }
     var onDropFiles: ([URL]) -> Void = { _ in }
@@ -139,6 +140,14 @@ final class NotchContainerView: NSView {
     }
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        let local = convert(event.locationInWindow, from: nil)
+        if interactiveRectsLocal().contains(where: { $0.contains(local) }) {
+            onPillEngaged()
+        }
+        super.mouseDown(with: event)
+    }
 
     override func keyDown(with event: NSEvent) {
         guard !event.isARepeat else { return }

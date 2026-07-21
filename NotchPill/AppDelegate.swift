@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller = NotchController()
         menuBar.hotZoneKeys = controller?.keyMonitor
         menuBar.onTestVolumeUp = { [weak controller] in controller?.testSystemVolumeUp() }
+        menuBar.onTestDevReady = { [weak controller] in controller?.testDevReadyPing() }
+        menuBar.onTestMultipleDevReady = { [weak controller] in controller?.testMultipleDevReadyPings() }
         controller?.start()
 
         // Load the notch first; open settings without stealing focus from the front app.

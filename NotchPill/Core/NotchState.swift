@@ -30,6 +30,8 @@ final class NotchState: ObservableObject {
     @Published private(set) var systemVolume: Int?
     /// Transient volume HUD level (0–100), nil when hidden.
     @Published private(set) var volumeLevel: Int? = nil
+    /// Active dev-ready peeks (multiple agents can finish at once).
+    @Published private(set) var devReadyAlerts: [DevReadyAlert] = []
     // AirDrop is intentionally always nil: no reliable public API exists to read
     // live transfer state, and the spec requires omitting it rather than faking.
     @Published var airDrop: String? = nil
@@ -48,6 +50,25 @@ final class NotchState: ObservableObject {
     func setExpanded(_ expanded: Bool) {
         guard isExpanded != expanded else { return }
         isExpanded = expanded
+    }
+
+    func enqueueDevReady(_ alerts: [DevReadyAlert]) {
+        guard !alerts.isEmpty else { return }
+        for alert in alerts {
+            if let index = devReadyAlerts.firstIndex(where: { $0.id == alert.id }) {
+                devReadyAlerts[index] = alert
+            } else {
+                devReadyAlerts.append(alert)
+            }
+        }
+    }
+
+    func removeDevReady(id: String) {
+        devReadyAlerts.removeAll { $0.id == id }
+    }
+
+    func clearDevReady() {
+        devReadyAlerts = []
     }
 
     /// Shows the volume HUD briefly after a keyboard adjustment.

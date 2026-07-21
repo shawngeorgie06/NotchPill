@@ -5,18 +5,19 @@ import ApplicationServices
 /// to quit, toggle tiles, and control launch-at-login.
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let settings = AppSettings.shared
     var hotZoneKeys: HotZoneKeyMonitor?
     var onTestVolumeUp: (() -> Void)?
+    var onTestDevReady: (() -> Void)?
+    var onTestMultipleDevReady: (() -> Void)?
 
     func install() {
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "capsule.fill",
-                                   accessibilityDescription: "NotchPill")
-            button.image?.isTemplate = true
-            button.title = " NotchPill"
-            button.imagePosition = .imageLeading
+            button.image = MenuBarIcon.templateImage()
+            button.imagePosition = .imageOnly
+            button.title = ""
+            button.toolTip = "NotchPill"
             button.action = #selector(showMenu(_:))
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -37,6 +38,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.removeAllItems()
 
         let header = NSMenuItem(title: "NotchPill", action: nil, keyEquivalent: "")
+        header.attributedTitle = NSAttributedString(
+            string: "NotchPill",
+            attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)]
+        )
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
@@ -79,6 +84,18 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         testVol.target = self
         menu.addItem(testVol)
 
+        let testDev = NSMenuItem(title: "Test Dev Ready Ping", action: #selector(testDevReady), keyEquivalent: "")
+        testDev.target = self
+        menu.addItem(testDev)
+
+        let testMulti = NSMenuItem(title: "Test Multiple Dev Ready Pings", action: #selector(testMultipleDevReady), keyEquivalent: "")
+        testMulti.target = self
+        menu.addItem(testMulti)
+
+        let copyNotify = NSMenuItem(title: "Copy Notify Command", action: #selector(copyNotifyCommand), keyEquivalent: "")
+        copyNotify.target = self
+        menu.addItem(copyNotify)
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "Quit NotchPill", action: #selector(quit), keyEquivalent: "q")
@@ -112,6 +129,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func testVolumeUp() {
         onTestVolumeUp?()
+    }
+
+    @objc private func testDevReady() {
+        onTestDevReady?()
+    }
+
+    @objc private func testMultipleDevReady() {
+        onTestMultipleDevReady?()
+    }
+
+    @objc private func copyNotifyCommand() {
+        let script = "~/Projects/NotchPill/Scripts/notify-notchpill.sh \"Agent finished\" \"Review the changes\" Cursor com.todesktop.230313mzl4w4u92 Composer"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(script, forType: .string)
     }
 
     /// Boxes a closure so it can ride on `representedObject`.

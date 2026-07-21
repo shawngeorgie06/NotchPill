@@ -21,6 +21,9 @@ struct NotchRootView: View {
     }
 
     private var contentLayout: NotchContentLayoutMetrics {
+        if !state.devReadyAlerts.isEmpty {
+            return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: state.devReadyAlerts)
+        }
         if state.isExpanded {
             return NotchContentLayout.expandedLayout(metrics: metrics, activities: expandedActivities)
         }
@@ -56,17 +59,18 @@ struct NotchRootView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            if state.isExpanded {
+            if state.isExpanded || !state.devReadyAlerts.isEmpty {
                 expandedBackground
             } else {
-                // When collapsed, only fill the physical notch — don't black out browser tabs on either side.
-                NotchShape(bottomRadius: collapsedBottomRadius)
-                    .fill(Color.black)
+                PillSurface(bottomRadius: collapsedBottomRadius)
                     .frame(width: metrics.notchWidth, height: metrics.notchHeight)
             }
         }
         .overlay(alignment: .top) {
-            if state.isExpanded {
+            if !state.devReadyAlerts.isEmpty {
+                devReadyContent(alerts: state.devReadyAlerts)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            } else if state.isExpanded {
                 expandedContent
                     .transition(.opacity)
             } else if !collapsedChips.isEmpty {
@@ -81,7 +85,7 @@ struct NotchRootView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .allowsHitTesting(state.isExpanded)
+        .allowsHitTesting(true)
         .animation(expandAnimation, value: state.isExpanded)
         .animation(expandAnimation, value: frameSize.width)
         .animation(expandAnimation, value: frameSize.height)
@@ -92,13 +96,14 @@ struct NotchRootView: View {
         .animation(expandAnimation, value: settingsFingerprint)
         .animation(contentAnimation, value: state.activity)
         .animation(contentAnimation, value: state.volumeLevel)
+        .animation(expandAnimation, value: state.devReadyAlerts.map(\.id))
     }
 
     private var collapsedBottomRadius: CGFloat {
-        collapsedChips.isEmpty ? max(6, metrics.notchHeight / 2) : 14
+        collapsedChips.isEmpty ? max(8, metrics.notchHeight / 2) : 12
     }
 
-    /// Expanded pill: black only in the notch column + body below; ears stay clear for tabs.
+    /// Expanded pill: black surface in the notch column + rounded body below; ears stay clear for tabs.
     private var expandedBackground: some View {
         let earWidth = max(0, (frameSize.width - metrics.notchWidth) / 2)
         return VStack(spacing: 0) {
@@ -107,8 +112,7 @@ struct NotchRootView: View {
                 Color.black.frame(width: metrics.notchWidth, height: metrics.notchHeight)
                 Color.clear.frame(width: earWidth, height: metrics.notchHeight)
             }
-            NotchShape(bottomRadius: 24)
-                .fill(Color.black)
+            PillSurface(bottomRadius: 16)
                 .frame(width: frameSize.width, height: max(0, frameSize.height - metrics.notchHeight))
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
@@ -116,7 +120,7 @@ struct NotchRootView: View {
 
     private var expandedContent: some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: metrics.notchHeight + metrics.topGap)
+            Color.clear.frame(height: metrics.notchHeight)
             ExpandedView(
                 state: state,
                 shelf: shelf,
@@ -126,9 +130,11 @@ struct NotchRootView: View {
                 readability: readabilityScale,
                 textScale: textScale
             )
+                .padding(.top, metrics.topGap + 4)
                 .frame(width: expandedDesignSize.width, height: expandedDesignSize.height)
                 .scaleEffect(metrics.scale, anchor: .top)
-                .frame(width: frameSize.width, height: frameSize.height - metrics.notchHeight - metrics.topGap)
+                .frame(width: frameSize.width, height: frameSize.height - metrics.notchHeight - metrics.topGap,
+                       alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
     }
@@ -137,6 +143,24 @@ struct NotchRootView: View {
         VStack(spacing: 0) {
             Color.clear.frame(height: metrics.notchHeight)
             CollapsedIndicatorsRow(chips: collapsedChips, readability: readabilityScale, textScale: textScale)
+                .padding(.top, 6)
+        }
+        .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+    }
+
+    private func devReadyContent(alerts: [DevReadyAlert]) -> some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: metrics.notchHeight)
+            DevReadyPeekListView(
+                alerts: alerts,
+                actions: actions,
+                maxScrollHeight: alerts.count > 1
+                    ? NotchContentLayout.devReadyListHeight(rowCount: alerts.count)
+                    : nil
+            )
+                .padding(.top, metrics.topGap + 2)
+                .frame(width: frameSize.width, height: frameSize.height - metrics.notchHeight - metrics.topGap,
+                       alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
     }
@@ -155,17 +179,23 @@ struct ExpandedView: View {
     var body: some View {
         Group {
             if activities.isEmpty {
-                Text("No cards enabled")
-                    .font(.system(size: 13 * textScale, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 8) {
+                    Image(systemName: "rectangle.inset.filled")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.2))
+                    Text("No cards enabled")
+                        .font(.system(size: 13 * textScale, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 cardRow
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
-        .padding(.top, 6)
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.easeOut(duration: 0.16), value: state.nowPlaying)
         .animation(.easeOut(duration: 0.14), value: state.appSwitchHint)
         .animation(.easeOut(duration: 0.14), value: state.frontmostApp)
@@ -189,7 +219,7 @@ struct ExpandedView: View {
                     Rectangle()
                         .fill(Color.white.opacity(0.1))
                         .frame(width: 1)
-                        .padding(.vertical, 4 * readability)
+                        .padding(.vertical, 2 * readability)
                 }
             }
         }

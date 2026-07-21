@@ -324,9 +324,180 @@ struct VolumeHUD: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.black.opacity(0.82), in: Capsule())
-        .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+        .background {
+            Capsule(style: .continuous)
+                .fill(Color.black)
+                .overlay {
+                    Capsule(style: .continuous)
+                        .strokeBorder(NotchDesign.pillStroke, lineWidth: 0.5)
+                }
+        }
+        .shadow(color: .black.opacity(0.45), radius: 10, y: 5)
         .offset(y: 52)
+    }
+}
+
+// MARK: - Dev ready peek
+
+/// One or more agent-ready rows when tasks finish around the same time.
+struct DevReadyPeekListView: View {
+    let alerts: [DevReadyAlert]
+    let actions: NotchActions
+    /// When set, the row list scrolls inside this height (used for multiple agents).
+    var maxScrollHeight: CGFloat?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if alerts.count > 1 {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(NotchDesign.devReadyGreen)
+                    Text("\(alerts.count) agents ready")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.55))
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
+            }
+
+            if let maxScrollHeight, alerts.count > 1 {
+                ScrollView(.vertical, showsIndicators: true) {
+                    alertRows
+                }
+                .frame(height: maxScrollHeight)
+            } else {
+                alertRows
+            }
+        }
+    }
+
+    private var alertRows: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(alerts.enumerated()), id: \.element.id) { index, alert in
+                DevReadyPeekRow(alert: alert, actions: actions)
+                if index < alerts.count - 1 {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.08))
+                        .frame(height: 1)
+                        .padding(.horizontal, 12)
+                }
+            }
+        }
+    }
+}
+
+/// Single dev-ready row — tap to jump to the source app and dismiss that agent.
+struct DevReadyPeekRow: View {
+    let alert: DevReadyAlert
+    let actions: NotchActions
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var body: some View {
+        Button(action: handleTap) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(NotchDesign.devReadyGreen.opacity(0.22))
+                        .frame(width: pulse ? 18 : 12, height: pulse ? 18 : 12)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                                   value: pulse)
+                    Circle()
+                        .fill(NotchDesign.devReadyGreen)
+                        .frame(width: 8, height: 8)
+                }
+                .frame(width: 20)
+
+                sourceIcon
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(alert.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+
+                    HStack(spacing: 5) {
+                        if let agent = alert.agent, !agent.isEmpty {
+                            agentBadge(agent, prominent: true)
+                        }
+                        if let source = alert.source, !source.isEmpty,
+                           alert.agent?.caseInsensitiveCompare(source) != .orderedSame {
+                            agentBadge(source, prominent: false)
+                        }
+                        if let subtitle = alert.subtitle, !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.5))
+                                .lineLimit(1)
+                        } else if alert.bundleId != nil {
+                            Text("Tap to open")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.38))
+                        }
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.28))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(DevReadyRowButtonStyle())
+        .onAppear { pulse = !reduceMotion }
+    }
+
+    @ViewBuilder
+    private var sourceIcon: some View {
+        if let icon = alert.appIcon {
+            Image(nsImage: icon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 22, height: 22)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        } else {
+            Image(systemName: "sparkles")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(NotchDesign.devReadyGreen)
+                .frame(width: 22, height: 22)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        }
+    }
+
+    private func agentBadge(_ text: String, prominent: Bool) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(prominent ? NotchDesign.devReadyGreen : .white.opacity(0.55))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                (prominent ? NotchDesign.devReadyGreen.opacity(0.14) : Color.white.opacity(0.08)),
+                in: Capsule()
+            )
+    }
+
+    private func handleTap() {
+        if let bundleId = alert.bundleId {
+            actions.focusApp(bundleId)
+        }
+        actions.dismissDevReady(alert.id)
+    }
+}
+
+private struct DevReadyRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(configuration.isPressed ? 0.1 : 0))
+            }
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -622,10 +793,19 @@ struct ExpandedActivityCard: View {
             Image(systemName: symbol)
                 .font(.system(size: s(size), weight: .medium))
                 .foregroundStyle(.white)
-                .frame(width: s(18), height: s(18))
+                .frame(width: s(20), height: s(20))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TransportButtonStyle())
+    }
+}
+
+private struct TransportButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.45 : 1)
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 

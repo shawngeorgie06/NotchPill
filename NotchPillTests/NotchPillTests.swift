@@ -290,3 +290,160 @@ struct NotchStateTests {
         #expect(hints.contains("Safari"))
     }
 }
+
+@Suite("DevReadyAlert")
+struct DevReadyAlertTests {
+    @Test("parses JSON payload")
+    func json() throws {
+        let data = Data("""
+        {"id":"a1","title":"Done","subtitle":"Review","source":"Cursor","agent":"Composer","bundleId":"com.example.app"}
+        """.utf8)
+        let alert = try #require(DevReadyAlert.parse(from: data))
+        #expect(alert.title == "Done")
+        #expect(alert.subtitle == "Review")
+        #expect(alert.source == "Cursor")
+        #expect(alert.agent == "Composer")
+        #expect(alert.bundleId == "com.example.app")
+    }
+
+    @Test("parses distributed notification userInfo")
+    func userInfo() {
+        let alert = DevReadyAlert.parse(userInfo: [
+            "id": "job-1",
+            "title": "Build complete",
+            "subtitle": "All green",
+            "source": "Terminal",
+            "agent": "claude-code",
+            "bundleId": "com.apple.Terminal"
+        ])
+        #expect(alert?.title == "Build complete")
+        #expect(alert?.agent == "claude-code")
+        #expect(alert?.bundleId == "com.apple.Terminal")
+    }
+
+    @Test("dev ready layout is wider than a single collapsed chip")
+    func width() {
+        let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                                   designExpandedWidth: 640, designExpandedHeight: 190,
+                                   scale: 0.65, topGap: 10)
+        let alert = DevReadyAlert(title: "Agent finished", agent: "Composer")
+        let layout = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: [alert])
+        #expect(layout.size.width >= NotchContentLayout.devReadyMinWidth)
+        #expect(layout.size.width > metrics.notchWidth + 120)
+    }
+
+    @Test("dev ready layout grows with multiple agents")
+    func layout() {
+        let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                                   designExpandedWidth: 640, designExpandedHeight: 190,
+                                   scale: 0.65, topGap: 10)
+        let one = DevReadyAlert(title: "Agent finished", agent: "Composer")
+        let two = [
+            DevReadyAlert(title: "A", agent: "Composer"),
+            DevReadyAlert(title: "B", agent: "claude-code"),
+        ]
+        let singleLayout = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: [one])
+        let multiLayout = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: two)
+        #expect(multiLayout.size.height > singleLayout.size.height)
+    }
+
+    @Test("dev ready layout caps height for many agents")
+    func cappedLayout() {
+        let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                                   designExpandedWidth: 640, designExpandedHeight: 190,
+                                   scale: 0.65, topGap: 10)
+        let three = (1...3).map { DevReadyAlert(title: "Task \($0)", agent: "Agent \($0)") }
+        let six = (1...6).map { DevReadyAlert(title: "Task \($0)", agent: "Agent \($0)") }
+        let layout3 = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: three)
+        let layout6 = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: six)
+        #expect(layout3.size.height == layout6.size.height)
+    }
+
+    @Test("state queues multiple dev-ready alerts")
+    @MainActor
+    func queue() {
+        let state = NotchState()
+        state.enqueueDevReady([
+            DevReadyAlert(id: "1", title: "One", agent: "A"),
+            DevReadyAlert(id: "2", title: "Two", agent: "B"),
+        ])
+        #expect(state.devReadyAlerts.count == 2)
+        state.removeDevReady(id: "1")
+        #expect(state.devReadyAlerts.count == 1)
+        #expect(state.devReadyAlerts.first?.agent == "B")
+    }
+}
+
+@Suite("NowPlayingDisplayResolver")
+struct NowPlayingDisplayResolverTests {
+    @Test("streaming domain is not shown as artist")
+    func streamingDomain() {
+        let resolved = NowPlayingDisplayResolver.resolve(
+            title: "Friends",
+            artist: "vixsrc.to",
+            album: nil,
+            bundleIdentifier: "com.brave.Browser"
+        )
+        #expect(resolved?.title == "Friends")
+        #expect(resolved?.artist == "")
+    }
+
+    @Test("album show name fills in when artist is a site")
+    func episodeWithAlbum() {
+        let resolved = NowPlayingDisplayResolver.resolve(
+            title: "The One Where Monica Gets a Roommate",
+            artist: "streamsite.net",
+            album: "Friends, Season 1",
+            bundleIdentifier: "com.google.Chrome"
+        )
+        #expect(resolved?.title == "The One Where Monica Gets a Roommate")
+        #expect(resolved?.artist == "Friends")
+    }
+
+    @Test("service name title promotes album movie name")
+    func netflixTitleNoise() {
+        let resolved = NowPlayingDisplayResolver.resolve(
+            title: "Netflix",
+            artist: "",
+            album: "Inception",
+            bundleIdentifier: "com.apple.Safari"
+        )
+        #expect(resolved?.title == "Inception")
+    }
+
+    @Test("combined show and episode title is split")
+    func combinedTitle() {
+        let resolved = NowPlayingDisplayResolver.resolve(
+            title: "Breaking Bad - Ozymandias",
+            artist: "netflix.com",
+            album: nil,
+            bundleIdentifier: "com.apple.Safari"
+        )
+        #expect(resolved?.title == "Ozymandias")
+        #expect(resolved?.artist == "Breaking Bad")
+    }
+
+    @Test("music metadata is unchanged")
+    func music() {
+        let resolved = NowPlayingDisplayResolver.resolve(
+            title: "T-Shirt",
+            artist: "Migos",
+            album: "Culture II",
+            mediaType: "MRMediaRemoteMediaTypeMusic"
+        )
+        #expect(resolved?.title == "T-Shirt")
+        #expect(resolved?.artist == "Migos")
+    }
+
+    @Test("youtube keeps channel as artist")
+    func youtube() {
+        let resolved = NowPlayingDisplayResolver.resolve(
+            title: "WWDC Keynote",
+            artist: "Apple",
+            album: nil,
+            bundleIdentifier: "com.google.Chrome"
+        )
+        #expect(resolved?.title == "WWDC Keynote")
+        #expect(resolved?.artist == "Apple")
+    }
+}

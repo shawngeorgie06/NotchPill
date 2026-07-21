@@ -25,6 +25,7 @@ final class NotchController {
     private let appSwitch = AppSwitchProvider()
     private let systemStats = SystemStatsProvider()
     private let battery = BatteryProvider()
+    private let devReady = DevReadyProvider()
 
     // Hover.
     private var collapseWorkItem: DispatchWorkItem?
@@ -42,8 +43,14 @@ final class NotchController {
     private var geometry: NotchGeometry?
 
     private var expandWorkItem: DispatchWorkItem?
+    /// Stays expanded while the pointer is over the pill or the user just clicked it.
+    private var pillEngaged = false
     /// Delay before expanding so quick mouse moves (e.g. to browser tabs) don't trigger it.
     private let hoverExpandDelay: TimeInterval = 0.03
+
+    private var devReadyDismissItem: DispatchWorkItem?
+    private var devReadyCoalesceItem: DispatchWorkItem?
+    private var pendingDevReadyAlerts: [DevReadyAlert] = []
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -54,7 +61,7 @@ final class NotchController {
         hotZoneKeys.onVolumeUp = { [weak self] in self?.volume.volumeUp() }
         hotZoneKeys.onVolumeDown = { [weak self] in self?.volume.volumeDown() }
         hotZoneKeys.pointerInHotZone = { [weak self] in
-            self?.isPointerInShortcutZone() ?? false
+            self?.shouldArmShortcuts() ?? false
         }
         hotZoneKeys.start()
 
@@ -71,7 +78,10 @@ final class NotchController {
         }
         hoverMonitor.expandZoneScreenRect = { [weak self] in self?.expandHoverScreenRect() ?? .zero }
         hoverMonitor.pointBlocksHover = { [weak self] point in
-            self?.isPointerInBrowserFlank(point) ?? false
+            guard let self else { return false }
+            // Only block hover-to-expand over browser tabs — never while expanded/engaged.
+            if self.state.isExpanded || self.pillEngaged { return false }
+            return self.isPointerInBrowserFlank(point)
         }
         hoverMonitor.start()
 
@@ -81,6 +91,13 @@ final class NotchController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(displaysChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(testDevReadyFromSettings),
+            name: .notchPillTestDevReady, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(testMultipleDevReadyFromSettings),
+            name: .notchPillTestMultipleDevReady, object: nil)
 
         // Resize window and refresh hover when expansion or chip content changes.
         state.$isExpanded
@@ -99,7 +116,8 @@ final class NotchController {
             state.$battery.map { _ in () }.eraseToAnyPublisher(),
             AppSettings.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher(),
             shelf.$items.map { _ in () }.eraseToAnyPublisher(),
-            TimerStore.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher()
+            TimerStore.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher(),
+            state.$devReadyAlerts.map { _ in () }.eraseToAnyPublisher()
         )
         .receive(on: RunLoop.main)
         .sink { [weak self] in
@@ -115,11 +133,48 @@ final class NotchController {
         volume.volumeUp()
     }
 
+    func testDevReadyPing() {
+        presentDevReady(DevReadyAlert(
+            title: "Agent finished",
+            subtitle: "Review the changes",
+            source: "Cursor",
+            agent: "Composer",
+            bundleId: Bundle.main.bundleIdentifier
+        ))
+    }
+
+    func testMultipleDevReadyPings() {
+        presentDevReady(DevReadyAlert(
+            title: "Refactor complete",
+            subtitle: "3 files changed",
+            source: "Cursor",
+            agent: "Composer",
+            bundleId: "com.todesktop.230313mzl4w4u92"
+        ))
+        presentDevReady(DevReadyAlert(
+            title: "Tests passed",
+            subtitle: "All green",
+            source: "Terminal",
+            agent: "claude-code",
+            bundleId: "com.apple.Terminal"
+        ))
+        presentDevReady(DevReadyAlert(
+            title: "Build finished",
+            subtitle: "Ready to ship",
+            source: "Windsurf",
+            agent: "Cascade",
+            bundleId: nil
+        ))
+    }
+
     private func makeRootView() -> NotchRootView {
         let actions = NotchActions(
             togglePlayPause: { [weak self] in self?.nowPlaying.togglePlayPause() },
             next: { [weak self] in self?.nowPlaying.next() },
-            previous: { [weak self] in self?.nowPlaying.previous() })
+            previous: { [weak self] in self?.nowPlaying.previous() },
+            focusApp: { [weak self] bundleId in self?.focusSourceApp(bundleId: bundleId) },
+            dismissDevReady: { [weak self] id in self?.dismissDevReady(id: id) }
+        )
         return NotchRootView(state: state, shelf: shelf, timer: TimerStore.shared, metrics: metrics, actions: actions)
     }
 
@@ -134,7 +189,7 @@ final class NotchController {
         hoverMonitor.stop()
         hotZoneKeys.stop()
         nowPlaying.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
-        systemStats.stop(); battery.stop()
+        systemStats.stop(); battery.stop(); devReady.stop()
         window?.orderOut(nil)
     }
 
@@ -153,6 +208,8 @@ final class NotchController {
         volume.start()
         if let level = volume.currentVolume() { state.refreshSystemVolume(level) }
         volume.onVolumeChanged = { [weak self] level in self?.state.showVolume(level) }
+        devReady.onDevReady = { [weak self] alert in self?.presentDevReady(alert) }
+        devReady.start()
 
         // Secondary providers can warm up after the notch is on screen.
         DispatchQueue.main.async { [weak self] in
@@ -177,6 +234,14 @@ final class NotchController {
 
     @objc private func displaysChanged() {
         rebuildForCurrentDisplays()
+    }
+
+    @objc private func testDevReadyFromSettings() {
+        testDevReadyPing()
+    }
+
+    @objc private func testMultipleDevReadyFromSettings() {
+        testMultipleDevReadyPings()
     }
 
     /// Shows the overlay only on a built-in notched display. On external-only /
@@ -214,6 +279,7 @@ final class NotchController {
                 return NotchGeometry.pointIsInBrowserFlank(point, on: screen)
             }
             container.onSpacePressed = { [weak self] in self?.nowPlaying.togglePlayPause() }
+            container.onPillEngaged = { [weak self] in self?.engagePill() }
             container.onDropFiles = { [weak self] urls in self?.shelf.add(urls: urls) }
             container.onDragTargetingChanged = { [weak self] targeting in
                 guard let self else { return }
@@ -224,8 +290,8 @@ final class NotchController {
             }
 
             let hosting = PassthroughHostingView(rootView: root)
-            hosting.acceptsScreenPoint = { [weak container] point in
-                container?.isPointOnInteractivePill(point) ?? false
+            hosting.acceptsScreenPoint = { [weak self] point in
+                self?.container?.isPointOnInteractivePill(point) ?? false
             }
             hosting.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(hosting)
@@ -273,16 +339,25 @@ final class NotchController {
     }
 
     private func expandedContentSize() -> CGSize {
+        if !state.devReadyAlerts.isEmpty { return devReadyContentSize() }
         let activities = NotchContentSnapshot.expandedActivities(
             state: state, shelf: shelf, timer: TimerStore.shared, settings: AppSettings.shared
         )
         return NotchContentLayout.expandedSize(metrics: metrics, activities: activities)
     }
 
+    private func devReadyContentSize() -> CGSize {
+        guard !state.devReadyAlerts.isEmpty else {
+            return CGSize(width: metrics.notchWidth + 96, height: metrics.notchHeight + metrics.topGap + 54)
+        }
+        return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: state.devReadyAlerts).size
+    }
+
     private func applyWindowFrame(animated: Bool) {
         guard let geometry, let window else { return }
+        let expanded = state.isExpanded || !state.devReadyAlerts.isEmpty
         let frame = geometry.windowFrame(
-            expanded: state.isExpanded,
+            expanded: expanded,
             collapsedContentSize: collapsedContentSize(),
             expandedContentSize: expandedContentSize()
         )
@@ -301,23 +376,51 @@ final class NotchController {
 
     private func handleHoverTick() {
         let mouse = NSEvent.mouseLocation
+        let overPill = isPointerOverPill(mouse)
 
-        if isPointerInBrowserFlank(mouse) {
+        if isPointerInBrowserFlank(mouse), !overPill, !state.isExpanded, !pillEngaged {
             expandWorkItem?.cancel()
             expandWorkItem = nil
             hotZoneKeys.updatePointerInHotZone(false)
             updateMousePassthrough(pointerInHotZone: false)
-            if state.isExpanded {
-                collapseWorkItem?.cancel()
-                state.setExpanded(false)
-                applyWindowFrame(animated: true)
-            }
             return
         }
 
-        let inShortcutZone = isPointerInShortcutZone()
-        hotZoneKeys.updatePointerInHotZone(inShortcutZone)
-        updateMousePassthrough(pointerInHotZone: inShortcutZone)
+        let armShortcuts = shouldArmShortcuts(at: mouse)
+        hotZoneKeys.updatePointerInHotZone(armShortcuts)
+        updateMousePassthrough(pointerInHotZone: armShortcuts)
+    }
+
+    private func engagePill() {
+        collapseWorkItem?.cancel()
+        collapseWorkItem = nil
+        expandWorkItem?.cancel()
+        expandWorkItem = nil
+        pillEngaged = true
+        state.setExpanded(true)
+        hotZoneKeys.updatePointerInHotZone(true)
+        hotZoneKeys.ensureShortcutCaptureReady()
+        applyWindowFrame(animated: true)
+        window?.orderFrontRegardless()
+        window?.makeKey()
+    }
+
+    private func isPointerOverPill(_ point: NSPoint) -> Bool {
+        if container?.isPointOnInteractivePill(point) == true { return true }
+        guard let geometry else { return false }
+        let pad: CGFloat = state.isExpanded ? 16 : 10
+        let rect = state.isExpanded ? expandedInteractionRect() : collapsedInteractionRect()
+        return rect.insetBy(dx: -pad, dy: -pad).contains(point)
+    }
+
+    private func shouldArmShortcuts(at point: NSPoint = NSEvent.mouseLocation) -> Bool {
+        if state.isExpanded {
+            if pillEngaged { return true }
+            return isPointerOverPill(point)
+        }
+        if isPointerInBrowserFlank(point) { return false }
+        return collapsedInteractionRect().insetBy(dx: -12, dy: -10).contains(point)
+            || geometry?.notchRect.insetBy(dx: -10, dy: -8).contains(point) == true
     }
 
     private func isPointerInBrowserFlank(_ point: NSPoint) -> Bool {
@@ -357,17 +460,19 @@ final class NotchController {
     }
 
     private func pointerExitedHot() {
-        if expandHoverScreenRect().insetBy(dx: -2, dy: -1).contains(NSEvent.mouseLocation) {
+        let mouse = NSEvent.mouseLocation
+        if isPointerOverPill(mouse) {
             return
         }
-        if isPointerInBrowserFlank(NSEvent.mouseLocation) {
+        if pillEngaged, expandedInteractionRect().insetBy(dx: -14, dy: -12).contains(mouse) {
+            return
+        }
+        if expandHoverScreenRect().insetBy(dx: -8, dy: -6).contains(mouse) {
+            return
+        }
+        if isPointerInBrowserFlank(mouse) {
             expandWorkItem?.cancel()
             expandWorkItem = nil
-            if state.isExpanded {
-                collapseWorkItem?.cancel()
-                state.setExpanded(false)
-                applyWindowFrame(animated: true)
-            }
             return
         }
 
@@ -375,29 +480,39 @@ final class NotchController {
         expandWorkItem = nil
         collapseWorkItem?.cancel()
         if Self.logHover { print("HOVER exit -> collapse in \(collapseGrace)s") }
+        let grace = state.isExpanded ? 0.35 : collapseGrace
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             let mouse = NSEvent.mouseLocation
-            if self.expandHoverScreenRect().insetBy(dx: -2, dy: -1).contains(mouse) {
+            if self.isPointerOverPill(mouse) {
+                return
+            }
+            if self.pillEngaged,
+               self.expandedInteractionRect().insetBy(dx: -14, dy: -12).contains(mouse) {
                 return
             }
             if self.isPointerInBrowserFlank(mouse) {
                 return
             }
             if Self.logHover { print("HOVER collapse fired @\(String(format: "%.3f", Date().timeIntervalSince1970))") }
+            self.pillEngaged = false
             self.state.setExpanded(false)
             self.applyWindowFrame(animated: true)
         }
         collapseWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + collapseGrace, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + grace, execute: item)
     }
 
-    /// Tight zone for expand/collapse: physical notch + pill body below the tab row only.
+    /// Hover target — wider while expanded so clicks and shortcuts stay active.
     private func expandHoverScreenRect() -> CGRect {
         guard let geometry else { return .zero }
 
+        if state.isExpanded || pillEngaged {
+            return expandedInteractionRect().insetBy(dx: -14, dy: -10)
+        }
+
         let notch = geometry.notchRect.insetBy(dx: -10, dy: -6)
-        let pillSize = state.isExpanded ? expandedContentSize() : collapsedContentSize()
+        let pillSize = collapsedContentSize()
         let belowHeight = max(0, pillSize.height - geometry.notchRect.height)
         guard belowHeight > 0 else { return notch }
 
@@ -408,15 +523,6 @@ final class NotchController {
             height: belowHeight
         )
         return notch.union(belowBody)
-    }
-
-    /// Live pointer test used by the global key monitor (no click required).
-    private func isPointerInShortcutZone() -> Bool {
-        let mouse = NSEvent.mouseLocation
-        if isPointerInBrowserFlank(mouse) { return false }
-        let rect = expandHoverScreenRect()
-        guard rect.width > 0, rect.height > 0 else { return false }
-        return rect.insetBy(dx: -12, dy: -8).contains(mouse)
     }
 
     private func collapsedInteractionRect() -> CGRect {
@@ -462,25 +568,87 @@ final class NotchController {
 
         let mouse = NSEvent.mouseLocation
 
-        // Browser tabs beside the notch must always stay clickable.
-        if NotchGeometry.pointIsInBrowserFlank(mouse, on: geometry.screen) {
+        // Browser tab flanks — pass through unless clicking the pill itself.
+        if NotchGeometry.pointIsInBrowserFlank(mouse, on: geometry.screen),
+           container.isPointOnInteractivePill(mouse) == false {
             window.ignoresMouseEvents = true
             return
         }
 
         // Menu bar strip always passes through (clock, Wi‑Fi, NotchPill icon, etc.).
-        if menuBarStrip.contains(mouse) {
+        if menuBarStrip.contains(mouse), !isPointerOverPill(mouse) {
             window.ignoresMouseEvents = true
             return
         }
 
         if !state.isExpanded {
-            window.ignoresMouseEvents = true
+            let overPill = isPointerOverPill(mouse)
+            window.ignoresMouseEvents = !overPill
             return
         }
 
-        // Only capture mouse when over interactive pill controls — never the full hot zone.
         let overPill = container.isPointOnInteractivePill(mouse)
         window.ignoresMouseEvents = !overPill
+    }
+
+    // MARK: - Dev ready pings
+
+    private func presentDevReady(_ alert: DevReadyAlert) {
+        guard AppSettings.shared.showDevReadyPings else { return }
+        pendingDevReadyAlerts.append(alert)
+        devReadyCoalesceItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.flushDevReadyBatch() }
+        devReadyCoalesceItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: item)
+    }
+
+    private func flushDevReadyBatch() {
+        devReadyCoalesceItem = nil
+        guard !pendingDevReadyAlerts.isEmpty else { return }
+        let batch = pendingDevReadyAlerts
+        pendingDevReadyAlerts = []
+        state.enqueueDevReady(batch)
+        engagePill()
+        scheduleDevReadyDismiss()
+    }
+
+    private func scheduleDevReadyDismiss() {
+        devReadyDismissItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.dismissDevReady() }
+        devReadyDismissItem = item
+        let delay = AppSettings.shared.devReadyDuration
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    private func dismissDevReady(id: String? = nil) {
+        if let id {
+            state.removeDevReady(id: id)
+            if !state.devReadyAlerts.isEmpty {
+                scheduleDevReadyDismiss()
+                applyWindowFrame(animated: true)
+                return
+            }
+        }
+
+        guard !state.devReadyAlerts.isEmpty else { return }
+        devReadyDismissItem?.cancel()
+        devReadyDismissItem = nil
+        state.clearDevReady()
+
+        let mouse = NSEvent.mouseLocation
+        if isPointerOverPill(mouse) || expandHoverScreenRect().insetBy(dx: -8, dy: -6).contains(mouse) {
+            applyWindowFrame(animated: true)
+            return
+        }
+
+        pillEngaged = false
+        state.setExpanded(false)
+        applyWindowFrame(animated: true)
+    }
+
+    private func focusSourceApp(bundleId: String) {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+            .first?
+            .activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
     }
 }

@@ -30,6 +30,9 @@ now-playing controls, live status cards, and optional collapsed activity chips.
 - **Next calendar event** — optional collapsed chip via EventKit.
 - **Multi-display aware** — overlay only on the built-in notched display.
 - **Menu-bar controls** — quit, toggles, settings, launch-at-login.
+- **Dev ready pings** — when a terminal, Cursor, or other tool finishes, the notch
+  briefly expands with a peek you can click to jump back to the source app. Trigger
+  via `Scripts/notify-notchpill.sh` or a JSON file in `~/.notchpill/signals/`.
 - **Accessibility** — honors Reduce Motion.
 
 ## Requirements
@@ -83,6 +86,63 @@ the background; open **Settings** from the Dock or menu to configure chips and
 cards. Expect one-time permission prompts for Calendar and for controlling
 Music/Spotify.
 
+## Dev ready pings
+
+When you're on another screen and Cursor, a terminal, or another tool finishes,
+NotchPill can briefly expand the notch so you know to check the result.
+
+### Test with Cursor (real workflow)
+
+1. Make sure **NotchPill is running** and **Dev Ready Pings** is on in Settings.
+2. **Switch to another Space or app** (Safari, Notes, etc.) so you are not staring at the notch.
+3. In Cursor, ask the agent to do something small that takes a moment, e.g.:
+   > "Add one line to the README under Dev ready pings, then notify me when you're done."
+4. When the agent finishes, it runs `notchpill-notify` and the notch should peek open.
+5. **Tap the row** to jump back to Cursor.
+
+You can also use **Settings → Dev Ready Pings → Test Ping** or **Test Multiple** without leaving the app.
+
+**Try it from the menu bar:** NotchPill → **Test Dev Ready Ping**.
+
+**From a shell** (after `chmod +x Scripts/notify-notchpill.sh`):
+
+```sh
+./Scripts/notify-notchpill.sh "Agent finished" "Review the changes" Cursor com.todesktop.230313mzl4w4u92 Composer
+```
+
+Arguments: `title`, optional `subtitle`, optional `source` (app), optional `bundle id`, optional `agent` (e.g. Composer, claude-code). Multiple agents finishing within ~120ms stack in one peek; tap a row to jump to that app.
+
+**Cursor / agent hook** — add to the end of a task script or shell alias:
+
+```sh
+NOTCHPILL_NOTIFY=~/Projects/NotchPill/Scripts/notify-notchpill.sh
+"$NOTCHPILL_NOTIFY" "Cursor finished" "Ready for review" Cursor com.todesktop.230313mzl4w4u92 Composer
+```
+
+**Terminal long commands** — optional zsh `precmd` wrapper:
+
+```sh
+notchpill_precmd() {
+  local last=$?
+  if [[ -n "${NOTCHPILL_WATCH_CMD:-}" && -n "${NOTCHPILL_NOTIFY:-}" ]]; then
+    if [[ $last -eq 0 ]]; then
+      "$NOTCHPILL_NOTIFY" "Command finished" "${NOTCHPILL_WATCH_CMD}" Terminal com.apple.Terminal
+    fi
+    unset NOTCHPILL_WATCH_CMD
+  fi
+}
+add-zsh-hook precmd notchpill_precmd
+# Before a long command: NOTCHPILL_WATCH_CMD="npm test" npm test
+```
+
+Signals are also picked up from `~/.notchpill/signals/*.json`:
+
+```json
+{"title":"Build complete","subtitle":"All tests passed","source":"Cursor","agent":"Composer","bundleId":"com.todesktop.230313mzl4w4u92"}
+```
+
+Toggle duration and enable/disable in **Settings → Dev Ready Pings**.
+
 ## Architecture
 
 ```
@@ -98,6 +158,7 @@ Providers/
   AppSwitchProvider     → frontmost-app tracking
   CalendarProvider      → EventKit next event
   VolumeProvider        → system volume read/adjust
+  DevReadyProvider      → file watcher + distributed notifications
 Views/                  → SwiftUI overlay (NotchRootView, Tiles, PreferencesView)
 ```
 

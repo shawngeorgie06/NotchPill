@@ -68,6 +68,13 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(showExpandedShelf, forKey: Keys.showExpandedShelf) }
     }
 
+    @Published var showDevReadyPings: Bool {
+        didSet { defaults.set(showDevReadyPings, forKey: Keys.showDevReadyPings) }
+    }
+    @Published var devReadyDuration: Double {
+        didSet { defaults.set(devReadyDuration, forKey: Keys.devReadyDuration) }
+    }
+
     @Published var launchAtLogin: Bool = (SMAppService.mainApp.status == .enabled)
 
     private enum Keys {
@@ -89,6 +96,8 @@ final class AppSettings: ObservableObject {
         static let showExpandedSystemStats = "showExpandedSystemStats"
         static let showExpandedBattery = "showExpandedBattery"
         static let showExpandedShelf = "showExpandedShelf"
+        static let showDevReadyPings = "showDevReadyPings"
+        static let devReadyDuration = "devReadyDuration"
     }
 
     private init() {
@@ -111,6 +120,8 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedSystemStats: false,
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: false,
+            Keys.showDevReadyPings: true,
+            Keys.devReadyDuration: 8.0,
         ])
 
         showCollapsedActivity = defaults.bool(forKey: Keys.showCollapsedActivity)
@@ -131,6 +142,9 @@ final class AppSettings: ObservableObject {
         showExpandedSystemStats = defaults.bool(forKey: Keys.showExpandedSystemStats)
         showExpandedBattery = defaults.bool(forKey: Keys.showExpandedBattery)
         showExpandedShelf = defaults.bool(forKey: Keys.showExpandedShelf)
+        showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
+        let storedDuration = defaults.double(forKey: Keys.devReadyDuration)
+        devReadyDuration = storedDuration > 0 ? storedDuration : 8.0
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -167,6 +181,8 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedSystemStats: false,
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: false,
+            Keys.showDevReadyPings: true,
+            Keys.devReadyDuration: 8.0,
         ]
         defaultValues.forEach { defaults.set($0.value, forKey: $0.key) }
         showCollapsedActivity = true
@@ -187,5 +203,7 @@ final class AppSettings: ObservableObject {
         showExpandedSystemStats = false
         showExpandedBattery = false
         showExpandedShelf = false
+        showDevReadyPings = true
+        devReadyDuration = 8.0
     }
 }

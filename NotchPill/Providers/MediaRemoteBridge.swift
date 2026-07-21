@@ -150,19 +150,21 @@ final class MediaRemoteBridge {
     }
 
     private func parseNowPlaying(_ payload: [String: Any]) -> NowPlaying? {
-        let title = (payload["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let album = (payload["album"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedTitle = [title, album].compactMap { $0 }.first { !$0.isEmpty }
-        guard let resolvedTitle else { return nil }
+        guard let resolved = NowPlayingDisplayResolver.resolve(
+            title: payload["title"] as? String,
+            artist: payload["artist"] as? String,
+            album: payload["album"] as? String,
+            mediaType: payload["mediaType"] as? String,
+            bundleIdentifier: payload["bundleIdentifier"] as? String
+        ) else { return nil }
 
-        let artist = (payload["artist"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let playing = payload["playing"] as? Bool
         let rate = payload["playbackRate"] as? Double
         let isPlaying = playing ?? ((rate ?? 1) > 0)
-        let artwork = artwork(from: payload, title: resolvedTitle, artist: artist)
+        let artwork = artwork(from: payload, title: resolved.title, artist: resolved.artist)
         return NowPlaying(
-            title: resolvedTitle,
-            artist: artist,
+            title: resolved.title,
+            artist: resolved.artist,
             isPlaying: isPlaying,
             artwork: artwork,
             elapsed: parseElapsed(payload),

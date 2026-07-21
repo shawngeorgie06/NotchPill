@@ -42,6 +42,78 @@ struct CalendarEvent: Equatable {
     var isAllDay: Bool
 }
 
+/// A transient "task finished" ping from a terminal, IDE, or automation hook.
+struct DevReadyAlert: Equatable, Codable, Identifiable {
+    var id: String
+    var title: String
+    var subtitle: String?
+    /// Host app or tool, e.g. Cursor, Terminal, Claude Code.
+    var source: String?
+    /// Specific agent identity, e.g. Composer, claude-opus-4, Worker 2.
+    var agent: String?
+    var bundleId: String?
+
+    static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
+
+    init(
+        id: String = UUID().uuidString,
+        title: String,
+        subtitle: String? = nil,
+        source: String? = nil,
+        agent: String? = nil,
+        bundleId: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.source = source
+        self.agent = agent
+        self.bundleId = bundleId
+    }
+
+    /// Short label for the agent or source shown in the peek row.
+    var agentLabel: String? {
+        if let agent, !agent.isEmpty { return agent }
+        if let source, !source.isEmpty { return source }
+        return nil
+    }
+
+    var appIcon: NSImage? {
+        guard let bundleId,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
+            return nil
+        }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+
+    static func parse(from data: Data) -> DevReadyAlert? {
+        guard var alert = try? JSONDecoder().decode(DevReadyAlert.self, from: data) else { return nil }
+        if alert.id.isEmpty { alert.id = UUID().uuidString }
+        guard !alert.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return alert
+    }
+
+    static func parse(userInfo: [AnyHashable: Any]) -> DevReadyAlert? {
+        let title = (userInfo["title"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !title.isEmpty else { return nil }
+        let id = (userInfo["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return DevReadyAlert(
+            id: (id?.isEmpty == false) ? id! : UUID().uuidString,
+            title: title,
+            subtitle: userInfo["subtitle"] as? String,
+            source: userInfo["source"] as? String,
+            agent: userInfo["agent"] as? String,
+            bundleId: userInfo["bundleId"] as? String
+        )
+    }
+}
+
+extension Notification.Name {
+    static let notchPillTestDevReady = Notification.Name("com.shawngeorgie06.NotchPill.testDevReady")
+    static let notchPillTestMultipleDevReady = Notification.Name("com.shawngeorgie06.NotchPill.testMultipleDevReady")
+}
+
 /// Compact chip shown in the collapsed pill preview.
 enum CollapsedChip: Equatable, Identifiable {
     case media(NowPlaying)
