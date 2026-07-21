@@ -41,12 +41,28 @@ now-playing controls, live status cards, and optional collapsed activity chips.
 
 ## Download
 
-**[Download the latest release](https://github.com/shawngeorgie06/NotchPill/releases/latest)** (macOS 14+, Apple Silicon).
+**[Download the latest release](https://github.com/shawngeorgie06/NotchPill/releases/latest)** (macOS 14+, Apple Silicon). Step-by-step install (including Gatekeeper workaround): **[docs/INSTALL.md](docs/INSTALL.md)**.
 
 1. Download `NotchPill-*-macOS-arm64.zip` from [Releases](https://github.com/shawngeorgie06/NotchPill/releases) and unzip it.
-2. Drag **NotchPill.app** into **Applications**.
-3. **First launch:** right-click NotchPill → **Open** (macOS blocks unsigned downloads by default).
-4. In **System Settings → Privacy & Security → Accessibility**, enable **NotchPill** so hover keyboard shortcuts work while other apps are focused.
+2. **Right-click** `NotchPill.app` → **Open** → **Open** (required once for unsigned builds — do not click Move to Trash).
+3. Drag **NotchPill.app** into **Applications** and open it from there.
+
+NotchPill runs as a **background menu bar app** — no Dock icon. Look for the pill icon in the menu bar (top right). Enable **Launch at Login** in the menu or Settings so it starts with macOS.
+
+### First launch (Gatekeeper)
+
+macOS may show **“Apple could not verify NotchPill.app”** for unsigned or older builds. **Do not click Move to Trash.** Instead:
+
+1. **Right-click** `NotchPill.app` → **Open** → click **Open** in the dialog, **or**
+2. In Terminal:
+   ```sh
+   xattr -cr ~/Downloads/NotchPill.app
+   open ~/Downloads/NotchPill.app
+   ```
+
+Newer releases are **Developer ID signed and notarized** and open normally after download. Maintainer setup: [docs/NOTARIZATION.md](docs/NOTARIZATION.md).
+
+3. In **System Settings → Privacy & Security → Accessibility**, enable **NotchPill** so hover keyboard shortcuts work while other apps are focused.
 
 New releases are built automatically when a `v*` tag is pushed (see `.github/workflows/release.yml`).
 
@@ -81,8 +97,7 @@ To package a release ZIP locally:
 open dist/
 ```
 
-The app appears in the Dock with a standard menu bar. The notch overlay runs in
-the background; open **Settings** from the Dock or menu to configure chips and
+The app appears in the **menu bar** and runs in the background; open **Settings** from the menu bar icon to configure chips and
 cards. Expect one-time permission prompts for Calendar and for controlling
 Music/Spotify.
 

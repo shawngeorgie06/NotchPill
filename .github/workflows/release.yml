@@ -37,8 +37,44 @@ jobs:
       - name: Build MediaRemote adapter
         run: ./Scripts/setup-vendor.sh
 
-      - name: Build NotchPill (Release)
+      - name: Import code signing certificate
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build NotchPill (Release)
+        env:
+          NOTCHPILL_SIGN_IDENTITY: ${{ secrets.NOTCHPILL_SIGN_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          SIGN_ARGS=(
+            CODE_SIGNING_ALLOWED=YES
+          )
+          if [[ -n "${NOTCHPILL_SIGN_IDENTITY:-}" ]]; then
+            SIGN_ARGS+=(
+              CODE_SIGN_IDENTITY="$NOTCHPILL_SIGN_IDENTITY"
+              CODE_SIGN_STYLE=Manual
+              DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
+              ENABLE_HARDENED_RUNTIME=YES
+              CODE_SIGN_ENTITLEMENTS=NotchPill/NotchPill.entitlements
+            )
+          else
+            SIGN_ARGS+=(
+              CODE_SIGN_IDENTITY="-"
+              ENABLE_HARDENED_RUNTIME=NO
+            )
+          fi
           xcodebuild \
             -project NotchPill.xcodeproj \
             -scheme NotchPill \
@@ -46,12 +82,19 @@ jobs:
             -derivedDataPath build \
             -arch arm64 \
             ONLY_ACTIVE_ARCH=YES \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_ALLOWED=YES \
+            "${SIGN_ARGS[@]}" \
             build
 
-      - name: Ad-hoc sign app bundle
-        run: codesign --force --deep --sign - build/Build/Products/Release/NotchPill.app
+      - name: Sign and notarize
+        env:
+          NOTCHPILL_SIGN_IDENTITY: ${{ secrets.NOTCHPILL_SIGN_IDENTITY }}
+          NOTCHPILL_NOTARY_KEYCHAIN_PROFILE: ${{ secrets.NOTCHPILL_NOTARY_KEYCHAIN_PROFILE }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          chmod +x Scripts/sign-and-notarize.sh
+          ./Scripts/sign-and-notarize.sh build/Build/Products/Release/NotchPill.app
 
       - name: Package ZIP
         run: |

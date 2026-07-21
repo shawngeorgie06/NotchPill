@@ -17,7 +17,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             button.image = MenuBarIcon.templateImage()
             button.imagePosition = .imageOnly
             button.title = ""
-            button.toolTip = "NotchPill"
+            button.toolTip = "NotchPill — notch overlay & live status"
             button.action = #selector(showMenu(_:))
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -60,6 +60,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let about = NSMenuItem(title: "About NotchPill", action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
         menu.addItem(.separator())
         addToggle(to: menu, title: "Launch at Login", isOn: settings.launchAtLogin) { [weak self] in
             guard let self else { return }
@@ -117,6 +121,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func openSettings() {
         PreferencesController.shared.show()
+    }
+
+    @objc private func showAbout() {
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "NotchPill",
+            .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0",
+            .credits: NSAttributedString(string: "Dynamic Island for your Mac notch.\n\nRuns in the background from the menu bar. Hover the notch to expand."),
+        ])
     }
 
     @objc private func quit() {

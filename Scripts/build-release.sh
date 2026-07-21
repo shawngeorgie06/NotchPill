@@ -8,6 +8,25 @@ cd "$ROOT"
 echo "==> Building MediaRemote adapter…"
 ./Scripts/setup-vendor.sh
 
+SIGN_IDENTITY="${NOTCHPILL_SIGN_IDENTITY:-${DEVELOPER_ID_SIGNING_IDENTITY:-}}"
+XCODE_SIGN_ARGS=(
+  CODE_SIGNING_ALLOWED=YES
+)
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  XCODE_SIGN_ARGS+=(
+    CODE_SIGN_IDENTITY="$SIGN_IDENTITY"
+    CODE_SIGN_STYLE=Manual
+    DEVELOPMENT_TEAM="${APPLE_TEAM_ID:-}"
+    ENABLE_HARDENED_RUNTIME=YES
+    CODE_SIGN_ENTITLEMENTS=NotchPill/NotchPill.entitlements
+  )
+else
+  XCODE_SIGN_ARGS+=(
+    CODE_SIGN_IDENTITY="-"
+    ENABLE_HARDENED_RUNTIME=NO
+  )
+fi
+
 echo "==> Building NotchPill (Release, arm64)…"
 xcodebuild \
   -project NotchPill.xcodeproj \
@@ -16,15 +35,14 @@ xcodebuild \
   -derivedDataPath build \
   -arch arm64 \
   ONLY_ACTIVE_ARCH=YES \
-  CODE_SIGN_IDENTITY="-" \
-  CODE_SIGNING_ALLOWED=YES \
+  "${XCODE_SIGN_ARGS[@]}" \
   build
 
 APP="build/Build/Products/Release/NotchPill.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 
-echo "==> Signing (ad-hoc)…"
-codesign --force --deep --sign - "$APP"
+echo "==> Signing for distribution…"
+./Scripts/sign-and-notarize.sh "$APP"
 
 mkdir -p dist
 ZIP="dist/NotchPill-${VERSION}-macOS-arm64.zip"
@@ -34,4 +52,8 @@ shasum -a 256 "$ZIP" | tee dist/SHA256SUMS.txt
 
 echo ""
 echo "Done: $ZIP"
-echo "Share this ZIP or upload it to GitHub Releases."
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  echo "Note: ad-hoc build — recipients must right-click → Open on first launch."
+else
+  echo "Ready to upload to GitHub Releases."
+fi
