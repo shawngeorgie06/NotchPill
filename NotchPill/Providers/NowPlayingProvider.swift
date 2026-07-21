@@ -91,11 +91,26 @@ final class NowPlayingProvider {
             let parts = output.components(separatedBy: "\n")
             guard parts.count >= 3 else { continue }
             var artwork: NSImage?
-            if parts.count >= 4, !parts[3].isEmpty {
-                artwork = artworkImage(forURLString: parts[3])
+            var elapsed: TimeInterval?
+            var duration: TimeInterval?
+            if parts.count >= 5 {
+                elapsed = TimeInterval(parts[3])
+                duration = TimeInterval(parts[4])
             }
-            return NowPlaying(title: parts[1], artist: parts[2],
-                              isPlaying: parts[0] == "playing", artwork: artwork)
+            let artIndex = isSpotify ? 5 : 3
+            if isSpotify, parts.count >= 6, !parts[artIndex].isEmpty {
+                artwork = artworkImage(forURLString: parts[artIndex])
+            }
+            return NowPlaying(
+                title: parts[1],
+                artist: parts[2],
+                isPlaying: parts[0] == "playing",
+                artwork: artwork,
+                elapsed: elapsed,
+                duration: duration,
+                playbackRate: parts[0] == "playing" ? 1 : 0,
+                timestamp: Date()
+            )
         }
         return nil
     }
@@ -116,7 +131,7 @@ final class NowPlayingProvider {
         tell application "\(appName)"
             set pstate to (player state as text)
             if pstate is "playing" or pstate is "paused" then
-                return pstate & linefeed & (name of current track) & linefeed & (artist of current track)\(artLine)
+                return pstate & linefeed & (name of current track) & linefeed & (artist of current track) & linefeed & (player position) & linefeed & (duration of current track)\(artLine)
             end if
             return ""
         end tell

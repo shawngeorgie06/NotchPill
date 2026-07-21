@@ -25,5 +25,9 @@ Package.resolved
 # Scratch / tool build artifacts
 tools/mousemove
 
+# Coverage
+default.profraw
+*.profraw
+
 # Vendored MediaRemote adapter build output
 Vendor/mediaremote-adapter/build/

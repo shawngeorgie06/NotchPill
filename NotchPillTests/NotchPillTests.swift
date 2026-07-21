@@ -43,13 +43,52 @@ struct ExpandedActivityBuilderTests {
             nowPlaying: np,
             appSwitchHint: nil,
             frontmostApp: "Safari",
-            systemVolume: 42
+            systemVolume: 42,
+            showMedia: true,
+            showActiveApp: true,
+            showVolume: true,
+            showClock: true
         )
         #expect(items.contains(.media(np)))
         #expect(items.contains(.activeApp(name: "Safari")))
         #expect(items.contains(.volume(42)))
         #expect(items.contains(.clock))
         #expect(items.count == 4)
+    }
+
+    @Test("respects card toggles")
+    func toggles() {
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil,
+            appSwitchHint: nil,
+            frontmostApp: "Safari",
+            systemVolume: 50,
+            showMedia: false,
+            showActiveApp: false,
+            showVolume: false,
+            showClock: true
+        )
+        #expect(items == [.clock])
+    }
+}
+
+@Suite("NowPlaying progress")
+struct NowPlayingProgressTests {
+    @Test("interpolates elapsed time while playing")
+    func interpolation() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        let np = NowPlaying(
+            title: "T",
+            artist: "A",
+            isPlaying: true,
+            artwork: nil,
+            elapsed: 10,
+            duration: 100,
+            playbackRate: 1,
+            timestamp: start
+        )
+        let later = start.addingTimeInterval(5)
+        #expect(abs((np.interpolatedElapsed(at: later) ?? 0) - 15) < 0.001)
     }
 }
 
@@ -64,8 +103,10 @@ struct CollapsedChipBuilderTests {
             nextEvent: event,
             shelfCount: 2,
             appSwitchHint: nil,
+            showMedia: true,
             showCalendar: true,
-            showShelf: true
+            showShelf: true,
+            showAppSwitch: true
         )
         #expect(chips.count == 3)
     }

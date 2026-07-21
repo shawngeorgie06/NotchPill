@@ -7,8 +7,26 @@ struct NowPlaying {
     var artist: String
     var isPlaying: Bool
     var artwork: NSImage?
+    var elapsed: TimeInterval?
+    var duration: TimeInterval?
+    var playbackRate: Double = 1
+    var timestamp: Date?
 
     var isEmpty: Bool { title.isEmpty && artist.isEmpty }
+
+    var hasProgress: Bool {
+        guard let duration, duration > 0, elapsed != nil else { return false }
+        return true
+    }
+
+    /// Interpolates playback position between stream updates while playing.
+    func interpolatedElapsed(at date: Date = Date()) -> TimeInterval? {
+        guard let elapsed else { return nil }
+        guard isPlaying, let timestamp, playbackRate > 0 else { return elapsed }
+        let projected = elapsed + date.timeIntervalSince(timestamp) * playbackRate
+        if let duration { return min(max(0, projected), duration) }
+        return max(0, projected)
+    }
 }
 
 extension NowPlaying: Equatable {

@@ -6,11 +6,23 @@ import ServiceManagement
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
+    // MARK: - Collapsed preview chips
+
+    /// When on, the collapsed pill grows to show live chips. When off, the notch
+    /// stays invisible until hover.
+    @AppStorage("showCollapsedActivity") var showCollapsedActivity = true
+    @AppStorage("showCollapsedMedia") var showCollapsedMedia = true
+    @AppStorage("showCollapsedAppSwitch") var showCollapsedAppSwitch = true
+    /// Legacy key kept for existing installs.
     @AppStorage("showCalendar") var showCalendar = true
     @AppStorage("showFileShelf") var showFileShelf = true
-    /// When on, the collapsed pill grows to show live chips (media, calendar,
-    /// shelf). When off, the notch stays invisible until hover.
-    @AppStorage("showCollapsedActivity") var showCollapsedActivity = true
+
+    // MARK: - Expanded status cards
+
+    @AppStorage("showExpandedMedia") var showExpandedMedia = true
+    @AppStorage("showExpandedActiveApp") var showExpandedActiveApp = true
+    @AppStorage("showExpandedVolume") var showExpandedVolume = true
+    @AppStorage("showExpandedClock") var showExpandedClock = true
 
     /// Launch-at-login is backed by SMAppService, not UserDefaults; this mirror
     /// keeps the menu checkmark in sync.

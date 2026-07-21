@@ -50,6 +50,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             self?.settings.showCollapsedActivity.toggle()
         }
         menu.addItem(.separator())
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        menu.addItem(.separator())
         addToggle(to: menu, title: "Launch at Login", isOn: settings.launchAtLogin) { [weak self] in
             guard let self else { return }
             self.settings.setLaunchAtLogin(!self.settings.launchAtLogin)
@@ -81,6 +86,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func handleToggle(_ sender: NSMenuItem) {
         (sender.representedObject as? Action)?.run()
+    }
+
+    @objc private func openSettings() {
+        PreferencesController.shared.show()
     }
 
     @objc private func quit() {

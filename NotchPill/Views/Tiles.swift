@@ -338,17 +338,23 @@ enum ExpandedActivityBuilder {
         nowPlaying: NowPlaying?,
         appSwitchHint: String?,
         frontmostApp: String?,
-        systemVolume: Int?
+        systemVolume: Int?,
+        showMedia: Bool,
+        showActiveApp: Bool,
+        showVolume: Bool,
+        showClock: Bool
     ) -> [ExpandedActivity] {
         var items: [ExpandedActivity] = []
-        if let np = nowPlaying, !np.isEmpty { items.append(.media(np)) }
-        if let hint = appSwitchHint {
-            items.append(.appSwitch(hint))
-        } else if let app = frontmostApp {
-            items.append(.activeApp(name: app))
+        if showMedia, let np = nowPlaying, !np.isEmpty { items.append(.media(np)) }
+        if showActiveApp {
+            if let hint = appSwitchHint {
+                items.append(.appSwitch(hint))
+            } else if let app = frontmostApp {
+                items.append(.activeApp(name: app))
+            }
         }
-        if let volume = systemVolume { items.append(.volume(volume)) }
-        items.append(.clock)
+        if showVolume, let volume = systemVolume { items.append(.volume(volume)) }
+        if showClock { items.append(.clock) }
         return items
     }
 }
@@ -398,6 +404,9 @@ struct ExpandedActivityCard: View {
                 transportButton("backward.fill", action: actions.previous)
                 transportButton(np.isPlaying ? "pause.fill" : "play.fill", size: 16, action: actions.togglePlayPause)
                 transportButton("forward.fill", action: actions.next)
+            }
+            if np.hasProgress {
+                MediaProgressView(nowPlaying: np, style: .expanded)
             }
         }
     }
@@ -518,12 +527,14 @@ enum CollapsedChipBuilder {
         nextEvent: CalendarEvent?,
         shelfCount: Int,
         appSwitchHint: String?,
+        showMedia: Bool,
         showCalendar: Bool,
-        showShelf: Bool
+        showShelf: Bool,
+        showAppSwitch: Bool
     ) -> [CollapsedChip] {
         var chips: [CollapsedChip] = []
-        if let app = appSwitchHint { chips.append(.appSwitch(app)) }
-        if let np = nowPlaying, !np.isEmpty { chips.append(.media(np)) }
+        if showAppSwitch, let app = appSwitchHint { chips.append(.appSwitch(app)) }
+        if showMedia, let np = nowPlaying, !np.isEmpty { chips.append(.media(np)) }
         if showCalendar, let event = nextEvent { chips.append(.calendar(event)) }
         if showShelf, shelfCount > 0 { chips.append(.shelf(count: shelfCount)) }
         return chips
@@ -558,14 +569,19 @@ struct CollapsedChipView: View {
     let chip: CollapsedChip
 
     var body: some View {
-        HStack(spacing: 5) {
-            leading
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .lineLimit(1)
-                .foregroundStyle(.white)
-            if case .media(let np) = chip, np.isPlaying {
-                EqualizerBars()
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                leading
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                if case .media(let np) = chip, np.isPlaying {
+                    EqualizerBars()
+                }
+            }
+            if case .media(let np) = chip, np.hasProgress {
+                MediaProgressView(nowPlaying: np, style: .collapsed)
             }
         }
     }
@@ -628,6 +644,62 @@ struct CollapsedIndicator: View {
         case .media(let np): return .media(np)
         case .appSwitch(let name): return .appSwitch(name)
         }
+    }
+}
+
+/// Playback progress bar with live interpolation between metadata updates.
+struct MediaProgressView: View {
+    enum Style { case collapsed, expanded }
+
+    let nowPlaying: NowPlaying
+    var style: Style = .expanded
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let elapsed = nowPlaying.interpolatedElapsed(at: context.date) ?? 0
+            let duration = nowPlaying.duration ?? 0
+            let fraction = duration > 0 ? min(max(elapsed / duration, 0), 1) : 0
+            switch style {
+            case .collapsed:
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.white.opacity(0.14))
+                        Capsule()
+                            .fill(.white.opacity(0.75))
+                            .frame(width: geo.size.width * fraction)
+                    }
+                }
+                .frame(width: 72, height: 2)
+            case .expanded:
+                VStack(spacing: 4) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(.white.opacity(0.15))
+                            Capsule()
+                                .fill(.white.opacity(0.85))
+                                .frame(width: geo.size.width * fraction)
+                        }
+                    }
+                    .frame(height: 4)
+                    HStack {
+                        Text(formatTime(elapsed))
+                        Spacer()
+                        Text(formatTime(duration))
+                    }
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .monospacedDigit()
+                }
+            }
+        }
+    }
+
+    private func formatTime(_ interval: TimeInterval) -> String {
+        guard interval.isFinite, interval >= 0 else { return "0:00" }
+        let total = Int(interval.rounded(.down))
+        let minutes = total / 60
+        let seconds = total % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 

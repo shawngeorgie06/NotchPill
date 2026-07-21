@@ -18,8 +18,10 @@ struct NotchRootView: View {
             nextEvent: state.nextEvent,
             shelfCount: shelf.items.count,
             appSwitchHint: state.appSwitchHint,
+            showMedia: settings.showCollapsedMedia,
             showCalendar: settings.showCalendar,
-            showShelf: settings.showFileShelf
+            showShelf: settings.showFileShelf,
+            showAppSwitch: settings.showCollapsedAppSwitch
         )
     }
 
@@ -93,17 +95,42 @@ struct NotchRootView: View {
 struct ExpandedView: View {
     @ObservedObject var state: NotchState
     let actions: NotchActions
+    @ObservedObject private var settings = AppSettings.shared
 
     private var activities: [ExpandedActivity] {
         ExpandedActivityBuilder.activities(
             nowPlaying: state.nowPlaying,
             appSwitchHint: state.appSwitchHint,
             frontmostApp: state.frontmostApp,
-            systemVolume: state.systemVolume
+            systemVolume: state.systemVolume,
+            showMedia: settings.showExpandedMedia,
+            showActiveApp: settings.showExpandedActiveApp,
+            showVolume: settings.showExpandedVolume,
+            showClock: settings.showExpandedClock
         )
     }
 
     var body: some View {
+        Group {
+            if activities.isEmpty {
+                Text("No cards enabled")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                cardRow
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+        .padding(.top, 6)
+        .animation(.easeInOut(duration: 0.25), value: state.nowPlaying)
+        .animation(.easeInOut(duration: 0.2), value: state.appSwitchHint)
+        .animation(.easeInOut(duration: 0.2), value: state.frontmostApp)
+        .animation(.easeInOut(duration: 0.15), value: state.systemVolume)
+    }
+
+    private var cardRow: some View {
         HStack(spacing: 10) {
             ForEach(Array(activities.enumerated()), id: \.element.id) { index, activity in
                 ExpandedActivityCard(
@@ -123,12 +150,5 @@ struct ExpandedView: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
-        .padding(.top, 6)
-        .animation(.easeInOut(duration: 0.25), value: state.nowPlaying)
-        .animation(.easeInOut(duration: 0.2), value: state.appSwitchHint)
-        .animation(.easeInOut(duration: 0.2), value: state.frontmostApp)
-        .animation(.easeInOut(duration: 0.15), value: state.systemVolume)
     }
 }

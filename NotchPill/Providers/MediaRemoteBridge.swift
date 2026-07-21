@@ -160,7 +160,52 @@ final class MediaRemoteBridge {
         let rate = payload["playbackRate"] as? Double
         let isPlaying = playing ?? ((rate ?? 1) > 0)
         let artwork = artwork(from: payload, title: resolvedTitle, artist: artist)
-        return NowPlaying(title: resolvedTitle, artist: artist, isPlaying: isPlaying, artwork: artwork)
+        return NowPlaying(
+            title: resolvedTitle,
+            artist: artist,
+            isPlaying: isPlaying,
+            artwork: artwork,
+            elapsed: parseElapsed(payload),
+            duration: parseDuration(payload),
+            playbackRate: rate ?? 1,
+            timestamp: parseTimestamp(payload)
+        )
+    }
+
+    private func parseDuration(_ payload: [String: Any]) -> TimeInterval? {
+        if let micros = payload["durationMicros"] as? NSNumber {
+            return micros.doubleValue / 1_000_000
+        }
+        if let seconds = payload["duration"] as? NSNumber {
+            return seconds.doubleValue
+        }
+        return nil
+    }
+
+    private func parseElapsed(_ payload: [String: Any]) -> TimeInterval? {
+        if let micros = payload["elapsedTimeNowMicros"] as? NSNumber {
+            return micros.doubleValue / 1_000_000
+        }
+        if let micros = payload["elapsedTimeMicros"] as? NSNumber {
+            return micros.doubleValue / 1_000_000
+        }
+        if let now = payload["elapsedTimeNow"] as? NSNumber {
+            return now.doubleValue
+        }
+        if let elapsed = payload["elapsedTime"] as? NSNumber {
+            return elapsed.doubleValue
+        }
+        return nil
+    }
+
+    private func parseTimestamp(_ payload: [String: Any]) -> Date? {
+        if let micros = payload["timestampEpochMicros"] as? NSNumber {
+            return Date(timeIntervalSince1970: micros.doubleValue / 1_000_000)
+        }
+        if let ts = payload["timestamp"] as? NSNumber {
+            return Date(timeIntervalSince1970: ts.doubleValue)
+        }
+        return nil
     }
 
     private func artwork(from payload: [String: Any], title: String, artist: String) -> NSImage? {
