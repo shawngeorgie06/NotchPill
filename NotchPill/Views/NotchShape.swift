@@ -1,0 +1,39 @@
+import SwiftUI
+
+/// Physical dimensions the SwiftUI layer needs to match the hardware notch and
+/// size the expanded pill.
+struct NotchMetrics: Equatable {
+    var notchWidth: CGFloat
+    var notchHeight: CGFloat
+    var expandedWidth: CGFloat
+    var expandedHeight: CGFloat
+
+    var collapsedSize: CGSize { CGSize(width: notchWidth, height: notchHeight) }
+    var expandedSize: CGSize { CGSize(width: expandedWidth, height: notchHeight + expandedHeight) }
+}
+
+/// A rectangle with square top corners (flush against the bezel) and rounded
+/// bottom corners — the shape of the physical notch, growing into the pill.
+struct NotchShape: Shape {
+    var bottomRadius: CGFloat
+
+    var animatableData: CGFloat {
+        get { bottomRadius }
+        set { bottomRadius = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let r = min(bottomRadius, min(rect.width, rect.height) / 2)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
+        path.addArc(center: CGPoint(x: rect.maxX - r, y: rect.maxY - r),
+                    radius: r, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
+        path.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
+        path.addArc(center: CGPoint(x: rect.minX + r, y: rect.maxY - r),
+                    radius: r, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+        path.closeSubpath()
+        return path
+    }
+}
