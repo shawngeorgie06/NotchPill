@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 1.0.0)"
+        required: true
+        default: "1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "tag=v${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "label=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "label=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+      - name: Build MediaRemote adapter
+        run: ./Scripts/setup-vendor.sh
+
+      - name: Build NotchPill (Release)
+        run: |
+          xcodebuild \
+            -project NotchPill.xcodeproj \
+            -scheme NotchPill \
+            -configuration Release \
+            -derivedDataPath build \
+            -arch arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=YES \
+            build
+
+      - name: Ad-hoc sign app bundle
+        run: codesign --force --deep --sign - build/Build/Products/Release/NotchPill.app
+
+      - name: Package ZIP
+        run: |
+          VERSION="${{ steps.version.outputs.label }}"
+          VERSION="${VERSION#v}"
+          mkdir -p dist
+          ditto -c -k --keepParent \
+            build/Build/Products/Release/NotchPill.app \
+            "dist/NotchPill-${VERSION}-macOS-arm64.zip"
+          shasum -a 256 "dist/NotchPill-${VERSION}-macOS-arm64.zip" | tee dist/SHA256SUMS.txt
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: NotchPill ${{ steps.version.outputs.label }}
+          generate_release_notes: true
+          files: |
+            dist/NotchPill-*-macOS-arm64.zip
+            dist/SHA256SUMS.txt

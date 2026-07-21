@@ -36,7 +36,18 @@ now-playing controls, live status cards, and optional collapsed activity chips.
 
 - macOS 14+ (built and tested on macOS 26, Xcode 26, a notched MacBook)
 
-## Build & run
+## Download
+
+**[Download the latest release](https://github.com/shawngeorgie06/NotchPill/releases/latest)** (macOS 14+, Apple Silicon).
+
+1. Download `NotchPill-*-macOS-arm64.zip` from [Releases](https://github.com/shawngeorgie06/NotchPill/releases) and unzip it.
+2. Drag **NotchPill.app** into **Applications**.
+3. **First launch:** right-click NotchPill → **Open** (macOS blocks unsigned downloads by default).
+4. In **System Settings → Privacy & Security → Accessibility**, enable **NotchPill** so hover keyboard shortcuts work while other apps are focused.
+
+New releases are built automatically when a `v*` tag is pushed (see `.github/workflows/release.yml`).
+
+## Build from source
 
 First-time setup builds the bundled MediaRemote adapter (required on macOS 15.4+):
 
@@ -58,6 +69,13 @@ open NotchPill.xcodeproj   # then Run (⌘R)
 # or:
 xcodebuild -project NotchPill.xcodeproj -scheme NotchPill -configuration Debug -derivedDataPath build build
 open build/Build/Products/Debug/NotchPill.app
+```
+
+To package a release ZIP locally:
+
+```sh
+./Scripts/build-release.sh
+open dist/
 ```
 
 The app appears in the Dock with a standard menu bar. The notch overlay runs in
