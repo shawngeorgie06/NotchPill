@@ -14,6 +14,9 @@ struct NotchGeometry {
     static let expandedWidth: CGFloat = 680
     static let expandedHeight: CGFloat = 112
     static let expandedScale: CGFloat = 0.58
+    /// Extra gap (render points) between the notch and the content, so the top
+    /// row sits clear of the notch.
+    static let contentTopGap: CGFloat = 14
     // Extra horizontal slack around the pill so the hosting window can host the
     // full expanded pill even when the notch is narrow.
     static let horizontalPadding: CGFloat = 40
@@ -72,7 +75,7 @@ struct NotchGeometry {
         let renderHeight = Self.expandedHeight * Self.expandedScale
         let width = max(renderWidth + Self.horizontalPadding * 2,
                         notchRect.width + Self.horizontalPadding * 2)
-        let height = renderHeight + notchRect.height
+        let height = renderHeight + notchRect.height + Self.contentTopGap
         let midX = notchRect.midX
         return CGRect(x: midX - width / 2,
                       y: screen.frame.maxY - height,

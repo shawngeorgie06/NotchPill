@@ -11,6 +11,8 @@ struct NotchMetrics: Equatable {
     var designExpandedHeight: CGFloat
     /// Uniform shrink applied to the expanded pill and its content (1.0 = none).
     var scale: CGFloat
+    /// Extra gap (render points) between the notch and the content.
+    var topGap: CGFloat = 0
 
     /// Rendered (post-shrink) pill dimensions below the notch.
     var expandedWidth: CGFloat { designExpandedWidth * scale }
@@ -18,7 +20,7 @@ struct NotchMetrics: Equatable {
 
     var designContentSize: CGSize { CGSize(width: designExpandedWidth, height: designExpandedHeight) }
     var collapsedSize: CGSize { CGSize(width: notchWidth, height: notchHeight) }
-    var expandedSize: CGSize { CGSize(width: expandedWidth, height: notchHeight + expandedHeight) }
+    var expandedSize: CGSize { CGSize(width: expandedWidth, height: notchHeight + topGap + expandedHeight) }
 }
 
 /// A rectangle with square top corners (flush against the bezel) and rounded

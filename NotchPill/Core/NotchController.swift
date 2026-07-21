@@ -14,7 +14,8 @@ final class NotchController {
     private var metrics = NotchMetrics(notchWidth: 200, notchHeight: 32,
                                        designExpandedWidth: NotchGeometry.expandedWidth,
                                        designExpandedHeight: NotchGeometry.expandedHeight,
-                                       scale: NotchGeometry.expandedScale)
+                                       scale: NotchGeometry.expandedScale,
+                                       topGap: NotchGeometry.contentTopGap)
 
     // Providers.
     private let nowPlaying = NowPlayingProvider()
@@ -80,7 +81,8 @@ final class NotchController {
                                notchHeight: geometry.notchRect.height,
                                designExpandedWidth: NotchGeometry.expandedWidth,
                                designExpandedHeight: NotchGeometry.expandedHeight,
-                               scale: NotchGeometry.expandedScale)
+                               scale: NotchGeometry.expandedScale,
+                               topGap: NotchGeometry.contentTopGap)
 
         let frame = geometry.windowFrame
         let actions = NotchActions(

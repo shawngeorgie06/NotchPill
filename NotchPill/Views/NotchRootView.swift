@@ -29,8 +29,9 @@ struct NotchRootView: View {
                 .overlay(alignment: .top) {
                     if state.isExpanded {
                         VStack(spacing: 0) {
-                            // Physical notch area, unscaled.
-                            Color.clear.frame(height: metrics.notchHeight)
+                            // Physical notch area plus a small gap, unscaled, so
+                            // the content clears the notch.
+                            Color.clear.frame(height: metrics.notchHeight + metrics.topGap)
                             // Content is laid out at its full design size, then the
                             // whole pill is shrunk uniformly by `metrics.scale`.
                             ExpandedView(state: state, shelf: shelf, actions: actions)
