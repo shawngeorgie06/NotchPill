@@ -17,12 +17,6 @@ extension NowPlaying: Equatable {
     }
 }
 
-struct BatteryInfo: Equatable {
-    var percent: Int
-    var isCharging: Bool
-    var isPluggedIn: Bool
-}
-
 struct CalendarEvent: Equatable {
     var title: String
     var start: Date

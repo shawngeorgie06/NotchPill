@@ -62,7 +62,28 @@
 		};
 /* End PBXGroup section */
 
-/* Begin PBXContainerItemProxy section */
+/* Begin PBXShellScriptBuildPhase section */
+		1A0000000000000000000022 /* Copy MediaRemote Adapter */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Vendor/mediaremote-adapter/build/MediaRemoteAdapter.framework",
+				"$(SRCROOT)/Vendor/mediaremote-adapter/bin/mediaremote-adapter.pl",
+			);
+			name = "Copy MediaRemote Adapter";
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/$(PRODUCT_NAME).app/Contents/Resources/MediaRemoteAdapter.framework",
+				"$(BUILT_PRODUCTS_DIR)/$(PRODUCT_NAME).app/Contents/Resources/mediaremote-adapter.pl",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "FRAMEWORK_SRC=\"${SRCROOT}/Vendor/mediaremote-adapter/build/MediaRemoteAdapter.framework\"\nSCRIPT_SRC=\"${SRCROOT}/Vendor/mediaremote-adapter/bin/mediaremote-adapter.pl\"\nDEST=\"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources\"\nif [[ ! -d \"$FRAMEWORK_SRC\" ]]; then echo \"error: build MediaRemoteAdapter first\" >&2; exit 1; fi\nmkdir -p \"$DEST\"\nrm -rf \"$DEST/MediaRemoteAdapter.framework\"\ncp -R \"$FRAMEWORK_SRC\" \"$DEST/\"\ncp \"$SCRIPT_SRC\" \"$DEST/mediaremote-adapter.pl\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 		1A000000000000000000001A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 1A0000000000000000000001 /* Project object */;
@@ -109,6 +130,7 @@
 				1A0000000000000000000007 /* Sources */,
 				1A0000000000000000000008 /* Frameworks */,
 				1A0000000000000000000009 /* Resources */,
+				1A0000000000000000000022 /* Copy MediaRemote Adapter */,
 			);
 			buildRules = (
 			);
@@ -321,6 +343,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "NotchPill uses Apple Events to read now-playing info and control playback in Music and Spotify.";
@@ -347,6 +370,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "NotchPill uses Apple Events to read now-playing info and control playback in Music and Spotify.";

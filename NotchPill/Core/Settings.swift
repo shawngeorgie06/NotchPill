@@ -6,7 +6,6 @@ import ServiceManagement
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
-    @AppStorage("showBattery") var showBattery = true
     @AppStorage("showCalendar") var showCalendar = true
     @AppStorage("showFileShelf") var showFileShelf = true
     /// When off (default), the collapsed notch stays clean and everything is

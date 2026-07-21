@@ -40,9 +40,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(header)
         menu.addItem(.separator())
 
-        addToggle(to: menu, title: "Battery", isOn: settings.showBattery) { [weak self] in
-            self?.settings.showBattery.toggle()
-        }
         addToggle(to: menu, title: "Next Event", isOn: settings.showCalendar) { [weak self] in
             self?.settings.showCalendar.toggle()
         }

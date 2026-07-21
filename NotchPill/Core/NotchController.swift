@@ -20,7 +20,6 @@ final class NotchController {
     // Providers.
     private let nowPlaying = NowPlayingProvider()
     private let volume = VolumeProvider()
-    private let battery = BatteryProvider()
     private let calendar = CalendarProvider()
     private let airDrop = AirDropProvider()
     private let appSwitch = AppSwitchProvider()
@@ -72,7 +71,7 @@ final class NotchController {
         NotificationCenter.default.removeObserver(self)
         hoverMonitor.stop()
         hotZoneKeys.stop()
-        nowPlaying.stop(); battery.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
+        nowPlaying.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
         window?.orderOut(nil)
     }
 
@@ -80,12 +79,11 @@ final class NotchController {
 
     private func wireProviders() {
         nowPlaying.onUpdate = { [weak self] np in self?.state.notifyMediaChanged(np) }
-        battery.onUpdate = { [weak self] info in self?.state.battery = info }
         calendar.onUpdate = { [weak self] event in self?.state.nextEvent = event }
         airDrop.onUpdate = { [weak self] status in self?.state.airDrop = status }
         appSwitch.onSwitch = { [weak self] name in self?.state.notifyAppSwitched(name) }
 
-        nowPlaying.start(); battery.start(); calendar.start(); airDrop.start(); appSwitch.start()
+        nowPlaying.start(); calendar.start(); airDrop.start(); appSwitch.start()
         volume.onVolumeChanged = { [weak self] level in self?.state.showVolume(level) }
     }
 

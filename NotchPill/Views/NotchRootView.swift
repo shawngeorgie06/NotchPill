@@ -71,8 +71,7 @@ struct NotchRootView: View {
     }
 }
 
-/// The expanded pill body: now-playing + controls, battery, next event. Tiles
-/// with no reliable data (e.g. AirDrop) are omitted rather than faked.
+/// The expanded pill body: now-playing + controls, next event, and file shelf.
 struct ExpandedView: View {
     @ObservedObject var state: NotchState
     @ObservedObject var shelf: ShelfStore
@@ -83,13 +82,6 @@ struct ExpandedView: View {
         HStack(spacing: 14) {
             NowPlayingTile(nowPlaying: state.nowPlaying, actions: actions)
                 .frame(maxWidth: .infinity)
-
-            if settings.showBattery, let battery = state.battery {
-                Divider().overlay(Color.white.opacity(0.12))
-                BatteryTile(battery: battery)
-                    .frame(width: 64)
-                    .transition(.opacity)
-            }
 
             if settings.showCalendar, let event = state.nextEvent {
                 Divider().overlay(Color.white.opacity(0.12))
@@ -110,7 +102,6 @@ struct ExpandedView: View {
         .padding(.top, 8)
         // Any tile-data swap crossfades too.
         .animation(.easeInOut(duration: 0.25), value: state.nowPlaying)
-        .animation(.easeInOut(duration: 0.25), value: state.battery)
         .animation(.easeInOut(duration: 0.25), value: state.nextEvent)
         .animation(.easeInOut(duration: 0.2), value: shelf.items)
         .animation(.easeInOut(duration: 0.15), value: shelf.isDropTargeted)

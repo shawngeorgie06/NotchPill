@@ -24,3 +24,6 @@ Package.resolved
 
 # Scratch / tool build artifacts
 tools/mousemove
+
+# Vendored MediaRemote adapter build output
+Vendor/mediaremote-adapter/build/

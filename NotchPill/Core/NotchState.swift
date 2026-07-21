@@ -16,7 +16,6 @@ final class NotchState: ObservableObject {
 
     // Tile data.
     @Published var nowPlaying: NowPlaying?
-    @Published var battery: BatteryInfo?
     @Published var nextEvent: CalendarEvent?
     /// Transient volume HUD level (0–100), nil when hidden.
     @Published private(set) var volumeLevel: Int? = nil

@@ -29,11 +29,14 @@ struct NowPlayingTile: View {
     private var artwork: some View {
         Group {
             if let image = nowPlaying?.artwork {
-                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .id(ObjectIdentifier(image))
             } else {
                 ZStack {
                     Rectangle().fill(.white.opacity(0.08))
-                    Image(systemName: "music.note")
+                    Image(systemName: "play.rectangle.fill")
                         .foregroundStyle(.white.opacity(0.5))
                         .font(.system(size: 18))
                 }
@@ -61,43 +64,6 @@ struct NowPlayingTile: View {
                 .frame(width: 22, height: 22)
         }
         .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Battery
-
-struct BatteryTile: View {
-    let battery: BatteryInfo
-
-    var body: some View {
-        VStack(spacing: 6) {
-            ZStack {
-                Image(systemName: symbolName)
-                    .font(.system(size: 26))
-                    .foregroundStyle(color, .white.opacity(0.35))
-                    .symbolRenderingMode(.palette)
-            }
-            Text("\(battery.percent)%")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var symbolName: String {
-        if battery.isCharging { return "battery.100.bolt" }
-        switch battery.percent {
-        case ..<15: return "battery.0"
-        case ..<40: return "battery.25"
-        case ..<65: return "battery.50"
-        case ..<90: return "battery.75"
-        default: return "battery.100"
-        }
-    }
-
-    private var color: Color {
-        if battery.isCharging || battery.isPluggedIn { return .green }
-        return battery.percent < 15 ? .red : .white
     }
 }
 
