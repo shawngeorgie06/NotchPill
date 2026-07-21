@@ -152,6 +152,12 @@ struct ShelfTile: View {
                 Text("Shelf").font(.system(size: 13, weight: .medium))
                 Spacer(minLength: 0)
                 if !shelf.items.isEmpty {
+                    // Share/AirDrop everything on the shelf.
+                    ShareLink(items: shelf.items.map(\.url)) {
+                        Image(systemName: "square.and.arrow.up").font(.system(size: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(0.7))
                     Button { shelf.clear() } label: {
                         Image(systemName: "xmark.circle.fill").font(.system(size: 11))
                     }
@@ -231,6 +237,13 @@ struct ShelfChip: View {
         .onHover { hovering = $0 }
         // Drag the real file back out to Finder / AirDrop / any drop target.
         .onDrag { NSItemProvider(contentsOf: item.url) ?? NSItemProvider() }
+        .contextMenu {
+            ShareLink("Share / AirDrop…", item: item.url)
+            Button("Reveal in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([item.url])
+            }
+            Button("Remove", role: .destructive, action: onRemove)
+        }
     }
 }
 

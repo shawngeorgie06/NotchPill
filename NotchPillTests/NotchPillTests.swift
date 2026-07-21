@@ -42,9 +42,13 @@ struct NotchActivityTests {
 @MainActor
 @Suite("ShelfStore")
 struct ShelfStoreTests {
+    private func isolatedStore() -> ShelfStore {
+        ShelfStore(defaults: UserDefaults(suiteName: "notchpill.tests.\(UUID().uuidString)")!)
+    }
+
     @Test("add dedupes by URL")
     func dedupe() {
-        let shelf = ShelfStore()
+        let shelf = isolatedStore()
         let a = URL(fileURLWithPath: "/tmp/a.txt")
         let b = URL(fileURLWithPath: "/tmp/b.txt")
         shelf.add(urls: [a, b, a])
@@ -55,13 +59,34 @@ struct ShelfStoreTests {
 
     @Test("remove and clear")
     func removeClear() {
-        let shelf = ShelfStore()
+        let shelf = isolatedStore()
         shelf.add(urls: [URL(fileURLWithPath: "/tmp/a.txt"),
                          URL(fileURLWithPath: "/tmp/b.txt")])
         if let first = shelf.items.first { shelf.remove(first) }
         #expect(shelf.items.count == 1)
         shelf.clear()
         #expect(shelf.items.isEmpty)
+    }
+
+    @Test("items persist across store instances via shared defaults")
+    func persistence() throws {
+        let suite = "notchpill.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        // Use real, existing files so bookmarks resolve.
+        let a = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("np-a.txt")
+        let b = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("np-b.txt")
+        try "a".write(to: a, atomically: true, encoding: .utf8)
+        try "b".write(to: b, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: a); try? FileManager.default.removeItem(at: b) }
+
+        let first = ShelfStore(defaults: defaults)
+        first.add(urls: [a, b])
+        #expect(first.items.count == 2)
+
+        // A fresh store on the same defaults should restore the items.
+        let restored = ShelfStore(defaults: defaults)
+        #expect(restored.items.count == 2)
+        #expect(Set(restored.items.map { $0.url.lastPathComponent }) == ["np-a.txt", "np-b.txt"])
     }
 }
 

@@ -8,6 +8,7 @@ struct NotchRootView: View {
     @ObservedObject var shelf: ShelfStore
     let metrics: NotchMetrics
     let actions: NotchActions
+    @ObservedObject private var settings = AppSettings.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// When the user prefers reduced motion, swap springs/crossfades for a very
@@ -45,7 +46,9 @@ struct NotchRootView: View {
                     }
                 }
 
-            if !state.isExpanded {
+            // Collapsed live activity is opt-in; by default the notch stays clean
+            // and everything is revealed on hover.
+            if !state.isExpanded, settings.showCollapsedActivity {
                 CollapsedIndicator(activity: state.activity)
                     .id(state.activity.transitionKey)
                     .transition(.opacity)
