@@ -2,19 +2,19 @@ import AppKit
 
 /// Detects pointer hover over the notch hot zone using the live cursor position.
 ///
-/// The overlay window sits below the menu bar so status items stay clickable;
-/// that means AppKit tracking areas on the window never see events in the notch
-/// band. Polling `NSEvent.mouseLocation` against the hot-zone screen rect fixes
-/// that without stealing menu bar clicks.
+/// Expansion is limited to the physical notch column (not browser tab flanks).
+/// Hover is detected via screen-space polling so the overlay can pass clicks through.
 @MainActor
 final class HoverMonitor {
     var onEnter: () -> Void = {}
     var onExit: () -> Void = {}
-    /// Fired every tick with whether the pointer is inside the shortcut/hover zone.
+    /// Fired every tick with whether keyboard shortcuts should arm.
     var onTick: ((Bool) -> Void)?
 
-    /// Screen-coordinate rect (AppKit bottom-left origin) of the interactive zone.
-    var hotZoneScreenRect: () -> CGRect = { .zero }
+    /// Screen-coordinate rect that may trigger expand/collapse.
+    var expandZoneScreenRect: () -> CGRect = { .zero }
+    /// When true, the pointer is over browser tabs — never expand or arm shortcuts.
+    var pointBlocksHover: (NSPoint) -> Bool = { _ in false }
 
     private var timer: Timer?
     private var isInside = false
@@ -23,7 +23,7 @@ final class HoverMonitor {
 
     /// Consecutive poll ticks required before toggling expand/collapse (not shortcuts).
     private let enterTicksRequired = 2
-    private let exitTicksRequired = 4
+    private let exitTicksRequired = 3
 
     func start() {
         guard timer == nil else { return }
@@ -49,18 +49,27 @@ final class HoverMonitor {
     }
 
     private func tick() {
-        let rect = hotZoneScreenRect()
+        let mouse = NSEvent.mouseLocation
+
+        if pointBlocksHover(mouse) {
+            onTick?(false)
+            insideTicks = 0
+            if isInside {
+                outsideTicks = exitTicksRequired
+                isInside = false
+                onExit()
+            }
+            return
+        }
+
+        let rect = expandZoneScreenRect()
         guard rect.width > 0, rect.height > 0 else { return }
 
-        let mouse = NSEvent.mouseLocation
-        // Generous zone for shortcut arming — independent of expand/collapse hysteresis.
-        let shortcutZone = rect.insetBy(dx: -16, dy: -10).contains(mouse)
-        // Keep shortcuts armed while inside the hover session, not only on tight edge ticks.
+        let shortcutZone = rect.insetBy(dx: -12, dy: -8).contains(mouse)
         onTick?(shortcutZone || isInside)
 
-        // Tighter hysteresis only drives expand/collapse so the pill doesn't flutter.
-        let insideForEnter = rect.insetBy(dx: -12, dy: -8).contains(mouse)
-        let insideForExit = rect.insetBy(dx: -4, dy: -2).contains(mouse)
+        let insideForEnter = rect.insetBy(dx: -6, dy: -4).contains(mouse)
+        let insideForExit = rect.insetBy(dx: -2, dy: -1).contains(mouse)
         let inside = isInside ? insideForExit : insideForEnter
 
         if inside {

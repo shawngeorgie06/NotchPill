@@ -149,7 +149,7 @@ enum NotchContentLayout {
 
     private static func collapsedChipBaseWidth(_ chip: CollapsedChip) -> CGFloat {
         switch chip {
-        case .media: return 118
+        case .media: return 136
         case .systemStats: return 132
         case .calendar: return 96
         case .timer: return 56

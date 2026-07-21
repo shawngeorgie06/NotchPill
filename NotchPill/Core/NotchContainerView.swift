@@ -12,6 +12,8 @@ final class NotchContainerView: NSView {
     var isExpandedProvider: () -> Bool = { false }
     var collapsedContentSizeProvider: () -> CGSize = { .zero }
     var expandedContentSizeProvider: () -> CGSize = { .zero }
+    /// Screen-coordinate test for browser tab flanks beside the notch.
+    var browserFlankContains: (NSPoint) -> Bool = { _ in false }
     var onHotEntered: () -> Void = {}
     var onHotExited: () -> Void = {}
     var onSpacePressed: () -> Void = {}
@@ -33,17 +35,64 @@ final class NotchContainerView: NSView {
 
     /// Visible pill bounds in local coordinates (bottom-left origin).
     var hotRect: CGRect {
+        pillHitRect()
+    }
+
+    private func pillHitRect() -> CGRect {
         let w = bounds.width
         let h = bounds.height
         if isExpandedProvider() {
-            let size = expandedContentSizeProvider()
-            let pw = min(size.width, w)
-            // Full window height so the notch band counts as part of the pill.
-            return CGRect(x: (w - pw) / 2, y: 0, width: pw, height: h)
+            return expandedInteractiveUnion()
         }
         let size = collapsedContentSizeProvider()
         return CGRect(x: (w - size.width) / 2, y: h - size.height,
                       width: size.width, height: size.height)
+    }
+
+    /// Expanded pill minus the browser tab "ears" beside the physical notch.
+    private func expandedInteractiveUnion() -> CGRect {
+        interactiveRectsLocal().reduce(CGRect.null) { $0.union($1) }
+    }
+
+    /// Regions that receive clicks when expanded. Top corners beside the notch
+    /// are excluded so browser tabs stay accessible.
+    private func interactiveRectsLocal() -> [CGRect] {
+        let w = bounds.width
+        let h = bounds.height
+        let nw = metrics.notchWidth
+        let nh = metrics.notchHeight
+        let notchLeft = (w - nw) / 2
+
+        guard isExpandedProvider() else { return [pillHitRect()] }
+
+        let size = expandedContentSizeProvider()
+        let pw = min(size.width, w)
+        let pillX = (w - pw) / 2
+        let body = CGRect(x: pillX, y: 0, width: pw, height: max(0, h - nh))
+        let notchColumn = CGRect(x: notchLeft, y: h - nh, width: nw, height: nh)
+        return [body, notchColumn]
+    }
+
+    private func isInTabEar(at local: NSPoint) -> Bool {
+        guard isExpandedProvider() else { return false }
+        let w = bounds.width
+        let h = bounds.height
+        let nw = metrics.notchWidth
+        let nh = metrics.notchHeight
+        let notchLeft = (w - nw) / 2
+        let leftEar = CGRect(x: 0, y: h - nh, width: notchLeft, height: nh)
+        let rightEar = CGRect(x: notchLeft + nw, y: h - nh,
+                              width: w - (notchLeft + nw), height: nh)
+        return leftEar.contains(local) || rightEar.contains(local)
+    }
+
+    func isPointOnInteractivePill(_ screenPoint: NSPoint) -> Bool {
+        if browserFlankContains(screenPoint) { return false }
+        guard let window else { return false }
+        let windowPoint = window.convertPoint(fromScreen: screenPoint)
+        let local = convert(windowPoint, from: nil)
+        if isInTabEar(at: local) { return false }
+        return interactiveRectsLocal().contains { $0.insetBy(dx: -2, dy: -2).contains(local) }
     }
 
     func isMouseInHotZone() -> Bool {
@@ -53,12 +102,21 @@ final class NotchContainerView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        // Expanded only: accept clicks on the pill so controls work. Collapsed
-        // passes everything through via ignoresMouseEvents on the window.
+        guard let window else { return nil }
+        let screenPoint = window.convertToScreen(NSRect(origin: point, size: .zero)).origin
+        if browserFlankContains(screenPoint) { return nil }
+        // Pass clicks through to browser tabs / menu bar unless expanded over the pill.
         guard isExpandedProvider() else { return nil }
         let local = convert(point, from: superview)
-        guard hotRect.contains(local) else { return nil }
+        if isInTabEar(at: local) { return nil }
+        guard interactiveRectsLocal().contains(where: { $0.contains(local) }) else { return nil }
         return super.hitTest(point)
+    }
+
+    /// Screen-space rect of the interactive pill body (for click capture when expanded).
+    func pillScreenRect() -> CGRect {
+        guard let window else { return .zero }
+        return window.convertToScreen(pillHitRect())
     }
 
     override func updateTrackingAreas() {

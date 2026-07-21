@@ -111,7 +111,11 @@ final class NotchState: ObservableObject {
         } else if let app = appSwitchHint {
             resolved = .appSwitch(app)
         }
-        if resolved != activity { activity = resolved }
+        // Only crossfade when the activity *kind* changes — metadata updates use
+        // `nowPlaying` directly and should not re-trigger the transition.
+        if resolved.transitionKey != activity.transitionKey {
+            activity = resolved
+        }
     }
 
     /// Clears the transient app-switch banner and re-resolves activity.

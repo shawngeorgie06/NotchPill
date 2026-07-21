@@ -30,6 +30,46 @@ struct NotchGeometry {
                       height: height)
     }
 
+    /// Screen rects beside the physical notch where browsers (Chrome, Brave, Safari)
+    /// render tabs. Clicks here must always pass through the overlay.
+    static func browserFlankRects(for screen: NSScreen) -> [CGRect] {
+        let inset = screen.safeAreaInsets.top
+        guard inset > 0 else { return [] }
+
+        var rects: [CGRect] = []
+        if let left = screen.auxiliaryTopLeftArea, left.width > 1, left.height > 1 {
+            rects.append(left)
+        }
+        if let right = screen.auxiliaryTopRightArea, right.width > 1, right.height > 1 {
+            rects.append(right)
+        }
+
+        // Fallback when auxiliary areas are unavailable.
+        if rects.isEmpty, let notch = notchRect(for: screen) {
+            let frame = screen.frame
+            let top = frame.maxY - inset
+            rects.append(CGRect(x: frame.minX, y: top, width: notch.minX - frame.minX, height: inset))
+            rects.append(CGRect(x: notch.maxX, y: top, width: frame.maxX - notch.maxX, height: inset))
+        }
+
+        // Unified browser tab bars extend below the menu bar band.
+        let tabBarExtension: CGFloat = 52
+        return rects.map { rect in
+            CGRect(x: rect.minX,
+                   y: rect.minY - tabBarExtension,
+                   width: rect.width,
+                   height: rect.height + tabBarExtension)
+        }
+    }
+
+    static func browserFlankRects(for geometry: NotchGeometry) -> [CGRect] {
+        browserFlankRects(for: geometry.screen)
+    }
+
+    static func pointIsInBrowserFlank(_ point: NSPoint, on screen: NSScreen) -> Bool {
+        browserFlankRects(for: screen).contains { $0.contains(point) }
+    }
+
     /// Finds the built-in notched screen, if the current hardware/arrangement has one.
     static func current() -> NotchGeometry? {
         for screen in NSScreen.screens {

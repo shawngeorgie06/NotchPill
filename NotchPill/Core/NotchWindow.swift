@@ -1,7 +1,8 @@
 import AppKit
 
-/// A borderless, non-activating floating panel that sits above the menu bar and
-/// never steals focus from the frontmost app.
+/// A borderless, non-activating floating panel over the notch.
+/// Sits **below** the menu bar so status items and browser tabs stay clickable;
+/// hover is detected via screen-space polling instead of window hit-testing.
 final class NotchWindow: NSPanel {
     init(contentRect: CGRect) {
         super.init(contentRect: contentRect,
@@ -10,16 +11,15 @@ final class NotchWindow: NSPanel {
                    defer: false)
 
         isFloatingPanel = true
-        // Above the menu bar so the pill renders in the notch; menu bar flanks stay
-        // clickable via hit-test pass-through in NotchContainerView.
+        // Above normal windows so the pill renders in the notch; tab flanks use
+        // ignoresMouseEvents + hit-test pass-through (see NotchGeometry.browserFlankRects).
         level = .statusBar + 1
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        ignoresMouseEvents = false
+        ignoresMouseEvents = true
         hidesOnDeactivate = false
         isMovableByWindowBackground = false
-        // Appear on every Space, stay put during Exposé/full-screen transitions.
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
     }
 

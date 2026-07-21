@@ -66,11 +66,13 @@ final class NotchController {
             self?.hotZoneKeys.updatePointerInHotZone(false)
             self?.pointerExitedHot()
         }
-        hoverMonitor.onTick = { [weak self] inside in
-            self?.hotZoneKeys.updatePointerInHotZone(inside)
-            self?.updateMousePassthrough(pointerInHotZone: inside)
+        hoverMonitor.onTick = { [weak self] _ in
+            self?.handleHoverTick()
         }
-        hoverMonitor.hotZoneScreenRect = { [weak self] in self?.hotZoneScreenRect() ?? .zero }
+        hoverMonitor.expandZoneScreenRect = { [weak self] in self?.expandHoverScreenRect() ?? .zero }
+        hoverMonitor.pointBlocksHover = { [weak self] point in
+            self?.isPointerInBrowserFlank(point) ?? false
+        }
         hoverMonitor.start()
 
         rebuildForCurrentDisplays()
@@ -207,6 +209,10 @@ final class NotchController {
             container.isExpandedProvider = { [weak self] in self?.state.isExpanded ?? false }
             container.collapsedContentSizeProvider = { [weak self] in self?.collapsedContentSize() ?? .zero }
             container.expandedContentSizeProvider = { [weak self] in self?.expandedContentSize() ?? .zero }
+            container.browserFlankContains = { [weak self] point in
+                guard let screen = self?.geometry?.screen else { return false }
+                return NotchGeometry.pointIsInBrowserFlank(point, on: screen)
+            }
             container.onSpacePressed = { [weak self] in self?.nowPlaying.togglePlayPause() }
             container.onDropFiles = { [weak self] urls in self?.shelf.add(urls: urls) }
             container.onDragTargetingChanged = { [weak self] targeting in
@@ -217,7 +223,10 @@ final class NotchController {
                 targeting ? self.pointerEnteredHot() : self.pointerExitedHot()
             }
 
-            let hosting = NSHostingView(rootView: root)
+            let hosting = PassthroughHostingView(rootView: root)
+            hosting.acceptsScreenPoint = { [weak container] point in
+                container?.isPointOnInteractivePill(point) ?? false
+            }
             hosting.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(hosting)
             NSLayoutConstraint.activate([
@@ -233,14 +242,22 @@ final class NotchController {
             container?.metrics = metrics
             container?.collapsedContentSizeProvider = { [weak self] in self?.collapsedContentSize() ?? .zero }
             container?.expandedContentSizeProvider = { [weak self] in self?.expandedContentSize() ?? .zero }
-            if let hosting = container?.subviews.first as? NSHostingView<NotchRootView> {
+            container?.browserFlankContains = { [weak self] point in
+                guard let screen = self?.geometry?.screen else { return false }
+                return NotchGeometry.pointIsInBrowserFlank(point, on: screen)
+            }
+            if let hosting = container?.subviews.first as? PassthroughHostingView<NotchRootView> {
                 hosting.rootView = root
+                hosting.acceptsScreenPoint = { [weak container] point in
+                    container?.isPointOnInteractivePill(point) ?? false
+                }
             }
         }
 
         applyWindowFrame(animated: false)
         window?.orderFrontRegardless()
         container?.refreshTracking()
+        updateMousePassthrough(pointerInHotZone: expandHoverScreenRect().contains(NSEvent.mouseLocation))
 
         // Screenshot/inspection aid: start expanded so the pill is visible.
         if Diagnostics.forceExpand { state.setExpanded(true) }
@@ -275,12 +292,38 @@ final class NotchController {
         } else {
             window.setFrame(frame, display: true)
         }
-        updateMousePassthrough(pointerInHotZone: hotZoneScreenRect().contains(NSEvent.mouseLocation))
+        updateMousePassthrough(pointerInHotZone: expandHoverScreenRect().contains(NSEvent.mouseLocation))
     }
 
     // MARK: - Hover logic
 
     private static let logHover = ProcessInfo.processInfo.environment["NOTCHPILL_LOG_HOVER"] == "1"
+
+    private func handleHoverTick() {
+        let mouse = NSEvent.mouseLocation
+
+        if isPointerInBrowserFlank(mouse) {
+            expandWorkItem?.cancel()
+            expandWorkItem = nil
+            hotZoneKeys.updatePointerInHotZone(false)
+            updateMousePassthrough(pointerInHotZone: false)
+            if state.isExpanded {
+                collapseWorkItem?.cancel()
+                state.setExpanded(false)
+                applyWindowFrame(animated: true)
+            }
+            return
+        }
+
+        let inShortcutZone = isPointerInShortcutZone()
+        hotZoneKeys.updatePointerInHotZone(inShortcutZone)
+        updateMousePassthrough(pointerInHotZone: inShortcutZone)
+    }
+
+    private func isPointerInBrowserFlank(_ point: NSPoint) -> Bool {
+        guard let screen = geometry?.screen else { return false }
+        return NotchGeometry.pointIsInBrowserFlank(point, on: screen)
+    }
 
     private func pointerEnteredHot() {
         collapseWorkItem?.cancel()
@@ -291,8 +334,9 @@ final class NotchController {
         if Self.logHover { print("HOVER enter -> expand in \(hoverExpandDelay)s") }
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            // Only expand if the pointer is still over the interaction target.
-            guard self.hotZoneScreenRect().insetBy(dx: -10, dy: -6).contains(NSEvent.mouseLocation) else {
+            let mouse = NSEvent.mouseLocation
+            guard !self.isPointerInBrowserFlank(mouse) else { return }
+            guard self.expandHoverScreenRect().insetBy(dx: -6, dy: -4).contains(mouse) else {
                 return
             }
             self.activateExpandedHotZone()
@@ -303,6 +347,7 @@ final class NotchController {
 
     private func activateExpandedHotZone() {
         expandWorkItem = nil
+        guard !isPointerInBrowserFlank(NSEvent.mouseLocation) else { return }
         if Self.logHover { print("HOVER expand @\(String(format: "%.3f", Date().timeIntervalSince1970))") }
         state.setExpanded(true)
         hotZoneKeys.updatePointerInHotZone(true)
@@ -312,8 +357,17 @@ final class NotchController {
     }
 
     private func pointerExitedHot() {
-        // Ignore spurious exits while the pointer is still in the screen hot zone.
-        if hotZoneScreenRect().insetBy(dx: -4, dy: -2).contains(NSEvent.mouseLocation) {
+        if expandHoverScreenRect().insetBy(dx: -2, dy: -1).contains(NSEvent.mouseLocation) {
+            return
+        }
+        if isPointerInBrowserFlank(NSEvent.mouseLocation) {
+            expandWorkItem?.cancel()
+            expandWorkItem = nil
+            if state.isExpanded {
+                collapseWorkItem?.cancel()
+                state.setExpanded(false)
+                applyWindowFrame(animated: true)
+            }
             return
         }
 
@@ -323,7 +377,11 @@ final class NotchController {
         if Self.logHover { print("HOVER exit -> collapse in \(collapseGrace)s") }
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            if self.hotZoneScreenRect().insetBy(dx: -4, dy: -2).contains(NSEvent.mouseLocation) {
+            let mouse = NSEvent.mouseLocation
+            if self.expandHoverScreenRect().insetBy(dx: -2, dy: -1).contains(mouse) {
+                return
+            }
+            if self.isPointerInBrowserFlank(mouse) {
                 return
             }
             if Self.logHover { print("HOVER collapse fired @\(String(format: "%.3f", Date().timeIntervalSince1970))") }
@@ -334,29 +392,31 @@ final class NotchController {
         DispatchQueue.main.asyncAfter(deadline: .now() + collapseGrace, execute: item)
     }
 
-    /// Hot zone in screen coordinates for the hover poller and shortcut arming.
-    private func hotZoneScreenRect() -> CGRect {
+    /// Tight zone for expand/collapse: physical notch + pill body below the tab row only.
+    private func expandHoverScreenRect() -> CGRect {
         guard let geometry else { return .zero }
 
-        let notch = geometry.notchRect
-        let menuBarHeight = max(geometry.screen.safeAreaInsets.top, NSStatusBar.system.thickness)
-        // Band across the menu bar / physical notch — where the cursor sits before clicking.
-        let notchBand = CGRect(
-            x: notch.midX - max(notch.width + 96, 200) / 2,
-            y: geometry.screen.frame.maxY - menuBarHeight - 20,
-            width: max(notch.width + 96, 200),
-            height: menuBarHeight + 36
-        )
+        let notch = geometry.notchRect.insetBy(dx: -10, dy: -6)
+        let pillSize = state.isExpanded ? expandedContentSize() : collapsedContentSize()
+        let belowHeight = max(0, pillSize.height - geometry.notchRect.height)
+        guard belowHeight > 0 else { return notch }
 
-        let pill = collapsedInteractionRect().union(expandedInteractionRect())
-        return notchBand.union(pill)
+        let belowBody = CGRect(
+            x: geometry.notchRect.midX - pillSize.width / 2,
+            y: geometry.screen.frame.maxY - pillSize.height,
+            width: pillSize.width,
+            height: belowHeight
+        )
+        return notch.union(belowBody)
     }
 
     /// Live pointer test used by the global key monitor (no click required).
     private func isPointerInShortcutZone() -> Bool {
-        let rect = hotZoneScreenRect()
+        let mouse = NSEvent.mouseLocation
+        if isPointerInBrowserFlank(mouse) { return false }
+        let rect = expandHoverScreenRect()
         guard rect.width > 0, rect.height > 0 else { return false }
-        return rect.insetBy(dx: -20, dy: -14).contains(NSEvent.mouseLocation)
+        return rect.insetBy(dx: -12, dy: -8).contains(mouse)
     }
 
     private func collapsedInteractionRect() -> CGRect {
@@ -394,14 +454,33 @@ final class NotchController {
     }
 
     /// Collapsed: pass all clicks through to apps below (Brave tabs, etc.).
-    /// Expanded: capture clicks only over the pill for controls.
+    /// Expanded: capture clicks only over the pill body — never over browser tab flanks.
     private func updateMousePassthrough(pointerInHotZone: Bool) {
-        let mouse = NSEvent.mouseLocation
-        let overMenuBar = menuBarStrip.contains(mouse)
-        if state.isExpanded {
-            window?.ignoresMouseEvents = overMenuBar || !pointerInHotZone
-        } else {
-            window?.ignoresMouseEvents = true
+        guard let window, let container, let geometry else {
+            return
         }
+
+        let mouse = NSEvent.mouseLocation
+
+        // Browser tabs beside the notch must always stay clickable.
+        if NotchGeometry.pointIsInBrowserFlank(mouse, on: geometry.screen) {
+            window.ignoresMouseEvents = true
+            return
+        }
+
+        // Menu bar strip always passes through (clock, Wi‑Fi, NotchPill icon, etc.).
+        if menuBarStrip.contains(mouse) {
+            window.ignoresMouseEvents = true
+            return
+        }
+
+        if !state.isExpanded {
+            window.ignoresMouseEvents = true
+            return
+        }
+
+        // Only capture mouse when over interactive pill controls — never the full hot zone.
+        let overPill = container.isPointOnInteractivePill(mouse)
+        window.ignoresMouseEvents = !overPill
     }
 }

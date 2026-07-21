@@ -10,8 +10,8 @@ now-playing controls, live status cards, and optional collapsed activity chips.
 
 - **Precise notch placement** — positioned over the physical notch using
   `NSScreen.auxiliaryTopLeftArea` / `safeAreaInsets`.
-- **Hover to expand** — expands into a pill within ~300 ms; collapses after a
-  500 ms grace delay when the pointer leaves.
+- **Hover to expand** — expands into a pill when you hover the physical notch;
+  browser tabs beside the notch stay clickable and won't trigger expansion.
 - **Now playing** — title, artist, artwork, playback progress, and
   play/pause/skip controls. Uses the
   [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter) Perl
@@ -19,8 +19,8 @@ now-playing controls, live status cards, and optional collapsed activity chips.
   app bundles). Falls back to AppleScript for Music/Spotify.
 - **Hover keyboard shortcuts** — while the pointer is over the notch: **Space**
   play/pause, **← / →** previous/next track, **↑ / ↓** volume with a live HUD.
-- **Collapsed preview** — optional chip row below the notch for media, calendar
-  events, file shelf count, and app-switch banners.
+- **Collapsed preview** — optional chip row below the notch for media (artwork,
+  title, artist, progress), calendar events, file shelf count, and app-switch banners.
 - **Expanded status cards** — configurable live cards for now playing (with
   progress bar), active app, volume, and clock.
 - **Settings window** — menu bar → **Settings…** (⌘,) to toggle each collapsed

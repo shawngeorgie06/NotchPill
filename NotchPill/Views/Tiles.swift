@@ -709,9 +709,9 @@ struct CollapsedChipView: View {
 
     private var chipContent: some View {
         VStack(alignment: .leading, spacing: s(3)) {
-            HStack(spacing: s(5)) {
+            HStack(spacing: s(6)) {
                 leading
-                labelView
+                mediaLabels
                 if case .media(let np) = chip, np.isPlaying {
                     EqualizerBars(scale: readability)
                 }
@@ -719,6 +719,25 @@ struct CollapsedChipView: View {
             if case .media(let np) = chip, np.hasProgress {
                 MediaProgressView(nowPlaying: np, style: .collapsed, readability: readability, textScale: textScale)
             }
+        }
+    }
+
+    @ViewBuilder private var mediaLabels: some View {
+        if case .media(let np) = chip {
+            VStack(alignment: .leading, spacing: s(1)) {
+                Text(np.title)
+                    .font(.system(size: textSize(11), weight: .semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                if !np.artist.isEmpty {
+                    Text(np.artist)
+                        .font(.system(size: textSize(9), weight: .medium))
+                        .lineLimit(1)
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
+        } else {
+            labelView
         }
     }
 
@@ -747,17 +766,24 @@ struct CollapsedChipView: View {
     @ViewBuilder private var leading: some View {
         switch chip {
         case .media(let np):
-            if let image = np.artwork {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: s(16), height: s(16))
-                    .clipShape(RoundedRectangle(cornerRadius: s(3), style: .continuous))
-            } else {
-                Image(systemName: "play.rectangle.fill")
-                    .font(.system(size: s(10)))
-                    .foregroundStyle(.white.opacity(0.7))
+            Group {
+                if let image = np.artwork {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .id(ObjectIdentifier(image))
+                } else {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: s(4), style: .continuous)
+                            .fill(.white.opacity(0.08))
+                        Image(systemName: np.isPlaying ? "play.fill" : "pause.fill")
+                            .font(.system(size: s(8), weight: .bold))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                }
             }
+            .frame(width: s(20), height: s(20))
+            .clipShape(RoundedRectangle(cornerRadius: s(4), style: .continuous))
         case .calendar:
             Image(systemName: "calendar")
                 .font(.system(size: s(10)))
@@ -850,7 +876,7 @@ struct MediaProgressView: View {
                             .frame(width: geo.size.width * fraction)
                     }
                 }
-                .frame(width: s(72), height: s(2))
+                .frame(width: s(88), height: s(2.5))
             case .expanded:
                 VStack(spacing: s(4)) {
                     GeometryReader { geo in

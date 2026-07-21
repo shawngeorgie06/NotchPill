@@ -267,9 +267,8 @@ struct NotchStateTests {
         defer { cancellable.cancel() }
 
         state.notifyMediaChanged(NowPlaying(title: "A", artist: "x", isPlaying: true, artwork: nil))
-        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
         state.notifyMediaChanged(NowPlaying(title: "B", artist: "x", isPlaying: true, artwork: nil))
-        try await Task.sleep(nanoseconds: 400_000_000) // let it settle
+        try await Task.sleep(nanoseconds: 120_000_000)
 
         #expect(emissions == ["media"])
     }

@@ -56,26 +56,32 @@ struct NotchRootView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            NotchShape(bottomRadius: state.isExpanded ? 24 : collapsedBottomRadius)
-                .fill(Color.black)
-                .frame(width: frameSize.width, height: frameSize.height)
-                .overlay(alignment: .top) {
-                    if state.isExpanded {
-                        expandedContent
-                            .transition(.opacity)
-                    } else if !collapsedChips.isEmpty {
-                        collapsedContent
-                            .transition(.opacity)
-                    }
-                }
-                .overlay {
-                    if let level = state.volumeLevel {
-                        VolumeHUD(level: level)
-                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                    }
-                }
+            if state.isExpanded {
+                expandedBackground
+            } else {
+                // When collapsed, only fill the physical notch — don't black out browser tabs on either side.
+                NotchShape(bottomRadius: collapsedBottomRadius)
+                    .fill(Color.black)
+                    .frame(width: metrics.notchWidth, height: metrics.notchHeight)
+            }
+        }
+        .overlay(alignment: .top) {
+            if state.isExpanded {
+                expandedContent
+                    .transition(.opacity)
+            } else if !collapsedChips.isEmpty {
+                collapsedContent
+                    .transition(.opacity)
+            }
+        }
+        .overlay {
+            if let level = state.volumeLevel {
+                VolumeHUD(level: level)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .allowsHitTesting(state.isExpanded)
         .animation(expandAnimation, value: state.isExpanded)
         .animation(expandAnimation, value: frameSize.width)
         .animation(expandAnimation, value: frameSize.height)
@@ -90,6 +96,22 @@ struct NotchRootView: View {
 
     private var collapsedBottomRadius: CGFloat {
         collapsedChips.isEmpty ? max(6, metrics.notchHeight / 2) : 14
+    }
+
+    /// Expanded pill: black only in the notch column + body below; ears stay clear for tabs.
+    private var expandedBackground: some View {
+        let earWidth = max(0, (frameSize.width - metrics.notchWidth) / 2)
+        return VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: earWidth, height: metrics.notchHeight)
+                Color.black.frame(width: metrics.notchWidth, height: metrics.notchHeight)
+                Color.clear.frame(width: earWidth, height: metrics.notchHeight)
+            }
+            NotchShape(bottomRadius: 24)
+                .fill(Color.black)
+                .frame(width: frameSize.width, height: max(0, frameSize.height - metrics.notchHeight))
+        }
+        .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
     }
 
     private var expandedContent: some View {

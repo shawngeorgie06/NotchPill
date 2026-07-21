@@ -10,7 +10,7 @@ struct PreferencesView: View {
             Divider()
             ScrollView {
                 Form {
-                    Section("Collapsed Preview") {
+                    Section {
                         Toggle("Show collapsed preview", isOn: $settings.showCollapsedActivity)
                         Toggle("Media", isOn: $settings.showCollapsedMedia)
                             .disabled(!settings.showCollapsedActivity)
@@ -28,6 +28,10 @@ struct PreferencesView: View {
                             .disabled(!settings.showCollapsedActivity)
                         Toggle("Battery", isOn: $settings.showCollapsedBattery)
                             .disabled(!settings.showCollapsedActivity)
+                    } header: {
+                        Text("Collapsed Preview")
+                    } footer: {
+                        Text("Chips appear below the physical notch when you hover nearby. Browser tabs beside the notch stay clickable.")
                     }
 
                     Section("Expanded Pill") {
@@ -42,7 +46,7 @@ struct PreferencesView: View {
                         Toggle("File shelf", isOn: $settings.showExpandedShelf)
                     }
 
-                    Section("Timer") {
+                    Section {
                         if let active = timer.active, active.isActive {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 HStack {
@@ -63,20 +67,57 @@ struct PreferencesView: View {
                                 Button("\(minutes)m") { timer.start(minutes: minutes) }
                             }
                         }
+                    } header: {
+                        Text("Timer")
                     }
 
-                    Section("General") {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            shortcutRow("Space", "Play / pause")
+                            shortcutRow("← / →", "Previous / next track")
+                            shortcutRow("↑ / ↓", "System volume")
+                        }
+                        .padding(.vertical, 2)
+                        Button("Open Accessibility Settings…") {
+                            NSWorkspace.shared.open(
+                                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                            )
+                        }
+                    } header: {
+                        Text("Keyboard Shortcuts")
+                    } footer: {
+                        Text("Hover the physical notch, then use these keys without clicking. Requires NotchPill in System Settings → Privacy & Security → Accessibility.")
+                    }
+
+                    Section {
                         Toggle("Launch at login", isOn: Binding(
                             get: { settings.launchAtLogin },
                             set: { settings.setLaunchAtLogin($0) }
                         ))
+                        Button("Reset All Settings to Defaults") {
+                            settings.resetToDefaults()
+                        }
+                    } header: {
+                        Text("General")
                     }
                 }
                 .formStyle(.grouped)
                 .padding(.bottom, 8)
             }
         }
-        .frame(minWidth: 460, minHeight: 560)
+        .frame(minWidth: 460, minHeight: 620)
+    }
+
+    private func shortcutRow(_ keys: String, _ action: String) -> some View {
+        HStack(spacing: 12) {
+            Text(keys)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+                .frame(width: 52, alignment: .leading)
+            Text(action)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var header: some View {

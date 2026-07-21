@@ -146,4 +146,46 @@ final class AppSettings: ObservableObject {
             launchAtLogin = (SMAppService.mainApp.status == .enabled)
         }
     }
+
+    func resetToDefaults() {
+        let defaultValues: [String: Any] = [
+            Keys.showCollapsedActivity: true,
+            Keys.showCollapsedMedia: true,
+            Keys.showCollapsedAppSwitch: true,
+            Keys.showCalendar: true,
+            Keys.showFileShelf: true,
+            Keys.showCollapsedTimer: true,
+            Keys.showCollapsedSystemStats: false,
+            Keys.showCollapsedBattery: false,
+            Keys.showCollapsedClock: true,
+            Keys.showExpandedMedia: true,
+            Keys.showExpandedActiveApp: true,
+            Keys.showExpandedVolume: true,
+            Keys.showExpandedClock: true,
+            Keys.showExpandedCalendar: false,
+            Keys.showExpandedTimer: true,
+            Keys.showExpandedSystemStats: false,
+            Keys.showExpandedBattery: false,
+            Keys.showExpandedShelf: false,
+        ]
+        defaultValues.forEach { defaults.set($0.value, forKey: $0.key) }
+        showCollapsedActivity = true
+        showCollapsedMedia = true
+        showCollapsedAppSwitch = true
+        showCalendar = true
+        showFileShelf = true
+        showCollapsedTimer = true
+        showCollapsedSystemStats = false
+        showCollapsedBattery = false
+        showCollapsedClock = true
+        showExpandedMedia = true
+        showExpandedActiveApp = true
+        showExpandedVolume = true
+        showExpandedClock = true
+        showExpandedCalendar = false
+        showExpandedTimer = true
+        showExpandedSystemStats = false
+        showExpandedBattery = false
+        showExpandedShelf = false
+    }
 }
