@@ -38,11 +38,14 @@ jobs:
         run: ./Scripts/setup-vendor.sh
 
       - name: Import code signing certificate
-        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
+          if [[ -z "${APPLE_CERTIFICATE_P12:-}" ]]; then
+            echo "No signing certificate secret configured; skipping import."
+            exit 0
+          fi
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
