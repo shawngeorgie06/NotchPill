@@ -1,40 +1,47 @@
 # Installing NotchPill (unsigned release)
 
-NotchPill is not notarized yet, so macOS Gatekeeper blocks the first open. **Do not click “Move to Trash.”**
+macOS Gatekeeper quarantines the **entire unzipped folder** — including `Install NotchPill.command`. You will see:
 
-## Quick install (recommended)
+> Apple could not verify "…" is free of malware
 
-1. Download `NotchPill-*-macOS-arm64.zip` from [Releases](https://github.com/shawngeorgie06/NotchPill/releases) and double-click to unzip.
-2. **Double-click `Install NotchPill.command`** — removes quarantine and copies to Applications automatically.
-3. Look for the notch icon in the **menu bar** (top right).
+**Do not click Move to Trash.**
 
-### Manual install (if the installer won't run)
+## One-line install (recommended)
 
-1. **Right-click** `NotchPill.app` → **Open**.
-2. In the dialog, click **Open** again (not Move to Trash).
-3. Drag **NotchPill.app** into **Applications**.
-
-## Terminal install
+Paste in **Terminal** (updates path if needed):
 
 ```sh
-cd ~/Downloads
-unzip -o NotchPill-*-macOS-arm64.zip
-xattr -cr NotchPill.app
-open NotchPill.app
+xattr -cr ~/Downloads/NotchPill-*-macOS-arm64 && bash ~/Downloads/NotchPill-*-macOS-arm64/Install\ NotchPill.command
+```
+
+This removes the quarantine flag on everything in the folder, then runs the installer.
+
+## Finder install
+
+1. Download and unzip `NotchPill-*-macOS-arm64.zip`.
+2. **Right-click** `Install NotchPill.command` → **Open** → **Open**  
+   (Double-click shows the malware warning — right-click is required the first time.)
+3. If prompted about `NotchPill.app` too: **right-click** it → **Open** → **Open**.
+
+## Manual Terminal install
+
+```sh
+cd ~/Downloads/NotchPill-*-macOS-arm64
+xattr -cr .
 cp -R NotchPill.app /Applications/
-open -a NotchPill
+xattr -cr /Applications/NotchPill.app
+open /Applications/NotchPill.app
 ```
 
 ## After install
 
-- **Menu bar** — look for the notch icon (top right). No Dock icon; that’s normal.
-- **Launch at Login** — click the menu bar icon → enable **Launch at Login**.
-- **Accessibility** — System Settings → Privacy & Security → Accessibility → enable **NotchPill** (for hover keyboard shortcuts).
+- **Menu bar** — notch icon (top right). No Dock icon; that's normal.
+- **Launch at Login** — menu bar icon → enable it.
+- **Accessibility** — System Settings → Privacy & Security → Accessibility → NotchPill.
 
-## If it still won’t open
+## If it still won't open
 
-1. System Settings → **Privacy & Security** → scroll down → **Open Anyway** next to NotchPill (appears after the first block).
-2. Or run again: `xattr -cr /Applications/NotchPill.app && open /Applications/NotchPill.app`
+System Settings → **Privacy & Security** → scroll down → **Open Anyway** next to NotchPill.
 
 ## Build from source (no download quarantine)
 
@@ -44,5 +51,3 @@ cd NotchPill
 ./Scripts/setup-vendor.sh
 open NotchPill.xcodeproj   # Run (⌘R)
 ```
-
-Apps you build locally are not quarantined like browser downloads.

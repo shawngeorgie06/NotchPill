@@ -1,30 +1,33 @@
 ═══════════════════════════════════════════════════════════════
-  NotchPill — READ THIS FIRST (macOS Gatekeeper)
+  NotchPill — READ THIS FIRST
 ═══════════════════════════════════════════════════════════════
 
-macOS may say: "Apple could not verify NotchPill is free of malware."
-
-This is normal for unsigned apps. DO NOT click "Move to Trash."
-
-───────────────────────────────────────────────────────────────
-  EASIEST: Double-click "Install NotchPill.command"
-───────────────────────────────────────────────────────────────
-
-That script removes the quarantine flag and copies NotchPill to
-Applications for you.
+macOS blocks BOTH NotchPill.app AND Install NotchPill.command
+the first time (unsigned download). DO NOT click "Move to Trash."
 
 ───────────────────────────────────────────────────────────────
-  OR: Right-click NotchPill.app → Open → Open
+  FASTEST FIX — paste this in Terminal (one time):
 ───────────────────────────────────────────────────────────────
 
-Then drag NotchPill.app into your Applications folder.
+xattr -cr ~/Downloads/NotchPill-*-macOS-arm64 && bash ~/Downloads/NotchPill-*-macOS-arm64/Install\ NotchPill.command
+
+(Change the path if you unzipped somewhere else.)
+
+───────────────────────────────────────────────────────────────
+  OR: Right-click each file → Open → Open
+───────────────────────────────────────────────────────────────
+
+1. Right-click "Install NotchPill.command" → Open → Open
+   (NOT double-click — that shows the malware warning.)
+
+2. If that still fails, use the Terminal command above.
 
 ───────────────────────────────────────────────────────────────
   After install
 ───────────────────────────────────────────────────────────────
 
-• Look for the notch icon in the menu bar (top right) — no Dock icon
+• Notch icon in the menu bar (top right) — no Dock icon
 • Menu bar → Launch at Login
-• System Settings → Privacy & Security → Accessibility → enable NotchPill
+• System Settings → Accessibility → enable NotchPill
 
-Full guide: https://github.com/shawngeorgie06/NotchPill/blob/main/docs/INSTALL.md
+https://github.com/shawngeorgie06/NotchPill/blob/main/docs/INSTALL.md
