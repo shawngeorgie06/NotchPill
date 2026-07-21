@@ -138,12 +138,15 @@ jobs:
       # TAP_PUSH_TOKEN. If the secret is unset the step is skipped (release still
       # succeeds); update the cask by hand or via Scripts/bump-cask.sh.
       - name: Update Homebrew cask
-        if: ${{ secrets.TAP_PUSH_TOKEN != '' }}
         env:
           TAP_PUSH_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
           RELEASE_LABEL: ${{ steps.version.outputs.label }}
         run: |
           set -euo pipefail
+          if [[ -z "${TAP_PUSH_TOKEN:-}" ]]; then
+            echo "TAP_PUSH_TOKEN not set; skipping cask update (bump it manually with Scripts/bump-cask.sh)."
+            exit 0
+          fi
           VERSION="${RELEASE_LABEL#v}"
           ZIP="dist/NotchPill-${VERSION}-macOS-arm64.zip"
           SHA="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
