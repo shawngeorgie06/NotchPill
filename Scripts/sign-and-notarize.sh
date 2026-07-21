@@ -94,4 +94,9 @@ sign_developer_id
 notarize
 
 echo ""
-echo "Signed and notarized: $APP"
+if [[ -n "$NOTARY_PROFILE" || ( -n "${APPLE_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ) ]]; then
+  echo "Signed and notarized: $APP"
+else
+  echo "Signed (stable identity, not notarized): $APP"
+  echo "Users clear one Gatekeeper prompt via Homebrew/installer quarantine strip."
+fi

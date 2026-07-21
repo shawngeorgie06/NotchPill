@@ -102,7 +102,9 @@ final class AppSettings: ObservableObject {
 
     private init() {
         defaults.register(defaults: [
-            Keys.showCollapsedActivity: true,
+            // Hover-only by default: the collapsed preview strip stays hidden
+            // until you hover the notch. Users can turn it on in Settings.
+            Keys.showCollapsedActivity: false,
             Keys.showCollapsedMedia: true,
             Keys.showCollapsedAppSwitch: true,
             Keys.showCalendar: true,
@@ -163,7 +165,7 @@ final class AppSettings: ObservableObject {
 
     func resetToDefaults() {
         let defaultValues: [String: Any] = [
-            Keys.showCollapsedActivity: true,
+            Keys.showCollapsedActivity: false,
             Keys.showCollapsedMedia: true,
             Keys.showCollapsedAppSwitch: true,
             Keys.showCalendar: true,
@@ -185,7 +187,7 @@ final class AppSettings: ObservableObject {
             Keys.devReadyDuration: 8.0,
         ]
         defaultValues.forEach { defaults.set($0.value, forKey: $0.key) }
-        showCollapsedActivity = true
+        showCollapsedActivity = false
         showCollapsedMedia = true
         showCollapsedAppSwitch = true
         showCalendar = true

@@ -39,30 +39,40 @@ now-playing controls, live status cards, and optional collapsed activity chips.
 
 - macOS 14+ (built and tested on macOS 26, Xcode 26, a notched MacBook)
 
-## Download
+## Install
 
-**[Download the latest release](https://github.com/shawngeorgie06/NotchPill/releases/latest)** (macOS 14+, Apple Silicon).
+macOS 14+ on Apple Silicon. NotchPill is self-signed (no paid Apple Developer
+account), so it is **not notarized** — the install paths below handle Gatekeeper
+for you by clearing the download quarantine flag.
 
-macOS will show *"Apple could not verify NotchPill"* — **do not click Move to Trash.**  
-**Do not double-click** `Install NotchPill.command` — it is blocked before it can run. Use **Terminal**:
+### Recommended — Homebrew
 
-### Install — paste one of these
+```sh
+brew install --cask shawngeorgie06/tap/notchpill
+```
 
-**Option A — download + install in one step:**
+Installs to `/Applications`, strips quarantine automatically, no dialogs.
+Update anytime with `brew upgrade --cask notchpill`.
+
+### No Homebrew — one-line installer
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/shawngeorgie06/NotchPill/main/Scripts/install-notchpill.sh | bash
 ```
 
-**Option B — already unzipped the ZIP:**
+Downloads the latest release and installs it. (`curl` doesn't quarantine, so this
+sidesteps the Gatekeeper wall a browser download would hit.)
 
-```sh
-xattr -cr ~/Downloads/NotchPill-*-macOS-arm64 && bash ~/Downloads/NotchPill-*-macOS-arm64/Install\ NotchPill.command
-```
+> **Avoid the browser ZIP + double-click path.** A ZIP downloaded in Safari/Chrome
+> is quarantined, and macOS blocks both the app *and* `Install NotchPill.command`
+> before they can run. If you already downloaded the ZIP, install from **Terminal**:
+> ```sh
+> xattr -cr ~/Downloads/NotchPill-*-macOS-arm64 && bash ~/Downloads/NotchPill-*-macOS-arm64/Install\ NotchPill.command
+> ```
 
 Then look for the **notch icon in the menu bar** (top right) and enable **Launch at Login**.
 
-Full guide: **[docs/INSTALL.md](docs/INSTALL.md)** · Maintainer notarization: [docs/NOTARIZATION.md](docs/NOTARIZATION.md)
+Full guide: **[docs/INSTALL.md](docs/INSTALL.md)** · Free stable signing: [docs/NOTARIZATION.md](docs/NOTARIZATION.md)
 
 In **System Settings → Privacy & Security → Accessibility**, enable **NotchPill** so hover keyboard shortcuts work while other apps are focused.
 

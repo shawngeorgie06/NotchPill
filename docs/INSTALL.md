@@ -1,14 +1,27 @@
 # Installing NotchPill
 
-macOS blocks unsigned downloads with:
+NotchPill is self-signed, not notarized (no paid Apple Developer account), so a
+plain browser download trips Gatekeeper with:
 
 > Apple could not verify "…" is free of malware
 
-**Do not click Move to Trash.** Double-clicking the installer **does not work** — use Terminal.
+Every option below avoids that by clearing the download quarantine flag.
+**Do not click Move to Trash.**
 
 ---
 
-## Option 1 — One command (easiest)
+## Option 0 — Homebrew (recommended)
+
+```sh
+brew install --cask shawngeorgie06/tap/notchpill
+```
+
+Installs to `/Applications`, clears quarantine, and never shows a dialog. Update
+with `brew upgrade --cask notchpill`; remove with `brew uninstall --cask notchpill`.
+
+---
+
+## Option 1 — One command (no Homebrew)
 
 Open **Terminal** and paste:
 

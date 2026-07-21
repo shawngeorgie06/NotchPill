@@ -1,6 +1,51 @@
-# Notarizing GitHub Releases
+# Signing & Notarizing Releases
 
-NotchPill releases must be **Developer ID signed and notarized** or macOS Gatekeeper blocks them with “Apple could not verify … is free of malware.”
+There are two ways to sign NotchPill. You only need one.
+
+## Free path — stable self-signed identity (recommended, no Apple payment)
+
+This does **not** make the app notarized — users still clear one Gatekeeper
+prompt (Homebrew and the install script do it automatically). What it fixes is
+**identity stability**: pure ad-hoc signing changes the code identity on every
+build, and macOS ties Accessibility/Calendar permissions to that identity, so
+each update silently drops the grants. Signing every release with one stable
+self-signed certificate keeps permissions across updates.
+
+**One-time setup:**
+
+```sh
+./Scripts/make-signing-cert.sh
+```
+
+It generates a non-expiring code-signing cert, trusts it in your login keychain,
+and prints the three GitHub secrets to paste (so CI release builds use the same
+identity):
+
+| Secret | Value |
+|--------|--------|
+| `NOTCHPILL_SIGN_IDENTITY` | `NotchPill Self-Signed` |
+| `APPLE_CERTIFICATE_P12` | base64 of the generated `.p12` (printed by the script) |
+| `APPLE_CERTIFICATE_PASSWORD` | the random password the script prints |
+
+Leave `NOTCHPILL_NOTARY_KEYCHAIN_PROFILE` / `APPLE_ID` unset — the build signs
+with the cert and skips notarization. Local signed build:
+
+```sh
+NOTCHPILL_SIGN_IDENTITY="NotchPill Self-Signed" ./Scripts/build-release.sh
+```
+
+To also keep the Homebrew cask current on each release, add a repo-scoped PAT for
+`shawngeorgie06/homebrew-tap` as secret `TAP_PUSH_TOKEN` (or run
+`./Scripts/bump-cask.sh <version>` by hand).
+
+---
+
+## Paid path — Developer ID + notarization (no Gatekeeper prompt at all)
+
+Only this removes the "Apple could not verify…" prompt entirely, and it requires
+the **$99/year Apple Developer Program**. The same three secrets above apply;
+just use a real *Developer ID Application* certificate instead of the self-signed
+one, and add the notary credentials below.
 
 ## One-time setup (maintainer)
 

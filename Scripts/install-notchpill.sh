@@ -34,14 +34,20 @@ xattr -cr "$STAGE"
 rm -rf "$DEST"
 ditto "$APP" "$DEST"
 
-# Re-sign after copy so macOS accepts the app bundle.
-FRAMEWORK="$DEST/Contents/Resources/MediaRemoteAdapter.framework"
-if [[ -d "$FRAMEWORK" ]]; then
-  codesign --force --sign - "$FRAMEWORK" 2>/dev/null || true
-fi
-codesign --force --sign - "$DEST/Contents/MacOS/NotchPill"
-codesign --force --sign - "$DEST"
+# Strip the Gatekeeper quarantine flag so the app launches. The release build
+# already carries a valid signature (self-signed or ad-hoc), so we do NOT
+# re-sign here — re-signing would change the code identity and macOS would drop
+# any Accessibility/Calendar permissions the user has granted. Only re-sign as a
+# last resort if the shipped signature is somehow broken on this machine.
 xattr -cr "$DEST"
+if ! codesign --verify --deep --strict "$DEST" 2>/dev/null; then
+  echo "==> Shipped signature invalid on this machine; re-signing ad-hoc…"
+  FRAMEWORK="$DEST/Contents/Resources/MediaRemoteAdapter.framework"
+  [[ -d "$FRAMEWORK" ]] && codesign --force --sign - "$FRAMEWORK" 2>/dev/null || true
+  codesign --force --sign - "$DEST/Contents/MacOS/NotchPill" 2>/dev/null || true
+  codesign --force --sign - "$DEST" 2>/dev/null || true
+  xattr -cr "$DEST"
+fi
 
 echo "==> Launching NotchPill…"
 open "$DEST"

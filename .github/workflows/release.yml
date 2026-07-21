@@ -53,8 +53,17 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
           security import "$RUNNER_TEMP/certificate.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychain -d user | tr -d '"')
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # A self-signed cert must be trusted for code signing before codesign
+          # will find it as a valid identity (Developer ID certs are already
+          # trusted via Apple's chain, so this is a harmless no-op for them).
+          openssl pkcs12 -in "$RUNNER_TEMP/certificate.p12" -clcerts -nokeys \
+            -passin pass:"$APPLE_CERTIFICATE_PASSWORD" -out "$RUNNER_TEMP/cert.pem" 2>/dev/null || true
+          if [[ -s "$RUNNER_TEMP/cert.pem" ]]; then
+            security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN_PATH" "$RUNNER_TEMP/cert.pem" 2>/dev/null || true
+          fi
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
 
       - name: Build NotchPill (Release)
         env:
@@ -123,3 +132,30 @@ jobs:
           files: |
             dist/NotchPill-*-macOS-arm64.zip
             dist/SHA256SUMS.txt
+
+      # Point the Homebrew cask at the new release so `brew upgrade` picks it up.
+      # Needs a repo-scoped PAT for shawngeorgie06/homebrew-tap as secret
+      # TAP_PUSH_TOKEN. If the secret is unset the step is skipped (release still
+      # succeeds); update the cask by hand or via Scripts/bump-cask.sh.
+      - name: Update Homebrew cask
+        if: ${{ secrets.TAP_PUSH_TOKEN != '' }}
+        env:
+          TAP_PUSH_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
+          RELEASE_LABEL: ${{ steps.version.outputs.label }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_LABEL#v}"
+          ZIP="dist/NotchPill-${VERSION}-macOS-arm64.zip"
+          SHA="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+          git clone --depth 1 "https://x-access-token:${TAP_PUSH_TOKEN}@github.com/shawngeorgie06/homebrew-tap.git" tap
+          CASK="tap/Casks/notchpill.rb"
+          /usr/bin/sed -i '' -E "s/^  version \"[^\"]*\"/  version \"${VERSION}\"/" "$CASK"
+          /usr/bin/sed -i '' -E "s/^  sha256 \"[^\"]*\"/  sha256 \"${SHA}\"/" "$CASK"
+          cd tap
+          if git diff --quiet; then
+            echo "Cask already up to date."
+            exit 0
+          fi
+          git -c user.email="actions@github.com" -c user.name="github-actions" \
+            commit -am "notchpill ${VERSION}"
+          git push origin HEAD:main

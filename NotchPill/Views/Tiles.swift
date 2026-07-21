@@ -44,20 +44,20 @@ struct ExpandedMediaRow: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             transportButton("backward.fill", action: actions.previous)
             transportButton(nowPlaying?.isPlaying == true ? "pause.fill" : "play.fill",
-                            size: 17, action: actions.togglePlayPause)
+                            size: 22, action: actions.togglePlayPause)
             transportButton("forward.fill", action: actions.next)
         }
     }
 
-    private func transportButton(_ symbol: String, size: CGFloat = 15, action: @escaping () -> Void) -> some View {
+    private func transportButton(_ symbol: String, size: CGFloat = 18, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .medium))
                 .foregroundStyle(.white)
-                .frame(width: 20, height: 20)
+                .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -111,21 +111,21 @@ struct NowPlayingTile: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 18) {
             transportButton("backward.fill", action: actions.previous)
             transportButton(nowPlaying?.isPlaying == true ? "pause.fill" : "play.fill",
-                            size: 20, action: actions.togglePlayPause)
+                            size: 24, action: actions.togglePlayPause)
             transportButton("forward.fill", action: actions.next)
         }
     }
 
-    private func transportButton(_ symbol: String, size: CGFloat = 17, action: @escaping () -> Void) -> some View {
+    private func transportButton(_ symbol: String, size: CGFloat = 20, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .medium))
                 .foregroundStyle(.white)
                 .contentShape(Rectangle())
-                .frame(width: 22, height: 22)
+                .frame(width: 28, height: 28)
         }
         .buttonStyle(.plain)
     }
@@ -609,9 +609,9 @@ struct ExpandedActivityCard: View {
                 }
                 if np.isPlaying { EqualizerBars(scale: readability) }
             }
-            HStack(spacing: s(14)) {
+            HStack(spacing: s(18)) {
                 transportButton("backward.fill", action: actions.previous)
-                transportButton(np.isPlaying ? "pause.fill" : "play.fill", size: 16, action: actions.togglePlayPause)
+                transportButton(np.isPlaying ? "pause.fill" : "play.fill", size: 22, action: actions.togglePlayPause)
                 transportButton("forward.fill", action: actions.next)
             }
             if np.hasProgress {
@@ -788,12 +788,12 @@ struct ExpandedActivityCard: View {
         return formatter.localizedString(for: date, relativeTo: Date())
     }
 
-    private func transportButton(_ symbol: String, size: CGFloat = 14, action: @escaping () -> Void) -> some View {
+    private func transportButton(_ symbol: String, size: CGFloat = 18, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: s(size), weight: .medium))
                 .foregroundStyle(.white)
-                .frame(width: s(20), height: s(20))
+                .frame(width: s(28), height: s(28))
                 .contentShape(Rectangle())
         }
         .buttonStyle(TransportButtonStyle())
