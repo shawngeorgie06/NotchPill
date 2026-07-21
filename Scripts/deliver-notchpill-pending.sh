@@ -108,6 +108,15 @@ if [[ "$SCOPE" == "subagent" ]]; then
     fi
     send_notify "$title" "$subtitle" "Cursor" "com.todesktop.230313mzl4w4u92" "$subagent_type"
   fi
+elif [[ "$SCOPE" == "main" ]]; then
+  # Main LLM fallback when the model forgot to queue — still ping on every completed turn.
+  model="$(printf '%s' "$input" | jq -r '.model // "Composer"')"
+  workspace="$(printf '%s' "$input" | jq -r '.workspace_roots[0] // empty')"
+  project="Cursor"
+  if [[ -n "$workspace" ]]; then
+    project="$(basename "$workspace")"
+  fi
+  send_notify "$model" "Reply ready in $project" "Cursor" "com.todesktop.230313mzl4w4u92" "$model"
 fi
 
 printf '%s\n' '{}'
