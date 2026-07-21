@@ -11,11 +11,11 @@ struct NowPlayingTile: View {
             artwork
             VStack(alignment: .leading, spacing: 2) {
                 Text(nowPlaying?.title ?? "Nothing playing")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                 Text(nowPlaying?.artist ?? "—")
-                    .font(.system(size: 11))
+                    .font(.system(size: 14))
                     .foregroundStyle(.white.opacity(0.6))
                     .lineLimit(1)
                 controls
@@ -47,12 +47,12 @@ struct NowPlayingTile: View {
         HStack(spacing: 16) {
             transportButton("backward.fill", action: actions.previous)
             transportButton(nowPlaying?.isPlaying == true ? "pause.fill" : "play.fill",
-                            size: 15, action: actions.togglePlayPause)
+                            size: 18, action: actions.togglePlayPause)
             transportButton("forward.fill", action: actions.next)
         }
     }
 
-    private func transportButton(_ symbol: String, size: CGFloat = 12, action: @escaping () -> Void) -> some View {
+    private func transportButton(_ symbol: String, size: CGFloat = 15, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .medium))
@@ -78,7 +78,7 @@ struct BatteryTile: View {
                     .symbolRenderingMode(.palette)
             }
             Text("\(battery.percent)%")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
         }
         .frame(maxWidth: .infinity)
@@ -109,15 +109,15 @@ struct CalendarTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Label(relativeStart, systemImage: "calendar")
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.orange)
                 .lineLimit(1)
             Text(event.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(2)
             Text(timeString)
-                .font(.system(size: 11))
+                .font(.system(size: 13))
                 .foregroundStyle(.white.opacity(0.6))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -148,8 +148,8 @@ struct ShelfTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
-                Image(systemName: "tray.full").font(.system(size: 10))
-                Text("Shelf").font(.system(size: 11, weight: .medium))
+                Image(systemName: "tray.full").font(.system(size: 12))
+                Text("Shelf").font(.system(size: 13, weight: .medium))
                 Spacer(minLength: 0)
                 if !shelf.items.isEmpty {
                     Button { shelf.clear() } label: {
@@ -173,7 +173,7 @@ struct ShelfTile: View {
                 .foregroundStyle(shelf.isDropTargeted ? Color.accentColor : .white.opacity(0.25))
                 .overlay(
                     Text("Drop files")
-                        .font(.system(size: 10))
+                        .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.4))
                 )
                 .frame(height: 44)
@@ -210,10 +210,10 @@ struct ShelfChip: View {
                 .resizable()
                 .frame(width: 30, height: 30)
             Text(item.name)
-                .font(.system(size: 8))
+                .font(.system(size: 10))
                 .foregroundStyle(.white.opacity(0.7))
                 .lineLimit(1)
-                .frame(width: 40)
+                .frame(width: 44)
         }
         .padding(4)
         .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.06)))

@@ -12,8 +12,8 @@ struct NotchGeometry {
     // Expanded overlay *design* dimensions (before shrink). The pill hangs below
     // the notch, wider than it. `expandedScale` shrinks the whole pill uniformly.
     static let expandedWidth: CGFloat = 680
-    static let expandedHeight: CGFloat = 140
-    static let expandedScale: CGFloat = 0.65
+    static let expandedHeight: CGFloat = 112
+    static let expandedScale: CGFloat = 0.58
     // Extra horizontal slack around the pill so the hosting window can host the
     // full expanded pill even when the notch is narrow.
     static let horizontalPadding: CGFloat = 40
