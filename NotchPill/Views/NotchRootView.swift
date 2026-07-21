@@ -6,36 +6,52 @@ import SwiftUI
 struct NotchRootView: View {
     @ObservedObject var state: NotchState
     @ObservedObject var shelf: ShelfStore
+    @ObservedObject var timer: TimerStore
     let metrics: NotchMetrics
     let actions: NotchActions
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var collapsedChips: [CollapsedChip] {
-        guard settings.showCollapsedActivity else { return [] }
-        return CollapsedChipBuilder.chips(
-            nowPlaying: state.nowPlaying,
-            nextEvent: state.nextEvent,
-            shelfCount: shelf.items.count,
-            appSwitchHint: state.appSwitchHint,
-            showMedia: settings.showCollapsedMedia,
-            showCalendar: settings.showCalendar,
-            showShelf: settings.showFileShelf,
-            showAppSwitch: settings.showCollapsedAppSwitch
-        )
+        NotchContentSnapshot.collapsedChips(state: state, shelf: shelf, timer: timer, settings: settings)
     }
 
-    private var frameSize: CGSize {
-        if state.isExpanded { return metrics.expandedSize }
-        if collapsedChips.isEmpty { return metrics.collapsedSize }
-        return metrics.collapsedPreviewSize(chipCount: collapsedChips.count)
+    private var expandedActivities: [ExpandedActivity] {
+        NotchContentSnapshot.expandedActivities(state: state, shelf: shelf, timer: timer, settings: settings)
+    }
+
+    private var contentLayout: NotchContentLayoutMetrics {
+        if state.isExpanded {
+            return NotchContentLayout.expandedLayout(metrics: metrics, activities: expandedActivities)
+        }
+        return NotchContentLayout.collapsedLayout(metrics: metrics, chips: collapsedChips)
+    }
+
+    private var frameSize: CGSize { contentLayout.size }
+
+    private var expandedDesignSize: CGSize {
+        NotchContentLayout.expandedDesignContentSize(metrics: metrics, activities: expandedActivities)
+    }
+
+    private var readabilityScale: CGFloat { contentLayout.readability }
+    private var textScale: CGFloat { contentLayout.textScale }
+
+    private var settingsFingerprint: String {
+        [
+            settings.showCollapsedActivity, settings.showCollapsedMedia, settings.showCollapsedAppSwitch,
+            settings.showCalendar, settings.showFileShelf, settings.showCollapsedTimer,
+            settings.showCollapsedSystemStats, settings.showCollapsedBattery, settings.showCollapsedClock,
+            settings.showExpandedMedia, settings.showExpandedActiveApp, settings.showExpandedVolume,
+            settings.showExpandedClock, settings.showExpandedCalendar, settings.showExpandedTimer,
+            settings.showExpandedSystemStats, settings.showExpandedBattery, settings.showExpandedShelf
+        ].map { $0 ? "1" : "0" }.joined()
     }
 
     private var expandAnimation: Animation {
-        reduceMotion ? .linear(duration: 0.01) : .spring(response: 0.26, dampingFraction: 0.86)
+        reduceMotion ? .linear(duration: 0.01) : .spring(response: 0.11, dampingFraction: 0.92)
     }
     private var contentAnimation: Animation {
-        reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.28)
+        reduceMotion ? .linear(duration: 0.01) : .easeOut(duration: 0.1)
     }
 
     var body: some View {
@@ -61,7 +77,13 @@ struct NotchRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(expandAnimation, value: state.isExpanded)
+        .animation(expandAnimation, value: frameSize.width)
+        .animation(expandAnimation, value: frameSize.height)
         .animation(expandAnimation, value: collapsedChips.map(\.id))
+        .animation(expandAnimation, value: expandedActivities.map(\.id))
+        .animation(expandAnimation, value: readabilityScale)
+        .animation(expandAnimation, value: textScale)
+        .animation(expandAnimation, value: settingsFingerprint)
         .animation(contentAnimation, value: state.activity)
         .animation(contentAnimation, value: state.volumeLevel)
     }
@@ -73,48 +95,46 @@ struct NotchRootView: View {
     private var expandedContent: some View {
         VStack(spacing: 0) {
             Color.clear.frame(height: metrics.notchHeight + metrics.topGap)
-            ExpandedView(state: state, actions: actions)
-                .frame(width: metrics.designContentSize.width,
-                       height: metrics.designContentSize.height)
+            ExpandedView(
+                state: state,
+                shelf: shelf,
+                timer: timer,
+                actions: actions,
+                activities: expandedActivities,
+                readability: readabilityScale,
+                textScale: textScale
+            )
+                .frame(width: expandedDesignSize.width, height: expandedDesignSize.height)
                 .scaleEffect(metrics.scale, anchor: .top)
-                .frame(width: metrics.expandedWidth, height: metrics.expandedHeight)
+                .frame(width: frameSize.width, height: frameSize.height - metrics.notchHeight - metrics.topGap)
         }
-        .frame(width: metrics.expandedSize.width, height: metrics.expandedSize.height, alignment: .top)
+        .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
     }
 
     private var collapsedContent: some View {
         VStack(spacing: 0) {
             Color.clear.frame(height: metrics.notchHeight)
-            CollapsedIndicatorsRow(chips: collapsedChips)
+            CollapsedIndicatorsRow(chips: collapsedChips, readability: readabilityScale, textScale: textScale)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
     }
 }
 
-/// Expanded pill: live status cards (media, app, volume, clock).
+/// Expanded pill: live status cards sized to how many are visible.
 struct ExpandedView: View {
     @ObservedObject var state: NotchState
+    @ObservedObject var shelf: ShelfStore
+    @ObservedObject var timer: TimerStore
     let actions: NotchActions
-    @ObservedObject private var settings = AppSettings.shared
-
-    private var activities: [ExpandedActivity] {
-        ExpandedActivityBuilder.activities(
-            nowPlaying: state.nowPlaying,
-            appSwitchHint: state.appSwitchHint,
-            frontmostApp: state.frontmostApp,
-            systemVolume: state.systemVolume,
-            showMedia: settings.showExpandedMedia,
-            showActiveApp: settings.showExpandedActiveApp,
-            showVolume: settings.showExpandedVolume,
-            showClock: settings.showExpandedClock
-        )
-    }
+    let activities: [ExpandedActivity]
+    var readability: CGFloat = 1.0
+    var textScale: CGFloat = 1.0
 
     var body: some View {
         Group {
             if activities.isEmpty {
                 Text("No cards enabled")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 13 * textScale, weight: .medium))
                     .foregroundStyle(.white.opacity(0.45))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -124,29 +144,30 @@ struct ExpandedView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
         .padding(.top, 6)
-        .animation(.easeInOut(duration: 0.25), value: state.nowPlaying)
-        .animation(.easeInOut(duration: 0.2), value: state.appSwitchHint)
-        .animation(.easeInOut(duration: 0.2), value: state.frontmostApp)
-        .animation(.easeInOut(duration: 0.15), value: state.systemVolume)
+        .animation(.easeOut(duration: 0.16), value: state.nowPlaying)
+        .animation(.easeOut(duration: 0.14), value: state.appSwitchHint)
+        .animation(.easeOut(duration: 0.14), value: state.frontmostApp)
+        .animation(.easeOut(duration: 0.12), value: state.systemVolume)
+        .animation(.easeOut(duration: 0.14), value: activities.map(\.id))
     }
 
     private var cardRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 10 * readability) {
             ForEach(Array(activities.enumerated()), id: \.element.id) { index, activity in
                 ExpandedActivityCard(
                     activity: activity,
                     appIcon: state.frontmostAppIcon,
                     actions: actions,
-                    prefersWide: {
-                        if case .media = activity { return true }
-                        return false
-                    }()
+                    onCancelTimer: { timer.cancel() },
+                    readability: readability,
+                    textScale: textScale,
+                    expandToFill: activities.count <= 2 || readability > 1.1
                 )
                 if index < activities.count - 1 {
                     Rectangle()
                         .fill(Color.white.opacity(0.1))
                         .frame(width: 1)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 4 * readability)
                 }
             }
         }

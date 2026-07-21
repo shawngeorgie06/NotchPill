@@ -29,5 +29,8 @@ tools/mousemove
 default.profraw
 *.profraw
 
+# Vendored MediaRemote adapter (clone via Scripts/setup-vendor.sh)
+Vendor/
+
 # Vendored MediaRemote adapter build output
 Vendor/mediaremote-adapter/build/

@@ -8,6 +8,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let settings = AppSettings.shared
     var hotZoneKeys: HotZoneKeyMonitor?
+    var onTestVolumeUp: (() -> Void)?
 
     func install() {
         if let button = statusItem.button {
@@ -68,8 +69,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 keyEquivalent: "")
             access.target = self
             menu.addItem(access)
-            menu.addItem(.separator())
+        } else {
+            let status = NSMenuItem(title: "Shortcuts: enabled", action: nil, keyEquivalent: "")
+            status.isEnabled = false
+            menu.addItem(status)
         }
+
+        let testVol = NSMenuItem(title: "Test System Volume Up", action: #selector(testVolumeUp), keyEquivalent: "")
+        testVol.target = self
+        menu.addItem(testVol)
+
+        menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "Quit NotchPill", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -97,7 +107,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openAccessibilitySettings() {
-        HotZoneKeyMonitor.openAccessibilitySettings()
+        hotZoneKeys?.openAccessibilitySetup()
+    }
+
+    @objc private func testVolumeUp() {
+        onTestVolumeUp?()
     }
 
     /// Boxes a closure so it can ride on `representedObject`.

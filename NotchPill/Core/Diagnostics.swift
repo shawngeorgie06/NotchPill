@@ -37,7 +37,11 @@ enum Diagnostics {
         if let l = geo.screen.auxiliaryTopLeftArea { print("auxTopLeft: \(rectStr(l))") }
         if let r = geo.screen.auxiliaryTopRightArea { print("auxTopRight: \(rectStr(r))") }
         print("NOTCH rect (global): \(rectStr(geo.notchRect))")
-        let win = geo.windowFrame
+        let win = geo.windowFrame(
+            expanded: true,
+            collapsedContentSize: geo.notchRect.size,
+            expandedContentSize: CGSize(width: 420, height: geo.notchRect.height + 100)
+        )
         print("WINDOW frame: \(rectStr(win))")
 
         // Assert: window horizontally centered on the notch, top flush with screen.

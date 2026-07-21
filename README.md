@@ -60,8 +60,10 @@ xcodebuild -project NotchPill.xcodeproj -scheme NotchPill -configuration Debug -
 open build/Build/Products/Debug/NotchPill.app
 ```
 
-The app is a menu-bar/agent app (`LSUIElement`) with no Dock icon. Expect
-one-time permission prompts for Calendar and for controlling Music/Spotify.
+The app appears in the Dock with a standard menu bar. The notch overlay runs in
+the background; open **Settings** from the Dock or menu to configure chips and
+cards. Expect one-time permission prompts for Calendar and for controlling
+Music/Spotify.
 
 ## Architecture
 

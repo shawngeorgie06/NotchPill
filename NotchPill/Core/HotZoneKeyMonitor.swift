@@ -10,118 +10,112 @@ final class HotZoneKeyMonitor {
     var onVolumeUp: () -> Void = {}
     var onVolumeDown: () -> Void = {}
 
-    /// Dispatches a hot-zone shortcut. Returns true when the key was handled.
-    @discardableResult
-    private func dispatch(keyCode: UInt16) -> Bool {
-        switch keyCode {
-        case 49: // space
-            if Self.logKeys { print("KEYS space -> toggle") }
-            onTogglePlayPause()
-        case 124: // right arrow
-            if Self.logKeys { print("KEYS right -> next") }
-            onNext()
-        case 123: // left arrow
-            if Self.logKeys { print("KEYS left -> previous") }
-            onPrevious()
-        case 126: // up arrow
-            if Self.logKeys { print("KEYS up -> volume up") }
-            onVolumeUp()
-        case 125: // down arrow
-            if Self.logKeys { print("KEYS down -> volume down") }
-            onVolumeDown()
-        default:
-            return false
-        }
-        return true
-    }
-
-    /// Screen-coordinate hot-zone check, updated on the main thread each hover tick.
-    var isPointerInHotZone: () -> Bool = { false }
+    /// Live screen-space hot-zone check (must be safe to call on the main thread).
+    var pointerInHotZone: () -> Bool = { false }
 
     private let lock = NSLock()
-    private var active = false
     private var cachedInHotZone = false
+    private var lastDispatch: (keyCode: UInt16, time: CFAbsoluteTime)?
 
     private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
+    private var tapRunLoopSource: CFRunLoopSource?
+    private var tapThread: Thread?
     private var globalMonitor: Any?
     private var localMonitor: Any?
+    private var pendingAccessibilityAlert: DispatchWorkItem?
 
     private static let logKeys = ProcessInfo.processInfo.environment["NOTCHPILL_LOG_HOVER"] == "1"
 
     func start() {
-        promptForAccessibilityIfNeeded()
-        installEventTap()
-        showAccessibilityAlertIfNeeded()
+        installMonitors()
+        installLocalMonitor()
+
+        if !AccessibilityAuthorization.isGranted, !hasWorkingMonitor {
+            if AccessibilityAuthorization.shouldOfferSystemPrompt {
+                AccessibilityAuthorization.requestSystemPrompt()
+            } else if AccessibilityAuthorization.shouldOfferAlert {
+                showAccessibilityAlertIfNeeded()
+            }
+        }
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(appDidBecomeActive),
             name: NSApplication.didBecomeActiveNotification, object: nil)
+        DistributedNotificationCenter.default.addObserver(
+            self, selector: #selector(accessibilityChanged),
+            name: NSNotification.Name("com.apple.accessibility.api"), object: nil)
     }
 
     func stop() {
         NotificationCenter.default.removeObserver(self)
-        setActive(false)
+        DistributedNotificationCenter.default.removeObserver(self)
+        pendingAccessibilityAlert?.cancel()
+        pendingAccessibilityAlert = nil
+        updatePointerInHotZone(false)
         removeEventTap()
         removeGlobalMonitor()
         removeLocalMonitor()
     }
 
     func setActive(_ active: Bool) {
-        lock.withLock {
-            self.active = active
-            self.cachedInHotZone = active
-        }
-        if active {
-            installLocalMonitor()
-            if !hasWorkingMonitor { installEventTap() }
-        } else {
-            removeLocalMonitor()
-        }
-        if Self.logKeys {
-            print("KEYS active=\(active) local=\(localMonitor != nil) tap=\(eventTap != nil) global=\(globalMonitor != nil)")
+        if Self.logKeys { print("KEYS setActive(\(active)) ignored") }
+    }
+
+    func updatePointerInHotZone(_ inside: Bool) {
+        lock.withLock { cachedInHotZone = inside }
+        if inside {
+            ensureShortcutCaptureReady()
         }
     }
 
-    /// Called from the main thread on each hover poll so the tap thread can read
-    /// a fresh flag without touching AppKit.
-    func updatePointerInHotZone(_ inside: Bool) {
-        lock.withLock { cachedInHotZone = inside }
+    func ensureShortcutCaptureReady() {
+        guard AccessibilityAuthorization.isGranted else { return }
+        installEventTap()
+        installGlobalMonitor()
     }
 
     @objc private func appDidBecomeActive() {
-        if !hasWorkingMonitor, AXIsProcessTrusted() {
-            installEventTap()
-        }
+        pendingAccessibilityAlert?.cancel()
+        pendingAccessibilityAlert = nil
+        installMonitors()
     }
 
-    // MARK: - Accessibility
-
-    private func promptForAccessibilityIfNeeded() {
-        guard !AXIsProcessTrusted() else { return }
-        let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(opts)
+    @objc private func accessibilityChanged() {
+        installMonitors()
     }
+
+    // MARK: - Accessibility alert
 
     private func showAccessibilityAlertIfNeeded() {
-        guard !AXIsProcessTrusted(), !hasWorkingMonitor else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            guard !AXIsProcessTrusted() else { return }
+        guard AccessibilityAuthorization.shouldOfferAlert, !hasWorkingMonitor else { return }
+
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard AccessibilityAuthorization.shouldOfferAlert,
+                  !AccessibilityAuthorization.isGranted,
+                  !self.hasWorkingMonitor else { return }
+
+            AccessibilityAuthorization.markSystemPromptOffered()
+
             let alert = NSAlert()
             alert.messageText = "Enable Keyboard Shortcuts"
             alert.informativeText = """
-            NotchPill needs Accessibility access so Space can pause music while \
-            your cursor is over the notch.
+            NotchPill needs Accessibility access so Space / arrow keys work while \
+            your cursor is over the notch (even when Brave or another app is focused).
 
-            Open System Settings → Privacy & Security → Accessibility, turn on \
-            NotchPill, then relaunch the app.
+            In System Settings → Privacy & Security → Accessibility, turn on \
+            NotchPill for this copy of the app, then relaunch.
             """
             alert.addButton(withTitle: "Open Settings")
             alert.addButton(withTitle: "Later")
             if alert.runModal() == .alertFirstButtonReturn {
                 Self.openAccessibilitySettings()
+            } else {
+                AccessibilityAuthorization.markAlertDeclined()
             }
         }
+        pendingAccessibilityAlert = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: item)
     }
 
     static func openAccessibilitySettings() {
@@ -130,12 +124,29 @@ final class HotZoneKeyMonitor {
         }
     }
 
-    // MARK: - Event tap
+    // MARK: - Monitors
+
+    private func installMonitors() {
+        if AccessibilityAuthorization.isGranted {
+            installEventTap()
+            installGlobalMonitor()
+        } else {
+            installGlobalMonitorFallback()
+        }
+    }
 
     private func installEventTap() {
-        removeGlobalMonitor()
+        guard AccessibilityAuthorization.isGranted else { return }
         guard eventTap == nil else { return }
 
+        tapThread = Thread { [weak self] in
+            self?.runEventTapThread()
+        }
+        tapThread?.name = "NotchPill.HotZoneKeyTap"
+        tapThread?.start()
+    }
+
+    private func runEventTapThread() {
         let mask = (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.tapDisabledByTimeout.rawValue)
 
@@ -157,75 +168,162 @@ final class HotZoneKeyMonitor {
         )
 
         guard let tap else {
-            if Self.logKeys { print("KEYS event tap unavailable — trying global monitor") }
-            installGlobalMonitorFallback()
+            if Self.logKeys { print("KEYS event tap unavailable") }
             return
         }
 
         eventTap = tap
-        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        tapRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        let runLoop = CFRunLoopGetCurrent()
+        CFRunLoopAddSource(runLoop, tapRunLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
-        if Self.logKeys { print("KEYS event tap installed, AX=\(AXIsProcessTrusted())") }
+        if Self.logKeys { print("KEYS event tap running on background thread") }
+        CFRunLoopRun()
     }
 
     private func removeEventTap() {
-        if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-            self.runLoopSource = nil
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            eventTap = nil
         }
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-            self.eventTap = nil
+        if let source = tapRunLoopSource {
+            CFRunLoopSourceInvalidate(source)
+            tapRunLoopSource = nil
         }
+        tapThread?.cancel()
+        tapThread = nil
     }
 
-    private static let eventTapCallback: CGEventTapCallBack = { proxy, type, event, refcon in
-        guard let refcon else {
-            return Unmanaged.passUnretained(event)
-        }
+    private func installGlobalMonitor() {
+        guard AccessibilityAuthorization.isGranted else { return }
+        guard globalMonitor == nil else { return }
+        guard let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            self?.handleObservedKeyDown(event)
+        }) else { return }
+        globalMonitor = monitor
+        if Self.logKeys { print("KEYS global monitor installed") }
+    }
+
+    private func installGlobalMonitorFallback() {
+        guard globalMonitor == nil else { return }
+        guard let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            self?.handleObservedKeyDown(event)
+        }) else { return }
+        globalMonitor = monitor
+    }
+
+    private func handleObservedKeyDown(_ event: NSEvent) {
+        guard !event.isARepeat else { return }
+        _ = dispatchIfNeeded(keyCode: event.keyCode)
+    }
+
+    private static let eventTapCallback: CGEventTapCallBack = { _, type, event, refcon in
+        guard let refcon else { return Unmanaged.passUnretained(event) }
         let monitor = Unmanaged<HotZoneKeyMonitor>.fromOpaque(refcon).takeUnretainedValue()
-        return monitor.handleEvent(proxy: proxy, type: type, event: event)
+        return monitor.handleEvent(type: type, event: event)
     }
 
-    private func handleEvent(proxy: CGEventTapProxy, type: CGEventType,
-                             event: CGEvent) -> Unmanaged<CGEvent>? {
+    private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout {
-            if let eventTap {
-                CGEvent.tapEnable(tap: eventTap, enable: true)
-            }
+            if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
             return Unmanaged.passUnretained(event)
         }
 
-        guard type == .keyDown, shouldHandleShortcut else {
-            return Unmanaged.passUnretained(event)
-        }
-
+        guard type == .keyDown else { return Unmanaged.passUnretained(event) }
         if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 {
             return Unmanaged.passUnretained(event)
         }
 
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-        switch keyCode {
-        case 49, 124, 123, 126, 125:
-            DispatchQueue.main.async { [weak self] in self?.dispatch(keyCode: keyCode) }
-            return nil
-        default:
+        guard isShortcut(keyCode), isPointerInHotZoneLive() else {
             return Unmanaged.passUnretained(event)
+        }
+
+        if dispatchIfNeeded(keyCode: keyCode) {
+            return nil
+        }
+        return Unmanaged.passUnretained(event)
+    }
+
+    @discardableResult
+    private func dispatchIfNeeded(keyCode: UInt16) -> Bool {
+        guard isShortcut(keyCode) else { return false }
+
+        let now = CFAbsoluteTimeGetCurrent()
+        if let last = lastDispatch, last.keyCode == keyCode, now - last.time < 0.05 {
+            return true
+        }
+
+        final class Box { var value = false }
+        let box = Box()
+        let checkAndDispatch = { [weak self] in
+            guard let self else { return }
+            guard self.isPointerInHotZoneLive() else { return }
+            self.lastDispatch = (keyCode, now)
+            _ = self.dispatch(keyCode: keyCode)
+            box.value = true
+        }
+
+        if Thread.isMainThread {
+            checkAndDispatch()
+        } else {
+            DispatchQueue.main.sync(execute: checkAndDispatch)
+        }
+        return box.value
+    }
+
+    @discardableResult
+    private func dispatch(keyCode: UInt16) -> Bool {
+        switch keyCode {
+        case 49:
+            if Self.logKeys { print("KEYS space -> toggle") }
+            onTogglePlayPause()
+        case 124:
+            if Self.logKeys { print("KEYS right -> next") }
+            onNext()
+        case 123:
+            if Self.logKeys { print("KEYS left -> previous") }
+            onPrevious()
+        case 126:
+            if Self.logKeys { print("KEYS up -> volume up") }
+            onVolumeUp()
+        case 125:
+            if Self.logKeys { print("KEYS down -> volume down") }
+            onVolumeDown()
+        default:
+            return false
+        }
+        return true
+    }
+
+    private func isShortcut(_ keyCode: UInt16) -> Bool {
+        switch keyCode {
+        case 49, 124, 123, 126, 125: return true
+        default: return false
         }
     }
 
     private var shouldHandleShortcut: Bool {
-        lock.withLock { active || cachedInHotZone }
+        isPointerInHotZoneLive()
     }
 
-    // MARK: - Local monitor (works once the app is key — no Accessibility needed)
+    /// Reads the live cursor position on the main thread (authoritative for hover shortcuts).
+    private func isPointerInHotZoneLive() -> Bool {
+        if Thread.isMainThread {
+            return pointerInHotZone()
+        }
+        var inside = false
+        DispatchQueue.main.sync {
+            inside = pointerInHotZone()
+        }
+        return inside
+    }
 
     private func installLocalMonitor() {
         guard localMonitor == nil else { return }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.shouldHandleShortcut, !event.isARepeat else { return event }
-            if self.dispatch(keyCode: event.keyCode) { return nil }
+            guard let self, !event.isARepeat else { return event }
+            if self.dispatchIfNeeded(keyCode: event.keyCode) { return nil }
             return event
         }
         if Self.logKeys { print("KEYS local monitor installed") }
@@ -238,21 +336,11 @@ final class HotZoneKeyMonitor {
         }
     }
 
-    // MARK: - Global fallback (needs Accessibility when another app is focused)
-
-    private func installGlobalMonitorFallback() {
-        guard globalMonitor == nil else { return }
-        guard let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
-            guard let self, self.shouldHandleShortcut, !event.isARepeat else { return }
-            DispatchQueue.main.async {
-                _ = self.dispatch(keyCode: event.keyCode)
-            }
-        }) else {
-            if Self.logKeys { print("KEYS global monitor unavailable — grant Accessibility to NotchPill") }
-            return
+    private func removeGlobalMonitor() {
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+            self.globalMonitor = nil
         }
-        globalMonitor = monitor
-        if Self.logKeys { print("KEYS global monitor installed, AX=\(AXIsProcessTrusted())") }
     }
 
     var hasWorkingMonitor: Bool {
@@ -260,13 +348,15 @@ final class HotZoneKeyMonitor {
     }
 
     var isAccessibilityGranted: Bool {
-        AXIsProcessTrusted()
+        AccessibilityAuthorization.isGranted
     }
 
-    private func removeGlobalMonitor() {
-        if let globalMonitor {
-            NSEvent.removeMonitor(globalMonitor)
-            self.globalMonitor = nil
+    func openAccessibilitySetup() {
+        if AccessibilityAuthorization.isGranted {
+            installMonitors()
+            return
         }
+        AccessibilityAuthorization.requestSystemPrompt()
+        Self.openAccessibilitySettings()
     }
 }

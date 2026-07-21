@@ -48,6 +48,10 @@ enum CollapsedChip: Equatable, Identifiable {
     case calendar(CalendarEvent)
     case shelf(count: Int)
     case appSwitch(String)
+    case timer(ActiveTimer)
+    case systemStats(SystemStats)
+    case battery(BatteryStatus)
+    case clock
 
     var id: String {
         switch self {
@@ -55,6 +59,10 @@ enum CollapsedChip: Equatable, Identifiable {
         case .calendar(let e): return "cal-\(e.title)-\(e.start.timeIntervalSince1970)"
         case .shelf(let count): return "shelf-\(count)"
         case .appSwitch(let name): return "app-\(name)"
+        case .timer(let t): return "timer-\(t.endDate.timeIntervalSince1970)"
+        case .systemStats(let s): return "stats-\(s.cpuPercent)-\(s.memoryPercent)"
+        case .battery(let b): return "battery-\(b.level)-\(b.isCharging)"
+        case .clock: return "clock"
         }
     }
 }
@@ -66,6 +74,11 @@ enum ExpandedActivity: Equatable, Identifiable {
     case activeApp(name: String)
     case volume(Int)
     case clock
+    case calendar(CalendarEvent)
+    case timer(ActiveTimer)
+    case systemStats(SystemStats)
+    case battery(BatteryStatus)
+    case shelf(count: Int, names: [String])
 
     var id: String {
         switch self {
@@ -74,6 +87,11 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .activeApp(let name): return "app-\(name)"
         case .volume(let level): return "vol-\(level)"
         case .clock: return "clock"
+        case .calendar(let e): return "cal-\(e.title)-\(e.start.timeIntervalSince1970)"
+        case .timer(let t): return "timer-\(t.endDate.timeIntervalSince1970)"
+        case .systemStats(let s): return "stats-\(s.cpuPercent)-\(s.memoryPercent)"
+        case .battery(let b): return "battery-\(b.level)-\(b.isCharging)"
+        case .shelf(let count, _): return "shelf-\(count)"
         }
     }
 }

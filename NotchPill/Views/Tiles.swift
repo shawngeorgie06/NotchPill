@@ -336,13 +336,24 @@ struct VolumeHUD: View {
 enum ExpandedActivityBuilder {
     static func activities(
         nowPlaying: NowPlaying?,
+        nextEvent: CalendarEvent?,
         appSwitchHint: String?,
         frontmostApp: String?,
         systemVolume: Int?,
+        timer: ActiveTimer?,
+        systemStats: SystemStats?,
+        battery: BatteryStatus?,
+        shelfCount: Int,
+        shelfNames: [String],
         showMedia: Bool,
         showActiveApp: Bool,
         showVolume: Bool,
-        showClock: Bool
+        showClock: Bool,
+        showCalendar: Bool,
+        showTimer: Bool,
+        showSystemStats: Bool,
+        showBattery: Bool,
+        showShelf: Bool
     ) -> [ExpandedActivity] {
         var items: [ExpandedActivity] = []
         if showMedia, let np = nowPlaying, !np.isEmpty { items.append(.media(np)) }
@@ -353,7 +364,12 @@ enum ExpandedActivityBuilder {
                 items.append(.activeApp(name: app))
             }
         }
+        if showCalendar, let event = nextEvent { items.append(.calendar(event)) }
+        if showTimer, let timer, timer.isActive { items.append(.timer(timer)) }
         if showVolume, let volume = systemVolume { items.append(.volume(volume)) }
+        if showSystemStats, let stats = systemStats { items.append(.systemStats(stats)) }
+        if showBattery, let battery { items.append(.battery(battery)) }
+        if showShelf, shelfCount > 0 { items.append(.shelf(count: shelfCount, names: shelfNames)) }
         if showClock { items.append(.clock) }
         return items
     }
@@ -363,7 +379,15 @@ struct ExpandedActivityCard: View {
     let activity: ExpandedActivity
     let appIcon: NSImage?
     let actions: NotchActions
-    var prefersWide: Bool = false
+    var onCancelTimer: () -> Void = {}
+    var readability: CGFloat = 1.0
+    var textScale: CGFloat = 1.0
+    var expandToFill: Bool = false
+
+    private func s(_ value: CGFloat) -> CGFloat { value * readability }
+    private func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .system(size: size * textScale, weight: weight)
+    }
 
     var body: some View {
         Group {
@@ -377,36 +401,50 @@ struct ExpandedActivityCard: View {
             case .volume(let level):
                 volumeCard(level)
             case .clock:
-                clockCard
+                LiveClockView(style: .expanded, textScale: textScale, readability: readability)
+            case .calendar(let event):
+                calendarCard(event)
+            case .timer(let timer):
+                timerCard(timer)
+            case .systemStats(let stats):
+                systemStatsCard(stats)
+            case .battery(let status):
+                batteryCard(status)
+            case .shelf(let count, let names):
+                shelfCard(count: count, names: names)
             }
         }
-        .frame(minWidth: prefersWide ? nil : 88, maxWidth: prefersWide ? .infinity : nil, alignment: .leading)
-        .layoutPriority(prefersWide ? 1 : 0)
+        .frame(
+            minWidth: expandToFill ? nil : s(88),
+            maxWidth: expandToFill ? .infinity : nil,
+            alignment: .leading
+        )
+        .layoutPriority(expandToFill ? 1 : 0)
     }
 
     private func mediaCard(_ np: NowPlaying) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: s(6)) {
+            HStack(spacing: s(8)) {
                 mediaArtwork(np)
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: s(1)) {
                     Text(np.title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(font(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
-                        .lineLimit(1)
+                        .lineLimit(expandToFill ? 2 : 1)
                     Text(np.artist)
-                        .font(.system(size: 12))
+                        .font(font(size: 12))
                         .foregroundStyle(.white.opacity(0.55))
                         .lineLimit(1)
                 }
-                if np.isPlaying { EqualizerBars() }
+                if np.isPlaying { EqualizerBars(scale: readability) }
             }
-            HStack(spacing: 14) {
+            HStack(spacing: s(14)) {
                 transportButton("backward.fill", action: actions.previous)
                 transportButton(np.isPlaying ? "pause.fill" : "play.fill", size: 16, action: actions.togglePlayPause)
                 transportButton("forward.fill", action: actions.next)
             }
             if np.hasProgress {
-                MediaProgressView(nowPlaying: np, style: .expanded)
+                MediaProgressView(nowPlaying: np, style: .expanded, readability: readability, textScale: textScale)
             }
         }
     }
@@ -423,47 +461,46 @@ struct ExpandedActivityCard: View {
                     Rectangle().fill(.white.opacity(0.08))
                     Image(systemName: "play.rectangle.fill")
                         .foregroundStyle(.white.opacity(0.45))
-                        .font(.system(size: 12))
+                        .font(.system(size: s(12)))
                 }
             }
         }
-        .frame(width: 32, height: 32)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .frame(width: s(32), height: s(32))
+        .clipShape(RoundedRectangle(cornerRadius: s(6), style: .continuous))
     }
 
     private func appCard(title: String, name: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: s(6)) {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
+                .font(font(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.45))
-            HStack(spacing: 6) {
+            HStack(spacing: s(6)) {
                 if let appIcon {
                     Image(nsImage: appIcon)
                         .resizable()
-                        .frame(width: 22, height: 22)
+                        .frame(width: s(22), height: s(22))
                 } else {
                     Image(systemName: "app.fill")
-                        .font(.system(size: 18))
+                        .font(.system(size: s(18)))
                         .foregroundStyle(.white.opacity(0.6))
                 }
                 Text(name)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(font(size: 14, weight: .semibold))
                     .foregroundStyle(.white)
-                    .lineLimit(2)
+                    .lineLimit(expandToFill ? 3 : 2)
                     .minimumScaleFactor(0.8)
             }
         }
     }
 
     private func volumeCard(_ level: Int) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Volume", systemImage: level == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .font(.system(size: 11, weight: .medium))
+        VStack(alignment: .leading, spacing: s(6)) {
+            Label("System Volume", systemImage: level == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .font(font(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.45))
             Text("\(level)%")
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .font(font(size: 20, weight: .semibold).monospacedDigit())
                 .foregroundStyle(.white)
-                .monospacedDigit()
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.15))
@@ -472,46 +509,120 @@ struct ExpandedActivityCard: View {
                         .frame(width: geo.size.width * CGFloat(level) / 100)
                 }
             }
-            .frame(height: 4)
+            .frame(height: s(4))
         }
-        .frame(width: 72)
+        .frame(minWidth: s(72), alignment: .leading)
     }
 
-    private var clockCard: some View {
+    private func calendarCard(_ event: CalendarEvent) -> some View {
+        VStack(alignment: .leading, spacing: s(4)) {
+            Label("Next event", systemImage: "calendar")
+                .font(font(size: 11, weight: .medium))
+                .foregroundStyle(.orange.opacity(0.85))
+            Text(event.title)
+                .font(font(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(expandToFill ? 3 : 2)
+            Text(relativeStart(for: event.start))
+                .font(font(size: 11))
+                .foregroundStyle(.white.opacity(0.45))
+        }
+        .frame(minWidth: s(110), alignment: .leading)
+    }
+
+    private func timerCard(_ timer: ActiveTimer) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            VStack(alignment: .leading, spacing: 4) {
-                Text(timeString(context.date))
-                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+            VStack(alignment: .leading, spacing: s(6)) {
+                Label(timer.label, systemImage: "timer")
+                    .font(font(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+                Text(StatusFormatting.countdown(timer.remaining(at: context.date)))
+                    .font(font(size: 22, weight: .semibold).monospacedDigit())
                     .foregroundStyle(.white)
-                    .monospacedDigit()
-                Text(dateString(context.date))
-                    .font(.system(size: 11, weight: .medium))
+                Button("Cancel", action: onCancelTimer)
+                    .font(font(size: 11, weight: .medium))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .frame(minWidth: s(88), alignment: .leading)
+        }
+    }
+
+    private func systemStatsCard(_ stats: SystemStats) -> some View {
+        VStack(alignment: .leading, spacing: s(6)) {
+            Label("System", systemImage: "gauge.with.dots.needle.67percent")
+                .font(font(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+            statLine(title: "CPU", value: stats.cpuPercent)
+            statLine(title: "RAM", value: stats.memoryPercent)
+        }
+        .frame(minWidth: s(88), alignment: .leading)
+    }
+
+    private func statLine(title: String, value: Int) -> some View {
+        HStack {
+            Text(title)
+                .font(font(size: 11))
+                .foregroundStyle(.white.opacity(0.45))
+            Spacer()
+            Text("\(value)%")
+                .font(font(size: 13, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.white)
+        }
+    }
+
+    private func batteryCard(_ status: BatteryStatus) -> some View {
+        VStack(alignment: .leading, spacing: s(6)) {
+            Label(status.isCharging ? "Charging" : "Battery", systemImage: batterySymbol(for: status))
+                .font(font(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+            Text("\(status.level)%")
+                .font(font(size: 22, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.white)
+        }
+        .frame(minWidth: s(72), alignment: .leading)
+    }
+
+    private func shelfCard(count: Int, names: [String]) -> some View {
+        VStack(alignment: .leading, spacing: s(4)) {
+            Label("Shelf", systemImage: "tray.full")
+                .font(font(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+            Text(count == 1 ? "1 file" : "\(count) files")
+                .font(font(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+            ForEach(names, id: \.self) { name in
+                Text(name)
+                    .font(font(size: 10))
                     .foregroundStyle(.white.opacity(0.45))
                     .lineLimit(1)
             }
-            .frame(width: 72, alignment: .leading)
+        }
+        .frame(minWidth: s(100), alignment: .leading)
+    }
+
+    private func batterySymbol(for status: BatteryStatus) -> String {
+        switch status.level {
+        case 0...10: return status.isCharging ? "battery.0.bolt" : "battery.0"
+        case 11...35: return status.isCharging ? "battery.25.bolt" : "battery.25"
+        case 36...65: return status.isCharging ? "battery.50.bolt" : "battery.50"
+        case 66...90: return status.isCharging ? "battery.75.bolt" : "battery.75"
+        default: return status.isCharging ? "battery.100.bolt" : "battery.100"
         }
     }
 
-    private func timeString(_ date: Date) -> String {
-        let df = DateFormatter()
-        df.timeStyle = .short
-        df.dateStyle = .none
-        return df.string(from: date)
-    }
-
-    private func dateString(_ date: Date) -> String {
-        let df = DateFormatter()
-        df.setLocalizedDateFormatFromTemplate("EEE MMM d")
-        return df.string(from: date)
+    private func relativeStart(for date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     private func transportButton(_ symbol: String, size: CGFloat = 14, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: size, weight: .medium))
+                .font(.system(size: s(size), weight: .medium))
                 .foregroundStyle(.white)
-                .frame(width: 18, height: 18)
+                .frame(width: s(18), height: s(18))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -527,16 +638,27 @@ enum CollapsedChipBuilder {
         nextEvent: CalendarEvent?,
         shelfCount: Int,
         appSwitchHint: String?,
+        timer: ActiveTimer?,
+        systemStats: SystemStats?,
+        battery: BatteryStatus?,
         showMedia: Bool,
         showCalendar: Bool,
         showShelf: Bool,
-        showAppSwitch: Bool
+        showAppSwitch: Bool,
+        showTimer: Bool,
+        showSystemStats: Bool,
+        showBattery: Bool,
+        showClock: Bool
     ) -> [CollapsedChip] {
         var chips: [CollapsedChip] = []
         if showAppSwitch, let app = appSwitchHint { chips.append(.appSwitch(app)) }
         if showMedia, let np = nowPlaying, !np.isEmpty { chips.append(.media(np)) }
+        if showTimer, let timer, timer.isActive { chips.append(.timer(timer)) }
         if showCalendar, let event = nextEvent { chips.append(.calendar(event)) }
         if showShelf, shelfCount > 0 { chips.append(.shelf(count: shelfCount)) }
+        if showSystemStats, let stats = systemStats { chips.append(.systemStats(stats)) }
+        if showBattery, let battery { chips.append(.battery(battery)) }
+        if showClock { chips.append(.clock) }
         return chips
     }
 }
@@ -544,46 +666,82 @@ enum CollapsedChipBuilder {
 /// Row of compact chips inside the collapsed pill (media + calendar + shelf, etc.).
 struct CollapsedIndicatorsRow: View {
     let chips: [CollapsedChip]
+    var readability: CGFloat = 1.0
+    var textScale: CGFloat = 1.0
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 8 * readability) {
+            if chips.count <= 2 { Spacer(minLength: 0) }
             ForEach(chips) { chip in
-                CollapsedChipView(chip: chip)
+                CollapsedChipView(chip: chip, readability: readability, textScale: textScale)
                 if chip.id != chips.last?.id {
                     divider
                 }
             }
+            if chips.count <= 2 { Spacer(minLength: 0) }
         }
-        .padding(.horizontal, 10)
-        .padding(.bottom, 5)
+        .padding(.horizontal, 10 * readability)
+        .padding(.bottom, 5 * readability)
     }
 
     private var divider: some View {
         Rectangle()
             .fill(Color.white.opacity(0.14))
-            .frame(width: 1, height: 14)
+            .frame(width: 1, height: 14 * readability)
     }
 }
 
 struct CollapsedChipView: View {
     let chip: CollapsedChip
+    var readability: CGFloat = 1.0
+    var textScale: CGFloat = 1.0
+
+    private func s(_ value: CGFloat) -> CGFloat { value * readability }
+    private func textSize(_ base: CGFloat) -> CGFloat { base * textScale }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 5) {
+        if case .clock = chip {
+            LiveClockView(style: .collapsed, textScale: textScale, readability: readability)
+        } else {
+            chipContent
+        }
+    }
+
+    private var chipContent: some View {
+        VStack(alignment: .leading, spacing: s(3)) {
+            HStack(spacing: s(5)) {
                 leading
-                Text(label)
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
-                    .foregroundStyle(.white)
+                labelView
                 if case .media(let np) = chip, np.isPlaying {
-                    EqualizerBars()
+                    EqualizerBars(scale: readability)
                 }
             }
             if case .media(let np) = chip, np.hasProgress {
-                MediaProgressView(nowPlaying: np, style: .collapsed)
+                MediaProgressView(nowPlaying: np, style: .collapsed, readability: readability, textScale: textScale)
             }
         }
+    }
+
+    @ViewBuilder private var labelView: some View {
+        if case .timer(let timer) = chip {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(StatusFormatting.countdown(timer.remaining(at: context.date)))
+                    .font(.system(size: textSize(11), weight: .medium))
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+        } else {
+            Text(label)
+                .font(.system(size: textSize(11), weight: .medium))
+                .lineLimit(chipsAllowTwoLines ? 2 : 1)
+                .foregroundStyle(.white)
+        }
+    }
+
+    private var chipsAllowTwoLines: Bool {
+        textScale >= 1.35
     }
 
     @ViewBuilder private var leading: some View {
@@ -593,25 +751,39 @@ struct CollapsedChipView: View {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 16, height: 16)
-                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                    .frame(width: s(16), height: s(16))
+                    .clipShape(RoundedRectangle(cornerRadius: s(3), style: .continuous))
             } else {
                 Image(systemName: "play.rectangle.fill")
-                    .font(.system(size: 10))
+                    .font(.system(size: s(10)))
                     .foregroundStyle(.white.opacity(0.7))
             }
         case .calendar:
             Image(systemName: "calendar")
-                .font(.system(size: 10))
+                .font(.system(size: s(10)))
                 .foregroundStyle(.orange)
         case .shelf:
             Image(systemName: "tray.full")
-                .font(.system(size: 10))
+                .font(.system(size: s(10)))
                 .foregroundStyle(.white.opacity(0.7))
         case .appSwitch:
             Image(systemName: "square.stack.3d.up.fill")
-                .font(.system(size: 10))
+                .font(.system(size: s(10)))
                 .foregroundStyle(.white.opacity(0.7))
+        case .timer:
+            Image(systemName: "timer")
+                .font(.system(size: s(10)))
+                .foregroundStyle(.yellow.opacity(0.85))
+        case .systemStats:
+            Image(systemName: "gauge.with.dots.needle.67percent")
+                .font(.system(size: s(10)))
+                .foregroundStyle(.white.opacity(0.7))
+        case .battery(let status):
+            Image(systemName: status.isCharging ? "battery.100.bolt" : "battery.100")
+                .font(.system(size: s(10)))
+                .foregroundStyle(status.level <= 20 ? .red : .green)
+        case .clock:
+            EmptyView()
         }
     }
 
@@ -621,6 +793,10 @@ struct CollapsedChipView: View {
         case .calendar(let event): return event.title
         case .shelf(let count): return count == 1 ? "1 file" : "\(count) files"
         case .appSwitch(let name): return name
+        case .timer: return ""
+        case .systemStats(let stats): return "CPU \(stats.cpuPercent)% · RAM \(stats.memoryPercent)%"
+        case .battery(let status): return "\(status.level)%"
+        case .clock: return ""
         }
     }
 }
@@ -653,9 +829,14 @@ struct MediaProgressView: View {
 
     let nowPlaying: NowPlaying
     var style: Style = .expanded
+    var readability: CGFloat = 1.0
+    var textScale: CGFloat = 1.0
+
+    private func s(_ value: CGFloat) -> CGFloat { value * readability }
+    private func textSize(_ base: CGFloat) -> CGFloat { base * textScale }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(.periodic(from: .now, by: 0.25)) { context in
             let elapsed = nowPlaying.interpolatedElapsed(at: context.date) ?? 0
             let duration = nowPlaying.duration ?? 0
             let fraction = duration > 0 ? min(max(elapsed / duration, 0), 1) : 0
@@ -669,9 +850,9 @@ struct MediaProgressView: View {
                             .frame(width: geo.size.width * fraction)
                     }
                 }
-                .frame(width: 72, height: 2)
+                .frame(width: s(72), height: s(2))
             case .expanded:
-                VStack(spacing: 4) {
+                VStack(spacing: s(4)) {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule().fill(.white.opacity(0.15))
@@ -680,13 +861,13 @@ struct MediaProgressView: View {
                                 .frame(width: geo.size.width * fraction)
                         }
                     }
-                    .frame(height: 4)
+                    .frame(height: s(4))
                     HStack {
                         Text(formatTime(elapsed))
                         Spacer()
                         Text(formatTime(duration))
                     }
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .font(.system(size: textSize(10), weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.45))
                     .monospacedDigit()
                 }
@@ -705,18 +886,29 @@ struct MediaProgressView: View {
 
 /// Tiny animated equalizer to signal live playback.
 struct EqualizerBars: View {
+    var scale: CGFloat = 1.0
     @State private var animating = false
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 2 * scale) {
             ForEach(0..<3, id: \.self) { i in
                 Capsule()
                     .fill(Color.green)
-                    .frame(width: 2, height: animating ? 10 : 4)
+                    .frame(width: 2 * scale, height: animating ? 10 * scale : 4 * scale)
                     .animation(.easeInOut(duration: 0.4).repeatForever().delay(Double(i) * 0.12),
                                value: animating)
             }
         }
-        .frame(height: 10)
+        .frame(height: 10 * scale)
         .onAppear { animating = true }
+    }
+}
+
+enum StatusFormatting {
+    static func countdown(_ interval: TimeInterval) -> String {
+        guard interval.isFinite, interval >= 0 else { return "0:00" }
+        let total = Int(interval.rounded(.up))
+        let minutes = total / 60
+        let seconds = total % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }

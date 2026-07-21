@@ -337,6 +337,7 @@
 		1A000000000000000000000E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -345,7 +346,7 @@
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_LSUIElement = NO;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "NotchPill uses Apple Events to read now-playing info and control playback in Music and Spotify.";
 				INFOPLIST_KEY_NSAccessibilityUsageDescription = "NotchPill listens for keyboard shortcuts while your cursor is over the notch.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "NotchPill shows your next upcoming event in the notch overlay.";
@@ -364,6 +365,7 @@
 		1A000000000000000000000F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -372,7 +374,7 @@
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_LSUIElement = NO;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "NotchPill uses Apple Events to read now-playing info and control playback in Music and Spotify.";
 				INFOPLIST_KEY_NSAccessibilityUsageDescription = "NotchPill listens for keyboard shortcuts while your cursor is over the notch.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "NotchPill shows your next upcoming event in the notch overlay.";

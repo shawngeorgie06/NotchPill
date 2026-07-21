@@ -77,26 +77,24 @@ struct NotchGeometry {
                       height: notchHeight)
     }
 
-    /// The window that hosts the overlay. Sized to fit the fully expanded pill,
-    /// centered horizontally on the notch, its top edge flush with the screen top.
-    var windowFrame: CGRect {
-        let renderWidth = Self.expandedWidth * Self.expandedScale
-        let renderHeight = Self.expandedHeight * Self.expandedScale
-        let width = max(renderWidth + Self.horizontalPadding * 2,
-                        notchRect.width + Self.horizontalPadding * 2)
-        let height = renderHeight + notchRect.height + Self.contentTopGap
-        let midX = notchRect.midX
-        return CGRect(x: midX - width / 2,
+    /// The window that hosts the overlay. Sized to fit the fully expanded pill when
+    /// expanded; shrinks to the visible collapsed pill when not.
+    func windowFrame(expanded: Bool, collapsedContentSize: CGSize, expandedContentSize: CGSize) -> CGRect {
+        if expanded {
+            let pad: CGFloat = 2
+            let width = expandedContentSize.width + pad * 2
+            let height = expandedContentSize.height + pad
+            return CGRect(x: notchRect.midX - width / 2,
+                          y: screen.frame.maxY - height,
+                          width: width,
+                          height: height)
+        }
+        let pad: CGFloat = 2
+        let width = collapsedContentSize.width + pad * 2
+        let height = collapsedContentSize.height + pad
+        return CGRect(x: notchRect.midX - width / 2,
                       y: screen.frame.maxY - height,
                       width: width,
                       height: height)
-    }
-
-    /// The collapsed notch rect expressed in the window's local coordinate space.
-    func notchRectInWindow(_ windowFrame: CGRect) -> CGRect {
-        CGRect(x: notchRect.minX - windowFrame.minX,
-               y: notchRect.minY - windowFrame.minY,
-               width: notchRect.width,
-               height: notchRect.height)
     }
 }

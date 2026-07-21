@@ -20,12 +20,11 @@ struct NotchMetrics: Equatable {
 
     var designContentSize: CGSize { CGSize(width: designExpandedWidth, height: designExpandedHeight) }
     var collapsedSize: CGSize { CGSize(width: notchWidth, height: notchHeight) }
-    var expandedSize: CGSize { CGSize(width: expandedWidth, height: notchHeight + topGap + expandedHeight) }
 
-    /// Collapsed pill size when showing multiple live chips below the notch.
+    /// Legacy chip-count estimate (tests). Prefer `NotchContentLayout.collapsedSize`.
     func collapsedPreviewSize(chipCount: Int) -> CGSize {
         guard chipCount > 0 else { return collapsedSize }
-        let rowHeight: CGFloat = 30
+        let rowHeight: CGFloat = 34
         let perChip: CGFloat = 108
         let width = min(expandedWidth, max(notchWidth + 24, 24 + CGFloat(chipCount) * perChip))
         return CGSize(width: width, height: notchHeight + rowHeight)

@@ -2,26 +2,24 @@ import AppKit
 
 /// Hosts the SwiftUI overlay and manages hover detection plus click-through.
 ///
-/// Only the "hot" region reacts to the pointer: the notch rectangle while
-/// collapsed, the full pill while expanded. Everywhere else `hitTest` returns
-/// nil so clicks pass through to the app underneath.
+/// While collapsed, the window ignores mouse events so clicks reach apps underneath
+/// (e.g. browser tabs). Hover is detected via screen-space polling instead.
+/// While expanded, only the pill body receives clicks for controls.
 final class NotchContainerView: NSView {
     var metrics: NotchMetrics {
         didSet { refreshTracking() }
     }
     var isExpandedProvider: () -> Bool = { false }
+    var collapsedContentSizeProvider: () -> CGSize = { .zero }
+    var expandedContentSizeProvider: () -> CGSize = { .zero }
     var onHotEntered: () -> Void = {}
     var onHotExited: () -> Void = {}
     var onSpacePressed: () -> Void = {}
-    /// Called when a valid file drag begins/ends hovering the drop area.
     var onDragTargetingChanged: (Bool) -> Void = { _ in }
-    /// Called with dropped file URLs.
     var onDropFiles: ([URL]) -> Void = { _ in }
 
     private var trackingArea: NSTrackingArea?
     private var isHoveringHot = false
-    /// Suppresses enter/exit callbacks while the tracking area is being rebuilt.
-    private var suppressTrackingCallbacks = false
 
     init(metrics: NotchMetrics) {
         self.metrics = metrics
@@ -33,42 +31,21 @@ final class NotchContainerView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
 
-    /// The physical notch cutout at the top of the window.
-    private var physicalNotchRect: CGRect {
-        let w = bounds.width
-        let h = bounds.height
-        let nw = metrics.notchWidth
-        return CGRect(x: (w - nw) / 2, y: h - metrics.notchHeight,
-                      width: nw, height: metrics.notchHeight)
-    }
-
-    /// True for the full menu-bar height at the top of the window — always click-through.
-    private func isMenuBarStrip(_ local: NSPoint) -> Bool {
-        local.y >= bounds.height - metrics.notchHeight
-    }
-
-    /// Hot rect in this view's (non-flipped, bottom-left origin) coordinates.
-    /// Excludes the menu-bar strip so status items stay clickable; only the pill
-    /// body and collapsed preview row below the notch receive pointer events.
+    /// Visible pill bounds in local coordinates (bottom-left origin).
     var hotRect: CGRect {
         let w = bounds.width
         let h = bounds.height
-        let nw = metrics.notchWidth
         if isExpandedProvider() {
-            let pw = min(metrics.expandedWidth, w)
-            return CGRect(x: (w - pw) / 2, y: 0, width: pw,
-                          height: max(0, h - metrics.notchHeight))
+            let size = expandedContentSizeProvider()
+            let pw = min(size.width, w)
+            // Full window height so the notch band counts as part of the pill.
+            return CGRect(x: (w - pw) / 2, y: 0, width: pw, height: h)
         }
-        // Collapsed: center notch cutout + preview chip row beneath it.
-        let notch = CGRect(x: (w - nw) / 2, y: h - metrics.notchHeight, width: nw, height: metrics.notchHeight)
-        let previewWidth = min(metrics.expandedWidth, max(nw + 24, metrics.collapsedPreviewSize(chipCount: 3).width))
-        let chipHeight = max(0, metrics.collapsedPreviewSize(chipCount: 1).height - metrics.notchHeight)
-        let chipRow = CGRect(x: (w - previewWidth) / 2, y: h - metrics.notchHeight - chipHeight,
-                             width: previewWidth, height: chipHeight)
-        return notch.union(chipRow)
+        let size = collapsedContentSizeProvider()
+        return CGRect(x: (w - size.width) / 2, y: h - size.height,
+                      width: size.width, height: size.height)
     }
 
-    /// Whether the pointer is currently inside the hot zone (notch or pill).
     func isMouseInHotZone() -> Bool {
         guard let window else { return false }
         let local = convert(window.mouseLocationOutsideOfEventStream, from: nil)
@@ -76,9 +53,10 @@ final class NotchContainerView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // Expanded only: accept clicks on the pill so controls work. Collapsed
+        // passes everything through via ignoresMouseEvents on the window.
+        guard isExpandedProvider() else { return nil }
         let local = convert(point, from: superview)
-        // Never intercept the menu bar strip — status items must stay clickable.
-        if isMenuBarStrip(local) { return nil }
         guard hotRect.contains(local) else { return nil }
         return super.hitTest(point)
     }
@@ -88,11 +66,7 @@ final class NotchContainerView: NSView {
         refreshTracking()
     }
 
-    /// Rebuilds tracking and re-syncs hover from the live pointer position.
-    /// Tracking-area teardown can spuriously fire `mouseExited` while the pointer
-    /// is still over the pill, so we derive hover from geometry instead.
     func refreshTracking() {
-        suppressTrackingCallbacks = true
         if let trackingArea { removeTrackingArea(trackingArea) }
         let area = NSTrackingArea(
             rect: bounds,
@@ -101,45 +75,23 @@ final class NotchContainerView: NSView {
             userInfo: nil)
         addTrackingArea(area)
         trackingArea = area
-        suppressTrackingCallbacks = false
-        syncHoverState()
-    }
-
-    private func syncHoverState() {
-        let inside = isMouseInHotZone()
-        if inside, !isHoveringHot {
-            isHoveringHot = true
-            onHotEntered()
-        } else if !inside, isHoveringHot {
-            isHoveringHot = false
-            onHotExited()
-        }
+        // Hover-driven expand/collapse is handled by HoverMonitor (screen coords).
+        // Do not sync hover callbacks here — window resizes would spuriously exit.
+        isHoveringHot = isMouseInHotZone()
     }
 
     override var acceptsFirstResponder: Bool { true }
-
-    override func mouseEntered(with event: NSEvent) { syncHoverState() }
-    override func mouseExited(with event: NSEvent) { syncHoverState() }
-    override func mouseMoved(with event: NSEvent) { syncHoverState() }
 
     override func keyDown(with event: NSEvent) {
         guard !event.isARepeat else { return }
         switch event.keyCode {
         case 49: onSpacePressed()
-        case 124: break // handled by HotZoneKeyMonitor local monitor
-        case 123: break
         default: super.keyDown(with: event)
         }
     }
 
-    // MARK: - File drag destination
-
-    /// The footprint that accepts drops: the fully-expanded pill area, so a drag
-    /// approaching the notch expands it and reveals the shelf.
     private var dropRect: CGRect {
-        let w = bounds.width
-        let pw = min(metrics.expandedWidth, w)
-        return CGRect(x: (w - pw) / 2, y: 0, width: pw, height: bounds.height)
+        hotRect
     }
 
     private func isFileDrag(_ sender: NSDraggingInfo) -> Bool {

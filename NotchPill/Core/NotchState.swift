@@ -24,6 +24,8 @@ final class NotchState: ObservableObject {
     // Tile data.
     @Published var nowPlaying: NowPlaying?
     @Published var nextEvent: CalendarEvent?
+    @Published private(set) var systemStats: SystemStats?
+    @Published private(set) var battery: BatteryStatus?
     /// Last known system output volume (0–100).
     @Published private(set) var systemVolume: Int?
     /// Transient volume HUD level (0–100), nil when hidden.
@@ -34,7 +36,7 @@ final class NotchState: ObservableObject {
 
     // Debounce/coalesce window for activity resolution. Two events arriving
     // inside this window resolve to a single published activity.
-    private let debounceInterval: TimeInterval = 0.18
+    private let debounceInterval: TimeInterval = 0.04
     private var resolveWorkItem: DispatchWorkItem?
     private var appSwitchRevertItem: DispatchWorkItem?
 
@@ -61,6 +63,14 @@ final class NotchState: ObservableObject {
     /// Updates the stored volume without flashing the HUD.
     func refreshSystemVolume(_ level: Int) {
         systemVolume = level
+    }
+
+    func updateSystemStats(_ stats: SystemStats?) {
+        systemStats = stats
+    }
+
+    func updateBattery(_ status: BatteryStatus?) {
+        battery = status
     }
 
     // MARK: - Event intake (debounced)

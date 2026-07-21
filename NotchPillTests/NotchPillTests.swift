@@ -7,12 +7,13 @@ import Combine
 
 @Suite("NotchMetrics")
 struct NotchMetricsTests {
-    @Test("collapsed size matches the notch, expanded adds the pill height")
+    @Test("collapsed size matches the notch, expanded design scales uniformly")
     func sizes() {
         let m = NotchMetrics(notchWidth: 180, notchHeight: 32,
                              designExpandedWidth: 640, designExpandedHeight: 190, scale: 1.0)
         #expect(m.collapsedSize == CGSize(width: 180, height: 32))
-        #expect(m.expandedSize == CGSize(width: 640, height: 222))
+        #expect(m.expandedWidth == 640)
+        #expect(m.expandedHeight == 190)
     }
 
     @Test("scale shrinks the rendered pill uniformly")
@@ -34,6 +35,53 @@ struct NotchMetricsTests {
     }
 }
 
+@Suite("NotchContentLayout")
+struct NotchContentLayoutTests {
+    @Test("fewer visible cards use a larger readability scale")
+    func readabilityScaling() {
+        let one = NotchContentLayout.readabilityScale(itemCount: 1)
+        let three = NotchContentLayout.readabilityScale(itemCount: 3)
+        let six = NotchContentLayout.readabilityScale(itemCount: 6)
+        #expect(one > three)
+        #expect(three > six)
+    }
+
+    @Test("text scale grows faster than layout when items are few")
+    func textScaling() {
+        let layoutScale: CGFloat = 1.8
+        let text = NotchContentLayout.textScale(forLayoutScale: layoutScale)
+        #expect(text > layoutScale)
+    }
+
+    @Test("expanded pill reshapes: fewer cards are larger, many cards compress")
+    func expandedSizing() {
+        let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                                   designExpandedWidth: 720, designExpandedHeight: 148, scale: 0.58)
+        let one = NotchContentLayout.expandedLayout(metrics: metrics, activities: [.clock])
+        let three: [ExpandedActivity] = [.clock, .volume(50), .battery(BatteryStatus(level: 80, isCharging: false))]
+        let many = NotchContentLayout.expandedLayout(metrics: metrics, activities: three)
+        #expect(one.size.width < many.size.width)
+        #expect(one.readability > many.readability)
+        #expect(one.size.height > many.size.height)
+    }
+
+    @Test("collapsed pill grows wider with more chips and shrinks readability")
+    func collapsedSizing() {
+        let metrics = NotchMetrics(notchWidth: 120, notchHeight: 32,
+                                   designExpandedWidth: 720, designExpandedHeight: 148, scale: 0.58)
+        let np = NowPlaying(title: "T", artist: "A", isPlaying: true, artwork: nil)
+        let one = NotchContentLayout.collapsedLayout(metrics: metrics, chips: [.media(np)])
+        let three: [CollapsedChip] = [
+            .media(np),
+            .calendar(CalendarEvent(title: "Meet", start: .now, location: nil, isAllDay: false)),
+            .timer(ActiveTimer(label: "Focus", endDate: Date().addingTimeInterval(300)))
+        ]
+        let many = NotchContentLayout.collapsedLayout(metrics: metrics, chips: three)
+        #expect(one.readability > many.readability)
+        #expect(many.size.width >= one.size.width)
+    }
+}
+
 @Suite("ExpandedActivityBuilder")
 struct ExpandedActivityBuilderTests {
     @Test("builds live status cards without calendar or shelf")
@@ -41,13 +89,24 @@ struct ExpandedActivityBuilderTests {
         let np = NowPlaying(title: "Song", artist: "Artist", isPlaying: true, artwork: nil)
         let items = ExpandedActivityBuilder.activities(
             nowPlaying: np,
+            nextEvent: nil,
             appSwitchHint: nil,
             frontmostApp: "Safari",
             systemVolume: 42,
+            timer: nil,
+            systemStats: nil,
+            battery: nil,
+            shelfCount: 0,
+            shelfNames: [],
             showMedia: true,
             showActiveApp: true,
             showVolume: true,
-            showClock: true
+            showClock: true,
+            showCalendar: false,
+            showTimer: false,
+            showSystemStats: false,
+            showBattery: false,
+            showShelf: false
         )
         #expect(items.contains(.media(np)))
         #expect(items.contains(.activeApp(name: "Safari")))
@@ -60,13 +119,24 @@ struct ExpandedActivityBuilderTests {
     func toggles() {
         let items = ExpandedActivityBuilder.activities(
             nowPlaying: nil,
+            nextEvent: nil,
             appSwitchHint: nil,
             frontmostApp: "Safari",
             systemVolume: 50,
+            timer: nil,
+            systemStats: nil,
+            battery: nil,
+            shelfCount: 0,
+            shelfNames: [],
             showMedia: false,
             showActiveApp: false,
             showVolume: false,
-            showClock: true
+            showClock: true,
+            showCalendar: false,
+            showTimer: false,
+            showSystemStats: false,
+            showBattery: false,
+            showShelf: false
         )
         #expect(items == [.clock])
     }
@@ -103,10 +173,17 @@ struct CollapsedChipBuilderTests {
             nextEvent: event,
             shelfCount: 2,
             appSwitchHint: nil,
+            timer: nil,
+            systemStats: nil,
+            battery: nil,
             showMedia: true,
             showCalendar: true,
             showShelf: true,
-            showAppSwitch: true
+            showAppSwitch: true,
+            showTimer: false,
+            showSystemStats: false,
+            showBattery: false,
+            showClock: false
         )
         #expect(chips.count == 3)
     }
