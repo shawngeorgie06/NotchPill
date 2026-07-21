@@ -9,9 +9,11 @@ struct NotchGeometry {
     /// Notch rectangle in global screen coordinates (matches the black cutout).
     let notchRect: CGRect
 
-    // Expanded overlay dimensions. The pill hangs below the notch, wider than it.
+    // Expanded overlay *design* dimensions (before shrink). The pill hangs below
+    // the notch, wider than it. `expandedScale` shrinks the whole pill uniformly.
     static let expandedWidth: CGFloat = 680
-    static let expandedHeight: CGFloat = 190
+    static let expandedHeight: CGFloat = 140
+    static let expandedScale: CGFloat = 0.65
     // Extra horizontal slack around the pill so the hosting window can host the
     // full expanded pill even when the notch is narrow.
     static let horizontalPadding: CGFloat = 40
@@ -66,9 +68,11 @@ struct NotchGeometry {
     /// The window that hosts the overlay. Sized to fit the fully expanded pill,
     /// centered horizontally on the notch, its top edge flush with the screen top.
     var windowFrame: CGRect {
-        let width = max(Self.expandedWidth + Self.horizontalPadding * 2,
+        let renderWidth = Self.expandedWidth * Self.expandedScale
+        let renderHeight = Self.expandedHeight * Self.expandedScale
+        let width = max(renderWidth + Self.horizontalPadding * 2,
                         notchRect.width + Self.horizontalPadding * 2)
-        let height = Self.expandedHeight + notchRect.height
+        let height = renderHeight + notchRect.height
         let midX = notchRect.midX
         return CGRect(x: midX - width / 2,
                       y: screen.frame.maxY - height,

@@ -5,9 +5,18 @@ import SwiftUI
 struct NotchMetrics: Equatable {
     var notchWidth: CGFloat
     var notchHeight: CGFloat
-    var expandedWidth: CGFloat
-    var expandedHeight: CGFloat
+    /// The content design canvas — tiles are laid out at this full size, then the
+    /// whole expanded pill is uniformly shrunk by `scale` for display.
+    var designExpandedWidth: CGFloat
+    var designExpandedHeight: CGFloat
+    /// Uniform shrink applied to the expanded pill and its content (1.0 = none).
+    var scale: CGFloat
 
+    /// Rendered (post-shrink) pill dimensions below the notch.
+    var expandedWidth: CGFloat { designExpandedWidth * scale }
+    var expandedHeight: CGFloat { designExpandedHeight * scale }
+
+    var designContentSize: CGSize { CGSize(width: designExpandedWidth, height: designExpandedHeight) }
     var collapsedSize: CGSize { CGSize(width: notchWidth, height: notchHeight) }
     var expandedSize: CGSize { CGSize(width: expandedWidth, height: notchHeight + expandedHeight) }
 }

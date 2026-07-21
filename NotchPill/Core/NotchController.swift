@@ -12,8 +12,9 @@ final class NotchController {
     private var window: NotchWindow?
     private var container: NotchContainerView?
     private var metrics = NotchMetrics(notchWidth: 200, notchHeight: 32,
-                                       expandedWidth: NotchGeometry.expandedWidth,
-                                       expandedHeight: NotchGeometry.expandedHeight)
+                                       designExpandedWidth: NotchGeometry.expandedWidth,
+                                       designExpandedHeight: NotchGeometry.expandedHeight,
+                                       scale: NotchGeometry.expandedScale)
 
     // Providers.
     private let nowPlaying = NowPlayingProvider()
@@ -77,8 +78,9 @@ final class NotchController {
 
         metrics = NotchMetrics(notchWidth: geometry.notchRect.width,
                                notchHeight: geometry.notchRect.height,
-                               expandedWidth: NotchGeometry.expandedWidth,
-                               expandedHeight: NotchGeometry.expandedHeight)
+                               designExpandedWidth: NotchGeometry.expandedWidth,
+                               designExpandedHeight: NotchGeometry.expandedHeight,
+                               scale: NotchGeometry.expandedScale)
 
         let frame = geometry.windowFrame
         let actions = NotchActions(

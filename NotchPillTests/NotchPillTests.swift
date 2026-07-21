@@ -10,9 +10,18 @@ struct NotchMetricsTests {
     @Test("collapsed size matches the notch, expanded adds the pill height")
     func sizes() {
         let m = NotchMetrics(notchWidth: 180, notchHeight: 32,
-                             expandedWidth: 640, expandedHeight: 190)
+                             designExpandedWidth: 640, designExpandedHeight: 190, scale: 1.0)
         #expect(m.collapsedSize == CGSize(width: 180, height: 32))
         #expect(m.expandedSize == CGSize(width: 640, height: 222))
+    }
+
+    @Test("scale shrinks the rendered pill uniformly")
+    func scaled() {
+        let m = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                             designExpandedWidth: 680, designExpandedHeight: 190, scale: 0.65)
+        #expect(m.expandedWidth == 442)          // 680 * 0.65
+        #expect(abs(m.expandedHeight - 123.5) < 0.001) // 190 * 0.65
+        #expect(m.designContentSize == CGSize(width: 680, height: 190))
     }
 }
 

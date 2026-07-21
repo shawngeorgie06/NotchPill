@@ -28,10 +28,19 @@ struct NotchRootView: View {
                 .frame(width: size.width, height: size.height)
                 .overlay(alignment: .top) {
                     if state.isExpanded {
-                        ExpandedView(state: state, shelf: shelf, actions: actions)
-                            .frame(width: size.width, height: size.height, alignment: .top)
-                            .padding(.top, metrics.notchHeight)
-                            .transition(.opacity)
+                        VStack(spacing: 0) {
+                            // Physical notch area, unscaled.
+                            Color.clear.frame(height: metrics.notchHeight)
+                            // Content is laid out at its full design size, then the
+                            // whole pill is shrunk uniformly by `metrics.scale`.
+                            ExpandedView(state: state, shelf: shelf, actions: actions)
+                                .frame(width: metrics.designContentSize.width,
+                                       height: metrics.designContentSize.height)
+                                .scaleEffect(metrics.scale, anchor: .top)
+                                .frame(width: metrics.expandedWidth, height: metrics.expandedHeight)
+                        }
+                        .frame(width: size.width, height: size.height, alignment: .top)
+                        .transition(.opacity)
                     }
                 }
 
