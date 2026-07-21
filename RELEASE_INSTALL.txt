@@ -3,6 +3,7 @@
 ═══════════════════════════════════════════════════════════════
 
 DO NOT double-click Install NotchPill.command — macOS blocks it.
+See also: INSTALL COMMANDS.txt (same commands, easy to copy)
 
 ───────────────────────────────────────────────────────────────
   PASTE THIS IN TERMINAL (works every time):

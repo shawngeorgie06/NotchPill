@@ -1,7 +1,11 @@
 #!/bin/bash
-# Install NotchPill from the folder next to this script.
-# If double-click is blocked, open Terminal and run:
-#   bash "/path/to/Install NotchPill.command"
+# ─────────────────────────────────────────────────────────────────────────────
+# If macOS blocked this file, open Terminal and paste ONE of these instead:
+#
+#   curl -fsSL https://raw.githubusercontent.com/shawngeorgie06/NotchPill/main/Scripts/install-notchpill.sh | bash
+#
+#   xattr -cr ~/Downloads/NotchPill-*-macOS-arm64 && bash ~/Downloads/NotchPill-*-macOS-arm64/Install\ NotchPill.command
+# ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"

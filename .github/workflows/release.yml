@@ -106,8 +106,9 @@ jobs:
           STAGE="dist/NotchPill-${VERSION}-macOS-arm64"
           mkdir -p "$STAGE"
           cp -R build/Build/Products/Release/NotchPill.app "$STAGE/"
-          cp RELEASE_INSTALL.txt "$STAGE/READ ME FIRST.txt"
-          cp "Scripts/Install NotchPill.command" "$STAGE/Install NotchPill.command"
+  cp RELEASE_INSTALL.txt "$STAGE/READ ME FIRST.txt"
+  cp INSTALL_COMMANDS.txt "$STAGE/INSTALL COMMANDS.txt"
+  cp "Scripts/Install NotchPill.command" "$STAGE/Install NotchPill.command"
           chmod +x "$STAGE/Install NotchPill.command"
           mkdir -p dist
           ditto -c -k --keepParent "$STAGE" "dist/NotchPill-${VERSION}-macOS-arm64.zip"

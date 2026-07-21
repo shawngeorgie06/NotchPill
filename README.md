@@ -41,34 +41,30 @@ now-playing controls, live status cards, and optional collapsed activity chips.
 
 ## Download
 
-**[Download the latest release](https://github.com/shawngeorgie06/NotchPill/releases/latest)** (macOS 14+, Apple Silicon). Step-by-step install: **[docs/INSTALL.md](docs/INSTALL.md)**.
+**[Download the latest release](https://github.com/shawngeorgie06/NotchPill/releases/latest)** (macOS 14+, Apple Silicon).
 
-1. Download and unzip `NotchPill-*-macOS-arm64.zip`.
-2. **Paste in Terminal** (clears Gatekeeper for the whole folder, then installs):
+macOS will show *"Apple could not verify NotchPill"* — **do not click Move to Trash.**  
+**Do not double-click** `Install NotchPill.command` — it is blocked before it can run. Use **Terminal**:
 
-   ```sh
-   xattr -cr ~/Downloads/NotchPill-*-macOS-arm64 && bash ~/Downloads/NotchPill-*-macOS-arm64/Install\ NotchPill.command
-   ```
+### Install — paste one of these
 
-   **Or** right-click `Install NotchPill.command` → **Open** → **Open** (do not double-click — macOS blocks that).
+**Option A — download + install in one step:**
 
-   If you see *"Apple could not verify"*, do **not** click Move to Trash — use one of the steps above.
-3. Look for the **notch icon in the menu bar** (top right). Enable **Launch at Login** there.
+```sh
+curl -fsSL https://raw.githubusercontent.com/shawngeorgie06/NotchPill/main/Scripts/install-notchpill.sh | bash
+```
 
-### First launch (Gatekeeper)
+**Option B — already unzipped the ZIP:**
 
-macOS may show **“Apple could not verify NotchPill.app”** for unsigned or older builds. **Do not click Move to Trash.** Instead:
+```sh
+xattr -cr ~/Downloads/NotchPill-*-macOS-arm64 && bash ~/Downloads/NotchPill-*-macOS-arm64/Install\ NotchPill.command
+```
 
-1. **Right-click** `NotchPill.app` → **Open** → click **Open** in the dialog, **or**
-2. In Terminal:
-   ```sh
-   xattr -cr ~/Downloads/NotchPill.app
-   open ~/Downloads/NotchPill.app
-   ```
+Then look for the **notch icon in the menu bar** (top right) and enable **Launch at Login**.
 
-Newer releases are **Developer ID signed and notarized** and open normally after download. Maintainer setup: [docs/NOTARIZATION.md](docs/NOTARIZATION.md).
+Full guide: **[docs/INSTALL.md](docs/INSTALL.md)** · Maintainer notarization: [docs/NOTARIZATION.md](docs/NOTARIZATION.md)
 
-3. In **System Settings → Privacy & Security → Accessibility**, enable **NotchPill** so hover keyboard shortcuts work while other apps are focused.
+In **System Settings → Privacy & Security → Accessibility**, enable **NotchPill** so hover keyboard shortcuts work while other apps are focused.
 
 New releases are built automatically when a `v*` tag is pushed (see `.github/workflows/release.yml`).
 

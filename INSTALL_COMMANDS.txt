@@ -1,0 +1,20 @@
+Copy-paste one of these commands in Terminal.app
+================================================
+
+OPTION A — Download and install (easiest)
+-----------------------------------------
+
+curl -fsSL https://raw.githubusercontent.com/shawngeorgie06/NotchPill/main/Scripts/install-notchpill.sh | bash
+
+
+OPTION B — Already unzipped this folder
+---------------------------------------
+
+xattr -cr ~/Downloads/NotchPill-*-macOS-arm64 && bash ~/Downloads/NotchPill-*-macOS-arm64/Install\ NotchPill.command
+
+(Change the path if you unzipped somewhere other than Downloads.)
+
+
+DO NOT double-click Install NotchPill.command — macOS blocks it.
+
+After install: look for the notch icon in the menu bar (top right).
