@@ -16,6 +16,8 @@ now-playing controls, battery, and your next calendar event.
   the private MediaRemote framework, falling back to AppleScript against a
   *running* Music or Spotify instance (Apple gated MediaRemote for third-party
   apps in macOS 15.4).
+- **Hover keyboard shortcuts** — while the pointer is over the notch: **Space**
+  play/pause, **← / →** previous/next track, **↑ / ↓** volume with a live HUD.
 - **Battery** — live percentage and charging state via IOKit.
 - **Next calendar event** — via EventKit (asks for Calendar access on first use).
 - **File shelf** — drag files onto the notch to stash them, then drag them back

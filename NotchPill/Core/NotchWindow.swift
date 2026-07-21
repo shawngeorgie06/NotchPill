@@ -10,6 +10,8 @@ final class NotchWindow: NSPanel {
                    defer: false)
 
         isFloatingPanel = true
+        // Above the menu bar so the pill renders in the notch; menu bar flanks stay
+        // clickable via hit-test pass-through in NotchContainerView.
         level = .statusBar + 1
         isOpaque = false
         backgroundColor = .clear

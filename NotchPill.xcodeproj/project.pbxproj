@@ -324,6 +324,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "NotchPill uses Apple Events to read now-playing info and control playback in Music and Spotify.";
+				INFOPLIST_KEY_NSAccessibilityUsageDescription = "NotchPill listens for keyboard shortcuts while your cursor is over the notch.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "NotchPill shows your next upcoming event in the notch overlay.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "NotchPill shows your next upcoming event in the notch overlay.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -349,6 +350,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "NotchPill uses Apple Events to read now-playing info and control playback in Music and Spotify.";
+				INFOPLIST_KEY_NSAccessibilityUsageDescription = "NotchPill listens for keyboard shortcuts while your cursor is over the notch.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "NotchPill shows your next upcoming event in the notch overlay.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "NotchPill shows your next upcoming event in the notch overlay.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";

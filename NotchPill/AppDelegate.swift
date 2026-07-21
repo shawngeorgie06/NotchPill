@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar.install()
         self.menuBar = menuBar
         controller = NotchController()
+        menuBar.hotZoneKeys = controller?.keyMonitor
         controller?.start()
     }
 

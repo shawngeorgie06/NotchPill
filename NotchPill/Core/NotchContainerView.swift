@@ -12,12 +12,16 @@ final class NotchContainerView: NSView {
     var isExpandedProvider: () -> Bool = { false }
     var onHotEntered: () -> Void = {}
     var onHotExited: () -> Void = {}
+    var onSpacePressed: () -> Void = {}
     /// Called when a valid file drag begins/ends hovering the drop area.
     var onDragTargetingChanged: (Bool) -> Void = { _ in }
     /// Called with dropped file URLs.
     var onDropFiles: ([URL]) -> Void = { _ in }
 
     private var trackingArea: NSTrackingArea?
+    private var isHoveringHot = false
+    /// Suppresses enter/exit callbacks while the tracking area is being rebuilt.
+    private var suppressTrackingCallbacks = false
 
     init(metrics: NotchMetrics) {
         self.metrics = metrics
@@ -29,24 +33,47 @@ final class NotchContainerView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
 
-    /// Hot rect in this view's (non-flipped, bottom-left origin) coordinates.
-    /// The notch/pill hug the top edge, centered horizontally.
-    private var hotRect: CGRect {
+    /// The physical notch cutout at the top of the window.
+    private var physicalNotchRect: CGRect {
         let w = bounds.width
         let h = bounds.height
+        let nw = metrics.notchWidth
+        return CGRect(x: (w - nw) / 2, y: h - metrics.notchHeight,
+                      width: nw, height: metrics.notchHeight)
+    }
+
+    /// Hot rect in this view's (non-flipped, bottom-left origin) coordinates.
+    /// The notch/pill hug the top edge, centered horizontally. Menu bar icons
+    /// flanking the notch are intentionally excluded so they stay clickable.
+    var hotRect: CGRect {
+        let w = bounds.width
+        let h = bounds.height
+        let notch = physicalNotchRect
         if isExpandedProvider() {
             let pw = min(metrics.expandedWidth, w)
-            return CGRect(x: (w - pw) / 2, y: 0, width: pw, height: h)
-        } else {
-            let nw = metrics.notchWidth
-            return CGRect(x: (w - nw) / 2, y: h - metrics.notchHeight,
-                          width: nw, height: metrics.notchHeight)
+            let pillBody = CGRect(x: (w - pw) / 2, y: 0, width: pw,
+                                  height: max(0, h - metrics.notchHeight))
+            return notch.union(pillBody)
         }
+        return notch
+    }
+
+    /// True when a point lies in the menu bar strip beside the notch cutout.
+    private func isMenuBarFlank(_ local: NSPoint) -> Bool {
+        local.y >= bounds.height - metrics.notchHeight && !physicalNotchRect.contains(local)
+    }
+
+    /// Whether the pointer is currently inside the hot zone (notch or pill).
+    func isMouseInHotZone() -> Bool {
+        guard let window else { return false }
+        let local = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        return hotRect.contains(local)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        // `point` is in the superview's coordinates; convert to ours.
         let local = convert(point, from: superview)
+        // Pass clicks through to menu bar icons on either side of the notch.
+        if isMenuBarFlank(local) { return nil }
         guard hotRect.contains(local) else { return nil }
         return super.hitTest(point)
     }
@@ -56,18 +83,49 @@ final class NotchContainerView: NSView {
         refreshTracking()
     }
 
-    /// Rebuilds the single tracking area to match the current hot rect.
+    /// Rebuilds tracking and re-syncs hover from the live pointer position.
+    /// Tracking-area teardown can spuriously fire `mouseExited` while the pointer
+    /// is still over the pill, so we derive hover from geometry instead.
     func refreshTracking() {
+        suppressTrackingCallbacks = true
         if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: hotRect,
-                                  options: [.activeAlways, .mouseEnteredAndExited],
-                                  owner: self, userInfo: nil)
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseEnteredAndExited, .mouseMoved, .inVisibleRect],
+            owner: self,
+            userInfo: nil)
         addTrackingArea(area)
         trackingArea = area
+        suppressTrackingCallbacks = false
+        syncHoverState()
     }
 
-    override func mouseEntered(with event: NSEvent) { onHotEntered() }
-    override func mouseExited(with event: NSEvent) { onHotExited() }
+    private func syncHoverState() {
+        let inside = isMouseInHotZone()
+        if inside, !isHoveringHot {
+            isHoveringHot = true
+            onHotEntered()
+        } else if !inside, isHoveringHot {
+            isHoveringHot = false
+            onHotExited()
+        }
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseEntered(with event: NSEvent) { syncHoverState() }
+    override func mouseExited(with event: NSEvent) { syncHoverState() }
+    override func mouseMoved(with event: NSEvent) { syncHoverState() }
+
+    override func keyDown(with event: NSEvent) {
+        guard !event.isARepeat else { return }
+        switch event.keyCode {
+        case 49: onSpacePressed()
+        case 124: break // handled by HotZoneKeyMonitor local monitor
+        case 123: break
+        default: super.keyDown(with: event)
+        }
+    }
 
     // MARK: - File drag destination
 

@@ -18,6 +18,8 @@ final class NotchState: ObservableObject {
     @Published var nowPlaying: NowPlaying?
     @Published var battery: BatteryInfo?
     @Published var nextEvent: CalendarEvent?
+    /// Transient volume HUD level (0–100), nil when hidden.
+    @Published private(set) var volumeLevel: Int? = nil
     // AirDrop is intentionally always nil: no reliable public API exists to read
     // live transfer state, and the spec requires omitting it rather than faking.
     @Published var airDrop: String? = nil
@@ -30,12 +32,22 @@ final class NotchState: ObservableObject {
 
     // Pending inputs the resolver reads when it fires.
     private var pendingAppSwitch: String?
+    private var volumeHideItem: DispatchWorkItem?
 
     // MARK: - Hover
 
     func setExpanded(_ expanded: Bool) {
         guard isExpanded != expanded else { return }
         isExpanded = expanded
+    }
+
+    /// Shows the volume HUD briefly after a keyboard adjustment.
+    func showVolume(_ level: Int) {
+        volumeLevel = level
+        volumeHideItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.volumeLevel = nil }
+        volumeHideItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: item)
     }
 
     // MARK: - Event intake (debounced)

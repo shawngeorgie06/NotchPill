@@ -247,6 +247,44 @@ struct ShelfChip: View {
     }
 }
 
+// MARK: - Volume HUD
+
+/// Brief overlay shown when volume is adjusted via keyboard shortcuts.
+struct VolumeHUD: View {
+    let level: Int
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: level == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(.white.opacity(0.18))
+                    Capsule()
+                        .fill(.white)
+                        .frame(width: geo.size.width * CGFloat(level) / 100)
+                }
+            }
+            .frame(height: 6)
+
+            Text("\(level)")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 30, alignment: .trailing)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.82), in: Capsule())
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+        .offset(y: 52)
+    }
+}
+
 // MARK: - Collapsed live-activity indicator
 
 /// Compact indicator that hangs just below the notch when there is activity.

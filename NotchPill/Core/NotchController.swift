@@ -19,6 +19,7 @@ final class NotchController {
 
     // Providers.
     private let nowPlaying = NowPlayingProvider()
+    private let volume = VolumeProvider()
     private let battery = BatteryProvider()
     private let calendar = CalendarProvider()
     private let airDrop = AirDropProvider()
@@ -27,10 +28,32 @@ final class NotchController {
     // Hover.
     private var collapseWorkItem: DispatchWorkItem?
     private let collapseGrace: TimeInterval = 0.5
+    private let hotZoneKeys = HotZoneKeyMonitor()
+    private let hoverMonitor = HoverMonitor()
+    var keyMonitor: HotZoneKeyMonitor { hotZoneKeys }
+
+    /// Screen-space hover targets derived from NotchGeometry (not view layout).
+    private var collapsedHotZone: CGRect = .zero
+    private var expandedHotZone: CGRect = .zero
 
     private var cancellables = Set<AnyCancellable>()
 
     func start() {
+        hotZoneKeys.onTogglePlayPause = { [weak self] in self?.nowPlaying.togglePlayPause() }
+        hotZoneKeys.onNext = { [weak self] in self?.nowPlaying.next() }
+        hotZoneKeys.onPrevious = { [weak self] in self?.nowPlaying.previous() }
+        hotZoneKeys.onVolumeUp = { [weak self] in self?.volume.volumeUp() }
+        hotZoneKeys.onVolumeDown = { [weak self] in self?.volume.volumeDown() }
+        hotZoneKeys.start()
+
+        hoverMonitor.onEnter = { [weak self] in self?.pointerEnteredHot() }
+        hoverMonitor.onExit = { [weak self] in self?.pointerExitedHot() }
+        hoverMonitor.onTick = { [weak self] inside in
+            self?.hotZoneKeys.updatePointerInHotZone(inside)
+        }
+        hoverMonitor.hotZoneScreenRect = { [weak self] in self?.hotZoneScreenRect() ?? .zero }
+        hoverMonitor.start()
+
         wireProviders()
         rebuildForCurrentDisplays()
 
@@ -47,6 +70,8 @@ final class NotchController {
 
     func stop() {
         NotificationCenter.default.removeObserver(self)
+        hoverMonitor.stop()
+        hotZoneKeys.stop()
         nowPlaying.stop(); battery.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
         window?.orderOut(nil)
     }
@@ -61,6 +86,7 @@ final class NotchController {
         appSwitch.onSwitch = { [weak self] name in self?.state.notifyAppSwitched(name) }
 
         nowPlaying.start(); battery.start(); calendar.start(); airDrop.start(); appSwitch.start()
+        volume.onVolumeChanged = { [weak self] level in self?.state.showVolume(level) }
     }
 
     // MARK: - Display handling
@@ -85,6 +111,7 @@ final class NotchController {
                                topGap: NotchGeometry.contentTopGap)
 
         let frame = geometry.windowFrame
+        updateHotZones(geometry: geometry, windowFrame: frame)
         let actions = NotchActions(
             togglePlayPause: { [weak self] in self?.nowPlaying.togglePlayPause() },
             next: { [weak self] in self?.nowPlaying.next() },
@@ -98,6 +125,7 @@ final class NotchController {
             container.isExpandedProvider = { [weak self] in self?.state.isExpanded ?? false }
             container.onHotEntered = { [weak self] in self?.pointerEnteredHot() }
             container.onHotExited = { [weak self] in self?.pointerExitedHot() }
+            container.onSpacePressed = { [weak self] in self?.nowPlaying.togglePlayPause() }
             container.onDropFiles = { [weak self] urls in self?.shelf.add(urls: urls) }
             container.onDragTargetingChanged = { [weak self] targeting in
                 guard let self else { return }
@@ -145,9 +173,20 @@ final class NotchController {
         collapseWorkItem = nil
         if Self.logHover { print("HOVER enter @\(String(format: "%.3f", Date().timeIntervalSince1970)) -> expand") }
         state.setExpanded(true)
+        hotZoneKeys.setActive(true)
+        hotZoneKeys.updatePointerInHotZone(true)
+        // Become key on hover so Space reaches us without a click. Activating
+        // briefly is required for the local key monitor when another app is front.
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+        window?.makeFirstResponder(container)
     }
 
     private func pointerExitedHot() {
+        hotZoneKeys.setActive(false)
+        hotZoneKeys.updatePointerInHotZone(false)
+        window?.makeFirstResponder(nil)
+        window?.resignKey()
         collapseWorkItem?.cancel()
         if Self.logHover { print("HOVER exit -> collapse in \(collapseGrace)s") }
         let item = DispatchWorkItem { [weak self] in
@@ -156,5 +195,32 @@ final class NotchController {
         }
         collapseWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + collapseGrace, execute: item)
+    }
+
+    /// Hot zone in screen coordinates for the hover poller.
+    private func hotZoneScreenRect() -> CGRect {
+        state.isExpanded ? expandedHotZone : collapsedHotZone
+    }
+
+    private func updateHotZones(geometry: NotchGeometry, windowFrame: CGRect) {
+        // Slightly inflate the notch target so hover is easy to hit.
+        collapsedHotZone = geometry.notchRect.insetBy(dx: -10, dy: -6)
+
+        let notchInWindow = geometry.notchRectInWindow(windowFrame)
+        let pillWidth = min(NotchGeometry.expandedWidth * NotchGeometry.expandedScale, windowFrame.width)
+        let pillBody = CGRect(
+            x: (windowFrame.width - pillWidth) / 2,
+            y: 0,
+            width: pillWidth,
+            height: max(0, windowFrame.height - geometry.notchRect.height))
+        let local = notchInWindow.union(pillBody)
+        expandedHotZone = CGRect(
+            x: windowFrame.minX + local.minX,
+            y: windowFrame.minY + local.minY,
+            width: local.width,
+            height: local.height)
+        if Self.logHover {
+            print("HOTZONE collapsed=\(collapsedHotZone) expanded=\(expandedHotZone)")
+        }
     }
 }

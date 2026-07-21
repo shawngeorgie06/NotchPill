@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 
 /// A menu-bar status item giving the (otherwise chrome-less) accessory app a way
 /// to quit, toggle tiles, and control launch-at-login.
@@ -6,16 +7,28 @@ import AppKit
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let settings = AppSettings.shared
+    var hotZoneKeys: HotZoneKeyMonitor?
 
     func install() {
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled",
+            button.image = NSImage(systemSymbolName: "capsule.fill",
                                    accessibilityDescription: "NotchPill")
             button.image?.isTemplate = true
+            button.title = " NotchPill"
+            button.imagePosition = .imageLeading
+            button.action = #selector(showMenu(_:))
+            button.target = self
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
+    }
+
+    @objc private func showMenu(_ sender: NSStatusBarButton) {
+        statusItem.menu?.popUp(positioning: nil,
+                               at: NSPoint(x: 0, y: sender.bounds.height + 4),
+                               in: sender)
     }
 
     // Rebuild the menu each time it opens so checkmarks reflect current state.
@@ -46,6 +59,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
+        if hotZoneKeys?.isAccessibilityGranted != true {
+            let access = NSMenuItem(
+                title: "Enable Keyboard Shortcuts…",
+                action: #selector(openAccessibilitySettings),
+                keyEquivalent: "")
+            access.target = self
+            menu.addItem(access)
+            menu.addItem(.separator())
+        }
+
         let quit = NSMenuItem(title: "Quit NotchPill", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
@@ -65,6 +88,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    @objc private func openAccessibilitySettings() {
+        HotZoneKeyMonitor.openAccessibilitySettings()
     }
 
     /// Boxes a closure so it can ride on `representedObject`.

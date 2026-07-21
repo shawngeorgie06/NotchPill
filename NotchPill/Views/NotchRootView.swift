@@ -45,6 +45,12 @@ struct NotchRootView: View {
                         .transition(.opacity)
                     }
                 }
+                .overlay {
+                    if let level = state.volumeLevel {
+                        VolumeHUD(level: level)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
+                }
 
             // Collapsed live activity is opt-in; by default the notch stays clean
             // and everything is revealed on hover.
@@ -61,6 +67,7 @@ struct NotchRootView: View {
         .animation(expandAnimation, value: state.isExpanded)
         // Content changes crossfade rather than pop.
         .animation(contentAnimation, value: state.activity)
+        .animation(contentAnimation, value: state.volumeLevel)
     }
 }
 
