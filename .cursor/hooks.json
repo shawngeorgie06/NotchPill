@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "command": ".cursor/hooks/notchpill-dev-ready-stop.sh",
+        "timeout": 10
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": ".cursor/hooks/notchpill-dev-ready-subagent-stop.sh",
+        "timeout": 10
+      }
+    ]
+  }
+}
