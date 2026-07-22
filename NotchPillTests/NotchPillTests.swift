@@ -3,6 +3,28 @@ import Foundation
 import Combine
 @testable import NotchPill
 
+// MARK: - Process capture (artwork deadlock regression)
+
+@Suite("ProcessRunner")
+struct ProcessRunnerTests {
+    @Test("captures output larger than the pipe buffer without deadlocking")
+    func largeOutput() {
+        // ~200 KB, far exceeding the ~64 KB pipe buffer. The old pattern
+        // (waitUntilExit before draining) would hang here — the exact bug that
+        // froze the now-playing stream on artwork fetch.
+        let byteCount = 200_000
+        let data = ProcessRunner.capture("/bin/sh", ["-c", "head -c \(byteCount) /dev/zero | base64"])
+        #expect(data != nil)
+        // base64 of 200 KB is ~270 KB; just assert we got well past the buffer.
+        #expect((data?.count ?? 0) > 100_000)
+    }
+
+    @Test("returns nil on non-zero exit")
+    func failureExit() {
+        #expect(ProcessRunner.capture("/bin/sh", ["-c", "exit 3"]) == nil)
+    }
+}
+
 // MARK: - Update version comparison
 
 @Suite("UpdateChecker version compare")

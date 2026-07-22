@@ -15,8 +15,12 @@ final class MediaRemoteBridge {
     private var cachedArtwork: NSImage?
     private var cachedArtworkKey: String?
     private var cachedArtworkTrackKey: String?
-    private var artworkFetchPending = false
     private let workQueue = DispatchQueue(label: "notchpill.mediaremote.bridge")
+    /// Artwork fetches run here, NOT on `workQueue`, so a slow `get` can never
+    /// stall the stream reader that shares `workQueue`.
+    private let artworkQueue = DispatchQueue(label: "notchpill.mediaremote.artwork")
+    /// Track we're currently fetching artwork for (owned by `artworkQueue`).
+    private var artworkInFlightKey: String?
 
     private static let logMedia = ProcessInfo.processInfo.environment["NOTCHPILL_LOG_NOWPLAYING"] == "1"
 
@@ -81,6 +85,7 @@ final class MediaRemoteBridge {
         cachedArtwork = nil
         cachedArtworkKey = nil
         cachedArtworkTrackKey = nil
+        artworkQueue.async { [weak self] in self?.artworkInFlightKey = nil }
     }
 
     @discardableResult
@@ -137,8 +142,10 @@ final class MediaRemoteBridge {
         }
 
         let np = parseNowPlaying(accumulatedPayload)
-        if np?.artwork == nil, np != nil {
-            fetchArtworkOnce()
+        // Stream diffs omit artwork on a track change; fetch it (with retry) off
+        // the stream queue so the title keeps flowing while art loads.
+        if let np, np.artwork == nil {
+            requestArtwork(forTrackKey: "\(np.title)\u{0}\(np.artist)")
         }
         DispatchQueue.main.async { [weak self] in
             if Self.logMedia, let np {
@@ -241,26 +248,43 @@ final class MediaRemoteBridge {
         return image
     }
 
-    /// Artwork often arrives after title/elapsed in stream diffs; one `get` fills it in.
-    private func fetchArtworkOnce() {
-        guard !artworkFetchPending else { return }
-        artworkFetchPending = true
-        workQueue.async { [weak self] in
-            defer { self?.artworkFetchPending = false }
-            guard let self, let paths = self.bundledPaths() else { return }
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-            process.arguments = [paths.script.path, paths.framework.path, "get"]
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = Pipe()
-            guard (try? process.run()) != nil else { return }
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let np = self.parseNowPlaying(payload), np.artwork != nil else { return }
-            DispatchQueue.main.async { self.onUpdate?(np) }
+    /// Artwork arrives via a separate `get` (stream diffs omit it on track change).
+    /// The player often hasn't populated the new art the instant the title flips,
+    /// so retry a few times until it appears — or until the track changes again.
+    private func requestArtwork(forTrackKey trackKey: String) {
+        artworkQueue.async { [weak self] in
+            guard let self else { return }
+            guard self.artworkInFlightKey != trackKey else { return } // already fetching this track
+            self.artworkInFlightKey = trackKey
+            self.fetchArtwork(forTrackKey: trackKey, attempt: 0)
+        }
+    }
+
+    /// Runs on `artworkQueue`. Uses the deadlock-safe `ProcessRunner` (the old code
+    /// waited on the process before draining a >64 KB artwork pipe, which hung the
+    /// shared stream queue after the first track change).
+    private func fetchArtwork(forTrackKey trackKey: String, attempt: Int) {
+        guard artworkInFlightKey == trackKey else { return } // superseded by a newer track
+        guard let paths = bundledPaths() else { artworkInFlightKey = nil; return }
+
+        let maxAttempts = 6
+        if let data = ProcessRunner.capture("/usr/bin/perl",
+                                            [paths.script.path, paths.framework.path, "get"]),
+           let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let np = parseNowPlaying(payload),
+           np.artwork != nil,
+           "\(np.title)\u{0}\(np.artist)" == trackKey {
+            artworkInFlightKey = nil
+            DispatchQueue.main.async { [weak self] in self?.onUpdate?(np) }
+            return
+        }
+
+        if attempt + 1 < maxAttempts {
+            artworkQueue.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+                self?.fetchArtwork(forTrackKey: trackKey, attempt: attempt + 1)
+            }
+        } else {
+            artworkInFlightKey = nil
         }
     }
 
