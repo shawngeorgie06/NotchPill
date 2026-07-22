@@ -74,6 +74,9 @@ final class AppSettings: ObservableObject {
     @Published var devReadyDuration: Double {
         didSet { defaults.set(devReadyDuration, forKey: Keys.devReadyDuration) }
     }
+    @Published var autoCheckUpdates: Bool {
+        didSet { defaults.set(autoCheckUpdates, forKey: Keys.autoCheckUpdates) }
+    }
 
     @Published var launchAtLogin: Bool = (SMAppService.mainApp.status == .enabled)
 
@@ -98,6 +101,7 @@ final class AppSettings: ObservableObject {
         static let showExpandedShelf = "showExpandedShelf"
         static let showDevReadyPings = "showDevReadyPings"
         static let devReadyDuration = "devReadyDuration"
+        static let autoCheckUpdates = "autoCheckUpdates"
     }
 
     private init() {
@@ -124,6 +128,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedShelf: false,
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 8.0,
+            Keys.autoCheckUpdates: true,
         ])
 
         showCollapsedActivity = defaults.bool(forKey: Keys.showCollapsedActivity)
@@ -147,6 +152,7 @@ final class AppSettings: ObservableObject {
         showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
         let storedDuration = defaults.double(forKey: Keys.devReadyDuration)
         devReadyDuration = storedDuration > 0 ? storedDuration : 8.0
+        autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -185,6 +191,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedShelf: false,
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 8.0,
+            Keys.autoCheckUpdates: true,
         ]
         defaultValues.forEach { defaults.set($0.value, forKey: $0.key) }
         showCollapsedActivity = false
@@ -207,5 +214,6 @@ final class AppSettings: ObservableObject {
         showExpandedShelf = false
         showDevReadyPings = true
         devReadyDuration = 8.0
+        autoCheckUpdates = true
     }
 }

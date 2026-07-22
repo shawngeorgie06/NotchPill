@@ -23,6 +23,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar.onTestMultipleDevReady = { [weak controller] in controller?.testMultipleDevReadyPings() }
         controller?.start()
 
+        // Check GitHub for a newer release so the menu bar can offer an in-app update.
+        UpdateChecker.shared.onUpdateFound = { [weak self] _ in
+            // Rebuilding isn't needed — the menu reads live state when opened —
+            // but nudge the icon so a fresh update is noticeable.
+            self?.menuBar?.flagUpdateAvailable()
+        }
+        UpdateChecker.shared.start()
+
         // First launch only: show settings once so new installs know where to configure.
         if !UserDefaults.standard.bool(forKey: "didCompleteFirstLaunch") {
             UserDefaults.standard.set(true, forKey: "didCompleteFirstLaunch")

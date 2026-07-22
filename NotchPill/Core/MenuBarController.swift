@@ -27,7 +27,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         statusItem.menu = menu
     }
 
+    /// Tint the menu-bar icon so a freshly discovered update is noticeable.
+    func flagUpdateAvailable() {
+        statusItem.button?.contentTintColor = .controlAccentColor
+        statusItem.button?.toolTip = "NotchPill — update available"
+    }
+
     @objc private func showMenu(_ sender: NSStatusBarButton) {
+        // Clear the update tint once the user opens the menu (where they'll see it).
+        sender.contentTintColor = nil
         statusItem.menu?.popUp(positioning: nil,
                                at: NSPoint(x: 0, y: sender.bounds.height + 4),
                                in: sender)
@@ -45,6 +53,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
+
+        // Surface an available update prominently at the top.
+        if let update = UpdateChecker.shared.available {
+            let item = NSMenuItem(title: "Update to \(update.version)…",
+                                  action: #selector(installUpdate), keyEquivalent: "")
+            item.target = self
+            item.attributedTitle = NSAttributedString(
+                string: "↑ Update to \(update.version)",
+                attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+                             .foregroundColor: NSColor.controlAccentColor]
+            )
+            menu.addItem(item)
+            menu.addItem(.separator())
+        }
 
         addToggle(to: menu, title: "Next Event", isOn: settings.showCalendar) { [weak self] in
             self?.settings.showCalendar.toggle()
@@ -64,6 +86,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let about = NSMenuItem(title: "About NotchPill", action: #selector(showAbout), keyEquivalent: "")
         about.target = self
         menu.addItem(about)
+
+        let checkUpdates = NSMenuItem(title: updateCheckTitle(),
+                                      action: #selector(checkForUpdates), keyEquivalent: "")
+        checkUpdates.target = self
+        checkUpdates.isEnabled = !UpdateChecker.shared.isChecking
+        menu.addItem(checkUpdates)
+        addToggle(to: menu, title: "Check for Updates Automatically", isOn: settings.autoCheckUpdates) { [weak self] in
+            self?.settings.autoCheckUpdates.toggle()
+        }
         menu.addItem(.separator())
         addToggle(to: menu, title: "Launch at Login", isOn: settings.launchAtLogin) { [weak self] in
             guard let self else { return }
@@ -133,6 +164,43 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    private func updateCheckTitle() -> String {
+        if UpdateChecker.shared.isChecking { return "Checking for Updates…" }
+        if UpdateChecker.shared.available != nil { return "Install Available Update…" }
+        return "Check for Updates…"
+    }
+
+    @objc private func checkForUpdates() {
+        if let update = UpdateChecker.shared.available {
+            UpdateInstaller.install(update)
+        } else {
+            UpdateChecker.shared.check(force: true)
+            // Report the outcome shortly after the check resolves.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.reportUpdateCheckResult()
+            }
+        }
+    }
+
+    @objc private func installUpdate() {
+        guard let update = UpdateChecker.shared.available else { return }
+        UpdateInstaller.install(update)
+    }
+
+    private func reportUpdateCheckResult() {
+        guard UpdateChecker.shared.available == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "You're up to date"
+        alert.informativeText = "NotchPill \(UpdateChecker.shared.currentVersion) is the latest version."
+        if let err = UpdateChecker.shared.lastError {
+            alert.messageText = "Couldn't check for updates"
+            alert.informativeText = err
+        }
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     @objc private func openAccessibilitySettings() {

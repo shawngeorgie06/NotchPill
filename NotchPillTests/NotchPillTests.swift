@@ -3,6 +3,22 @@ import Foundation
 import Combine
 @testable import NotchPill
 
+// MARK: - Update version comparison
+
+@Suite("UpdateChecker version compare")
+struct UpdateVersionTests {
+    @Test("newer versions are detected, equal/older are not")
+    func ordering() {
+        #expect(UpdateChecker.isNewer("1.2.0", than: "1.1.9"))
+        #expect(UpdateChecker.isNewer("1.1.10", than: "1.1.9"))   // numeric, not lexical
+        #expect(UpdateChecker.isNewer("2.0.0", than: "1.9.9"))
+        #expect(!UpdateChecker.isNewer("1.1.9", than: "1.1.9"))   // equal
+        #expect(!UpdateChecker.isNewer("1.1.8", than: "1.1.9"))   // older
+        #expect(UpdateChecker.isNewer("1.1.9", than: "1.1"))      // more components
+        #expect(!UpdateChecker.isNewer("1.1", than: "1.1.0"))     // equal padded
+    }
+}
+
 // MARK: - Geometry / metrics math (hardware-independent)
 
 @Suite("NotchMetrics")
