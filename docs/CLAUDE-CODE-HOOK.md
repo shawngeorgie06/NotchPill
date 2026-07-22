@@ -51,8 +51,11 @@ so the new hooks take effect in the current session.
 
 1. Make sure **NotchPill is running** and **Dev Ready Pings** is on in Settings.
 2. Switch to another app/Space.
-3. Ask Claude Code to do something small; when it finishes, the notch peeks with
-   **"Claude Code finished."**
+3. Ask Claude Code to do something small; when it finishes, the notch peeks
+   labelled with the **project folder name** (e.g. **NotchPill**), a
+   `claude-code` badge, the terminal app, and `finished · <branch>`. Multiple
+   sessions finishing together stack into one "N agents ready" list, so you can
+   tell which terminal/project just completed.
 
 Manual test (no Claude Code needed):
 
