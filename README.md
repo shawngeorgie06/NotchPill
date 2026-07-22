@@ -139,6 +139,10 @@ You can also use **Settings → Dev Ready Pings → Test Ping** or **Test Multip
 
 Arguments: `title`, optional `subtitle`, optional `source` (app), optional `bundle id`, optional `agent` (e.g. Composer, claude-code). Multiple agents finishing within ~120ms stack in one peek; tap a row to jump to that app.
 
+**Claude Code** — add a `Stop`/`SubagentStop` hook so Claude Code peeks the notch
+when it finishes. See **[docs/CLAUDE-CODE-HOOK.md](docs/CLAUDE-CODE-HOOK.md)**
+(uses `Scripts/claude-code-notify.sh`).
+
 **Cursor / agent hook** — add to the end of a task script or shell alias:
 
 ```sh

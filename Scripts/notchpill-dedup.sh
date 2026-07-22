@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Shared dedup helpers for NotchPill notify scripts.
 NOTCHPILL_STATE_DIR="${HOME}/.notchpill"
-NOTCHPILL_DEDUP_SECONDS="${NOTCHPILL_DEDUP_SECONDS:-12}"
+# Window in which an identical title+subtitle is treated as a duplicate. Kept
+# short so it only swallows a true double-fire of the SAME completion (e.g.
+# Cursor's stop + afterAgentResponse firing together) without suppressing two
+# genuinely separate completions a few seconds apart.
+NOTCHPILL_DEDUP_SECONDS="${NOTCHPILL_DEDUP_SECONDS:-4}"
 
 notchpill_fingerprint() {
   printf '%s|%s' "${1:-}" "${2:-}"
