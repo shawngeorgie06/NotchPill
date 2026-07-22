@@ -17,6 +17,7 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,6 +39,7 @@ jobs:
         run: ./Scripts/setup-vendor.sh
 
       - name: Import code signing certificate
+        timeout-minutes: 5
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -56,16 +58,21 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychain -d user | tr -d '"')
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           # A self-signed cert must be trusted for code signing before codesign
-          # will find it as a valid identity (Developer ID certs are already
-          # trusted via Apple's chain, so this is a harmless no-op for them).
+          # will find it as a valid identity. Trust it in the ADMIN domain via
+          # sudo (the runner has passwordless sudo) — the user-domain form prompts
+          # interactively and hangs headless CI. For a real Developer ID cert this
+          # is a harmless extra anchor since Apple's chain already trusts it.
           openssl pkcs12 -in "$RUNNER_TEMP/certificate.p12" -clcerts -nokeys \
             -passin pass:"$APPLE_CERTIFICATE_PASSWORD" -out "$RUNNER_TEMP/cert.pem" 2>/dev/null || true
           if [[ -s "$RUNNER_TEMP/cert.pem" ]]; then
-            security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN_PATH" "$RUNNER_TEMP/cert.pem" 2>/dev/null || true
+            sudo -n security add-trusted-cert -d -r trustRoot -p codeSign \
+              -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem" \
+              || echo "warning: could not add trust anchor (continuing)"
           fi
           security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
 
       - name: Build NotchPill (Release)
+        timeout-minutes: 25
         env:
           NOTCHPILL_SIGN_IDENTITY: ${{ secrets.NOTCHPILL_SIGN_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -98,6 +105,7 @@ jobs:
             build
 
       - name: Sign and notarize
+        timeout-minutes: 15
         env:
           NOTCHPILL_SIGN_IDENTITY: ${{ secrets.NOTCHPILL_SIGN_IDENTITY }}
           NOTCHPILL_NOTARY_KEYCHAIN_PROFILE: ${{ secrets.NOTCHPILL_NOTARY_KEYCHAIN_PROFILE }}
