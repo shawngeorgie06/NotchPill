@@ -3,6 +3,7 @@ import SwiftUI
 struct PreferencesView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var timer = TimerStore.shared
+    @ObservedObject private var updates = UpdateChecker.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,6 +15,7 @@ struct PreferencesView: View {
                     timerSection
                     devReadySection
                     shortcutsSection
+                    updatesSection
                     generalSection
                 }
                 .padding(20)
@@ -141,6 +143,37 @@ struct PreferencesView: View {
             Text("Enable NotchPill under Privacy & Security → Accessibility.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var updatesSection: some View {
+        SettingsPanel(title: "Updates", subtitle: "Install new versions without leaving the app") {
+            Toggle("Check for updates automatically", isOn: $settings.autoCheckUpdates)
+            if let update = updates.available {
+                HStack(spacing: 10) {
+                    Text("Version \(update.version) is available.")
+                        .font(.callout)
+                    Spacer()
+                    Button("Update Now") { UpdateInstaller.install(update) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(NotchDesign.accent)
+                }
+            } else {
+                HStack(spacing: 10) {
+                    Text(updates.isChecking
+                         ? "Checking…"
+                         : "You're on version \(updates.currentVersion).")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Check Now") { updates.check(force: true) }
+                        .buttonStyle(.bordered)
+                        .disabled(updates.isChecking)
+                }
+            }
+            if let error = updates.lastError {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
         }
     }
 
