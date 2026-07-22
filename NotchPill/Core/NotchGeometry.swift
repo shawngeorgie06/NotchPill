@@ -13,7 +13,12 @@ struct NotchGeometry {
     // the notch, wider than it. `expandedScale` shrinks the whole pill uniformly.
     static let expandedWidth: CGFloat = 720
     static let expandedHeight: CGFloat = 148
-    static let expandedScale: CGFloat = 0.58
+    // Uniform shrink of the expanded pill. Raising this expands the pill a little
+    // and lifts the width cap that bounds how large the readability/text scale can
+    // grow — i.e. bigger, more legible text. NOTE: this affects only the EXPANDED
+    // pill; the hover *activation* zone is derived from the physical notch rect and
+    // the collapsed size, so it is unchanged by this value.
+    static let expandedScale: CGFloat = 0.68
     /// Extra gap (render points) between the notch and the content, so the top
     /// row sits clear of the notch.
     static let contentTopGap: CGFloat = 10

@@ -144,8 +144,8 @@ enum NotchContentLayout {
 
     /// Typography grows faster than layout when there is extra room.
     static func textScale(forLayoutScale scale: CGFloat) -> CGFloat {
-        guard scale > 1 else { return max(0.78, scale) }
-        return scale + (scale - 1) * 0.55
+        guard scale > 1 else { return max(0.82, scale) }
+        return scale + (scale - 1) * 0.9
     }
 
     /// Design canvas size (pre-scale) for the expanded card row.
