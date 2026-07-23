@@ -410,61 +410,78 @@ struct DevReadyPeekRow: View {
     @State private var pulse = false
 
     var body: some View {
-        Button(action: handleTap) {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(NotchDesign.devReadyGreen.opacity(0.22))
-                        .frame(width: pulse ? 18 : 12, height: pulse ? 18 : 12)
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
-                                   value: pulse)
-                    Circle()
-                        .fill(NotchDesign.devReadyGreen)
-                        .frame(width: 8, height: 8)
-                }
-                .frame(width: 20)
+        HStack(spacing: 6) {
+            Button(action: handleTap) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(NotchDesign.devReadyGreen.opacity(0.22))
+                            .frame(width: pulse ? 18 : 12, height: pulse ? 18 : 12)
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                                       value: pulse)
+                        Circle()
+                            .fill(NotchDesign.devReadyGreen)
+                            .frame(width: 8, height: 8)
+                    }
+                    .frame(width: 20)
 
-                sourceIcon
+                    sourceIcon
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(alert.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(alert.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
 
-                    HStack(spacing: 5) {
-                        if let agent = alert.agent, !agent.isEmpty {
-                            agentBadge(agent, prominent: true)
-                        }
-                        if let source = alert.source, !source.isEmpty,
-                           alert.agent?.caseInsensitiveCompare(source) != .orderedSame {
-                            agentBadge(source, prominent: false)
-                        }
-                        if let subtitle = alert.subtitle, !subtitle.isEmpty {
-                            Text(subtitle)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.5))
-                                .lineLimit(1)
-                        } else if alert.bundleId != nil {
-                            Text("Tap to open")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.38))
+                        HStack(spacing: 5) {
+                            if let agent = alert.agent, !agent.isEmpty {
+                                agentBadge(agent, prominent: true)
+                            }
+                            if let source = alert.source, !source.isEmpty,
+                               alert.agent?.caseInsensitiveCompare(source) != .orderedSame {
+                                agentBadge(source, prominent: false)
+                            }
+                            if let subtitle = alert.subtitle, !subtitle.isEmpty {
+                                Text(subtitle)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.5))
+                                    .lineLimit(1)
+                            } else if alert.bundleId != nil {
+                                Text("Tap to open")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.38))
+                            }
                         }
                     }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.28))
                 }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.28))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .contentShape(Rectangle())
+            .buttonStyle(DevReadyRowButtonStyle())
+            .onAppear { pulse = !reduceMotion }
+
+            if AppSettings.shared.agentReplyEnabled, TerminalReplyInjector.canTarget(alert) {
+                Button {
+                    actions.beginReply(alert)
+                } label: {
+                    Image(systemName: "arrowshape.turn.up.left")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.white.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+                .help("Reply in the notch")
+                .padding(.trailing, 8)
+            }
         }
-        .buttonStyle(DevReadyRowButtonStyle())
-        .onAppear { pulse = !reduceMotion }
     }
 
     @ViewBuilder
