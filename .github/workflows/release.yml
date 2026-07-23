@@ -77,8 +77,14 @@ jobs:
           NOTCHPILL_SIGN_IDENTITY: ${{ secrets.NOTCHPILL_SIGN_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Stamp the bundle version from the release tag so the app's
+          # CFBundleShortVersionString always matches the release (prevents the
+          # updater from perpetually offering an "update" to the same version).
+          VERSION="${{ steps.version.outputs.label }}"
+          VERSION="${VERSION#v}"
           SIGN_ARGS=(
             CODE_SIGNING_ALLOWED=YES
+            MARKETING_VERSION="$VERSION"
           )
           if [[ -n "${NOTCHPILL_SIGN_IDENTITY:-}" ]]; then
             SIGN_ARGS+=(
