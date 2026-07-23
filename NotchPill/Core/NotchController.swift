@@ -136,6 +136,23 @@ final class NotchController {
             .receive(on: RunLoop.main)
             .sink { [weak self] progress in self?.state.updateProgress = progress }
             .store(in: &cancellables)
+
+        // Pause auto-dismiss and take key focus while the reply composer is open.
+        state.$replyCompose
+            .receive(on: RunLoop.main)
+            .sink { [weak self] compose in
+                guard let self else { return }
+                if compose != nil {
+                    self.devReadyDismissItem?.cancel()      // hold the peek open
+                    self.window?.makeKeyAndOrderFront(nil)  // accept typing (nonactivating panel → no app switch)
+                } else {
+                    // Don't call resignKey() directly (system-owned). On send,
+                    // performReply activates the terminal which takes key away;
+                    // on cancel the nonactivating panel simply stops needing key.
+                    self.scheduleDevReadyDismiss()          // resume normal timeout
+                }
+            }
+            .store(in: &cancellables)
     }
 
     func testSystemVolumeUp() {
@@ -182,7 +199,9 @@ final class NotchController {
             next: { [weak self] in self?.nowPlaying.next() },
             previous: { [weak self] in self?.nowPlaying.previous() },
             focusApp: { [weak self] bundleId in self?.focusSourceApp(bundleId: bundleId) },
-            dismissDevReady: { [weak self] id in self?.dismissDevReady(id: id) }
+            dismissDevReady: { [weak self] id in self?.dismissDevReady(id: id) },
+            beginReply: { [weak self] alert in self?.state.beginReply(to: alert) },
+            sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) }
         )
         return NotchRootView(state: state, shelf: shelf, timer: TimerStore.shared, metrics: metrics, actions: actions)
     }
@@ -669,5 +688,23 @@ final class NotchController {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
             .first?
             .activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
+    }
+
+    private func performReply(alert: DevReadyAlert, text: String) {
+        if let err = TerminalReplyInjector.send(text: text, bundleId: alert.bundleId) {
+            switch err {
+            case .accessibilityDenied:
+                state.setReplyError("Grant Accessibility to send replies")
+                AccessibilityAuthorization.requestSystemPrompt()
+            case .targetNotRunning:
+                state.setReplyError("\(alert.source ?? "Terminal") isn't running")
+            case .emptyText, .noTarget:
+                state.setReplyError("Couldn't send reply")
+            }
+            return
+        }
+        // Success: close composer and dismiss that agent's peek.
+        state.cancelReply()
+        dismissDevReady(id: alert.id)
     }
 }
