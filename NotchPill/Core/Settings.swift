@@ -80,6 +80,9 @@ final class AppSettings: ObservableObject {
     @Published var autoCheckUpdates: Bool {
         didSet { defaults.set(autoCheckUpdates, forKey: Keys.autoCheckUpdates) }
     }
+    @Published var agentReplyEnabled: Bool {
+        didSet { defaults.set(agentReplyEnabled, forKey: Keys.agentReplyEnabled) }
+    }
 
     @Published var launchAtLogin: Bool = (SMAppService.mainApp.status == .enabled)
 
@@ -106,6 +109,7 @@ final class AppSettings: ObservableObject {
         static let devReadyDuration = "devReadyDuration"
         static let devReadyPlaySound = "devReadyPlaySound"
         static let autoCheckUpdates = "autoCheckUpdates"
+        static let agentReplyEnabled = "agentReplyEnabled"
     }
 
     private init() {
@@ -134,6 +138,7 @@ final class AppSettings: ObservableObject {
             Keys.devReadyDuration: 13.0,
             Keys.devReadyPlaySound: true,
             Keys.autoCheckUpdates: true,
+            Keys.agentReplyEnabled: true,
         ])
 
         showCollapsedActivity = defaults.bool(forKey: Keys.showCollapsedActivity)
@@ -159,6 +164,7 @@ final class AppSettings: ObservableObject {
         devReadyDuration = storedDuration > 0 ? storedDuration : 13.0
         devReadyPlaySound = defaults.object(forKey: Keys.devReadyPlaySound) as? Bool ?? true
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
+        agentReplyEnabled = defaults.object(forKey: Keys.agentReplyEnabled) as? Bool ?? true
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -199,6 +205,7 @@ final class AppSettings: ObservableObject {
             Keys.devReadyDuration: 13.0,
             Keys.devReadyPlaySound: true,
             Keys.autoCheckUpdates: true,
+            Keys.agentReplyEnabled: true,
         ]
         defaultValues.forEach { defaults.set($0.value, forKey: $0.key) }
         showCollapsedActivity = false
@@ -223,5 +230,6 @@ final class AppSettings: ObservableObject {
         devReadyDuration = 13.0
         devReadyPlaySound = true
         autoCheckUpdates = true
+        agentReplyEnabled = true
     }
 }
