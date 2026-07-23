@@ -533,3 +533,48 @@ struct TerminalReplyInjectorTests {
             isRunning: true, accessibilityGranted: true) == nil)
     }
 }
+
+// MARK: - NotchState reply compose
+
+@MainActor
+@Suite("NotchState reply compose")
+struct NotchStateReplyTests {
+    private func alert() -> DevReadyAlert {
+        DevReadyAlert(title: "proj", source: "iTerm", agent: "claude-code",
+                      bundleId: "com.googlecode.iterm2")
+    }
+
+    @Test("beginReply opens composer targeting the alert")
+    func begins() {
+        let s = NotchState()
+        s.beginReply(to: alert())
+        #expect(s.replyCompose?.targetAlert.title == "proj")
+        #expect(s.replyCompose?.draft == "")
+    }
+
+    @Test("updateReplyDraft records text and clears prior error")
+    func updates() {
+        let s = NotchState()
+        s.beginReply(to: alert())
+        s.setReplyError("boom")
+        s.updateReplyDraft("hello")
+        #expect(s.replyCompose?.draft == "hello")
+        #expect(s.replyCompose?.errorText == nil)
+    }
+
+    @Test("cancelReply clears the composer")
+    func cancels() {
+        let s = NotchState()
+        s.beginReply(to: alert())
+        s.cancelReply()
+        #expect(s.replyCompose == nil)
+    }
+
+    @Test("mutators no-op when composer is closed")
+    func noopWhenClosed() {
+        let s = NotchState()
+        s.updateReplyDraft("x")
+        s.setReplyError("y")
+        #expect(s.replyCompose == nil)
+    }
+}

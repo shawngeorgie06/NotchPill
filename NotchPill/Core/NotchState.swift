@@ -32,6 +32,9 @@ final class NotchState: ObservableObject {
     @Published private(set) var volumeLevel: Int? = nil
     /// Active dev-ready peeks (multiple agents can finish at once).
     @Published private(set) var devReadyAlerts: [DevReadyAlert] = []
+    /// Active reply composer, non-nil while the user is typing a reply to a
+    /// finished agent. nil = not composing.
+    @Published private(set) var replyCompose: ReplyComposeState?
     /// Live in-app update progress, rendered as a bar in the notch when set.
     @Published var updateProgress: UpdateProgress?
     // AirDrop is intentionally always nil: no reliable public API exists to read
@@ -152,4 +155,32 @@ final class NotchState: ObservableObject {
         appSwitchRevertItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: item)
     }
+
+    // MARK: - Reply compose
+
+    func beginReply(to alert: DevReadyAlert) {
+        replyCompose = ReplyComposeState(targetAlert: alert)
+    }
+
+    func updateReplyDraft(_ text: String) {
+        guard replyCompose != nil else { return }
+        replyCompose?.draft = text
+        replyCompose?.errorText = nil
+    }
+
+    func setReplyError(_ message: String) {
+        guard replyCompose != nil else { return }
+        replyCompose?.errorText = message
+    }
+
+    func cancelReply() {
+        replyCompose = nil
+    }
+}
+
+/// The in-notch reply composer's state: which agent it targets and the draft.
+struct ReplyComposeState: Equatable {
+    var targetAlert: DevReadyAlert
+    var draft: String = ""
+    var errorText: String? = nil
 }
