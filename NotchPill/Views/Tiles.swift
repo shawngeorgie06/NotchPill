@@ -346,6 +346,9 @@ struct DevReadyPeekListView: View {
     /// When set, the row list scrolls inside this height (used for multiple agents).
     var maxScrollHeight: CGFloat?
 
+    /// Drives a one-shot entrance glow so the peek catches your eye on arrival.
+    @State private var pulse = false
+
     var body: some View {
         VStack(spacing: 0) {
             if alerts.count > 1 {
@@ -370,6 +373,17 @@ struct DevReadyPeekListView: View {
             } else {
                 alertRows
             }
+        }
+        .overlay {
+            // Green "ready" glow that flashes once on entrance, then fades out.
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(NotchDesign.devReadyGreen.opacity(pulse ? 0 : 0.22))
+                .blendMode(.plusLighter)
+                .allowsHitTesting(false)
+        }
+        .onAppear {
+            pulse = false
+            withAnimation(.easeOut(duration: 0.7)) { pulse = true }
         }
     }
 

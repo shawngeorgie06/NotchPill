@@ -92,6 +92,8 @@ struct PreferencesView: View {
     private var devReadySection: some View {
         SettingsPanel(title: "Dev Ready Pings", subtitle: "Peek the notch when a terminal or IDE finishes") {
             Toggle("Show dev-ready notifications", isOn: $settings.showDevReadyPings)
+            Toggle("Play a sound", isOn: $settings.devReadyPlaySound)
+                .disabled(!settings.showDevReadyPings)
             HStack {
                 Text("Peek duration")
                 Spacer()

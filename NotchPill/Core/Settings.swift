@@ -74,6 +74,9 @@ final class AppSettings: ObservableObject {
     @Published var devReadyDuration: Double {
         didSet { defaults.set(devReadyDuration, forKey: Keys.devReadyDuration) }
     }
+    @Published var devReadyPlaySound: Bool {
+        didSet { defaults.set(devReadyPlaySound, forKey: Keys.devReadyPlaySound) }
+    }
     @Published var autoCheckUpdates: Bool {
         didSet { defaults.set(autoCheckUpdates, forKey: Keys.autoCheckUpdates) }
     }
@@ -101,6 +104,7 @@ final class AppSettings: ObservableObject {
         static let showExpandedShelf = "showExpandedShelf"
         static let showDevReadyPings = "showDevReadyPings"
         static let devReadyDuration = "devReadyDuration"
+        static let devReadyPlaySound = "devReadyPlaySound"
         static let autoCheckUpdates = "autoCheckUpdates"
     }
 
@@ -127,7 +131,8 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: false,
             Keys.showDevReadyPings: true,
-            Keys.devReadyDuration: 8.0,
+            Keys.devReadyDuration: 13.0,
+            Keys.devReadyPlaySound: true,
             Keys.autoCheckUpdates: true,
         ])
 
@@ -151,7 +156,8 @@ final class AppSettings: ObservableObject {
         showExpandedShelf = defaults.bool(forKey: Keys.showExpandedShelf)
         showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
         let storedDuration = defaults.double(forKey: Keys.devReadyDuration)
-        devReadyDuration = storedDuration > 0 ? storedDuration : 8.0
+        devReadyDuration = storedDuration > 0 ? storedDuration : 13.0
+        devReadyPlaySound = defaults.object(forKey: Keys.devReadyPlaySound) as? Bool ?? true
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
     }
 
@@ -190,7 +196,8 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: false,
             Keys.showDevReadyPings: true,
-            Keys.devReadyDuration: 8.0,
+            Keys.devReadyDuration: 13.0,
+            Keys.devReadyPlaySound: true,
             Keys.autoCheckUpdates: true,
         ]
         defaultValues.forEach { defaults.set($0.value, forKey: $0.key) }
@@ -213,7 +220,8 @@ final class AppSettings: ObservableObject {
         showExpandedBattery = false
         showExpandedShelf = false
         showDevReadyPings = true
-        devReadyDuration = 8.0
+        devReadyDuration = 13.0
+        devReadyPlaySound = true
         autoCheckUpdates = true
     }
 }

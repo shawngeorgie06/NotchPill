@@ -625,6 +625,9 @@ final class NotchController {
         pendingDevReadyAlerts = []
         state.enqueueDevReady(batch)
         engagePill()
+        if AppSettings.shared.devReadyPlaySound {
+            NSSound(named: "Glass")?.play()
+        }
         scheduleDevReadyDismiss()
     }
 
