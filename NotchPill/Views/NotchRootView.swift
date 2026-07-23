@@ -21,6 +21,9 @@ struct NotchRootView: View {
     }
 
     private var contentLayout: NotchContentLayoutMetrics {
+        if state.updateProgress != nil {
+            return NotchContentLayout.updateLayout(metrics: metrics)
+        }
         if !state.devReadyAlerts.isEmpty {
             return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: state.devReadyAlerts)
         }
@@ -59,7 +62,7 @@ struct NotchRootView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            if state.isExpanded || !state.devReadyAlerts.isEmpty {
+            if state.isExpanded || !state.devReadyAlerts.isEmpty || state.updateProgress != nil {
                 expandedBackground
             } else {
                 PillSurface(bottomRadius: collapsedBottomRadius)
@@ -67,7 +70,10 @@ struct NotchRootView: View {
             }
         }
         .overlay(alignment: .top) {
-            if !state.devReadyAlerts.isEmpty {
+            if let progress = state.updateProgress {
+                updateProgressContent(progress)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            } else if !state.devReadyAlerts.isEmpty {
                 devReadyContent(alerts: state.devReadyAlerts)
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else if state.isExpanded {
@@ -97,6 +103,20 @@ struct NotchRootView: View {
         .animation(contentAnimation, value: state.activity)
         .animation(contentAnimation, value: state.volumeLevel)
         .animation(expandAnimation, value: state.devReadyAlerts.map(\.id))
+        .animation(expandAnimation, value: state.updateProgress?.phase)
+        .animation(.easeOut(duration: 0.12), value: state.updateProgress?.fraction)
+    }
+
+    private func updateProgressContent(_ progress: UpdateProgress) -> some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: metrics.notchHeight)
+            UpdateProgressView(progress: progress)
+                .padding(.top, metrics.topGap + 2)
+                .frame(width: frameSize.width,
+                       height: frameSize.height - metrics.notchHeight - metrics.topGap,
+                       alignment: .top)
+        }
+        .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
     }
 
     private var collapsedBottomRadius: CGFloat {
@@ -163,6 +183,49 @@ struct NotchRootView: View {
                        alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+    }
+}
+
+/// Live in-app update: title, a filling progress bar, and a status line.
+struct UpdateProgressView: View {
+    let progress: UpdateProgress
+
+    private var isFailed: Bool { progress.phase == .failed }
+    private var barFraction: CGFloat {
+        // The download is the measurable bulk; later phases are quick, so show a
+        // full bar for them (the label communicates the phase).
+        progress.phase == .downloading ? CGFloat(progress.fraction) : 1
+    }
+    private var accent: Color { isFailed ? .orange : NotchDesign.accent }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Image(systemName: isFailed ? "exclamationmark.triangle.fill" : "arrow.down.circle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(accent)
+                Text(progress.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule()
+                        .fill(accent)
+                        .frame(width: max(6, geo.size.width * barFraction))
+                }
+            }
+            .frame(height: 7)
+            Text(progress.statusText)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
 

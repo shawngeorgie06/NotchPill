@@ -129,6 +129,18 @@ enum NotchContentLayout {
         )
     }
 
+    /// Fixed-size peek for the in-app update progress bar.
+    static func updateLayout(metrics: NotchMetrics) -> NotchContentLayoutMetrics {
+        let width = min(metrics.designExpandedWidth * metrics.scale,
+                        max(metrics.notchWidth + 240, 380))
+        let height = metrics.notchHeight + metrics.topGap + 78
+        return NotchContentLayoutMetrics(
+            size: CGSize(width: width, height: height),
+            readability: 1.05,
+            textScale: 1.05
+        )
+    }
+
     /// Legacy helper used by tests.
     static func readabilityScale(itemCount: Int) -> CGFloat {
         switch itemCount {

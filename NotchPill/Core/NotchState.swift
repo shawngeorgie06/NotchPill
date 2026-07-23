@@ -32,6 +32,8 @@ final class NotchState: ObservableObject {
     @Published private(set) var volumeLevel: Int? = nil
     /// Active dev-ready peeks (multiple agents can finish at once).
     @Published private(set) var devReadyAlerts: [DevReadyAlert] = []
+    /// Live in-app update progress, rendered as a bar in the notch when set.
+    @Published var updateProgress: UpdateProgress?
     // AirDrop is intentionally always nil: no reliable public API exists to read
     // live transfer state, and the spec requires omitting it rather than faking.
     @Published var airDrop: String? = nil

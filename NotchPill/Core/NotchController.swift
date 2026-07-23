@@ -119,7 +119,8 @@ final class NotchController {
             AppSettings.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher(),
             shelf.$items.map { _ in () }.eraseToAnyPublisher(),
             TimerStore.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher(),
-            state.$devReadyAlerts.map { _ in () }.eraseToAnyPublisher()
+            state.$devReadyAlerts.map { _ in () }.eraseToAnyPublisher(),
+            state.$updateProgress.map { _ in () }.eraseToAnyPublisher()
         )
         .receive(on: RunLoop.main)
         .sink { [weak self] in
@@ -129,6 +130,12 @@ final class NotchController {
             }
         }
         .store(in: &cancellables)
+
+        // Mirror live update progress into state so the overlay shows a bar.
+        UpdateProgressStore.shared.$progress
+            .receive(on: RunLoop.main)
+            .sink { [weak self] progress in self?.state.updateProgress = progress }
+            .store(in: &cancellables)
     }
 
     func testSystemVolumeUp() {
@@ -341,6 +348,7 @@ final class NotchController {
     }
 
     private func expandedContentSize() -> CGSize {
+        if state.updateProgress != nil { return NotchContentLayout.updateLayout(metrics: metrics).size }
         if !state.devReadyAlerts.isEmpty { return devReadyContentSize() }
         let activities = NotchContentSnapshot.expandedActivities(
             state: state, shelf: shelf, timer: TimerStore.shared, settings: AppSettings.shared
@@ -357,7 +365,7 @@ final class NotchController {
 
     private func applyWindowFrame(animated: Bool) {
         guard let geometry, let window else { return }
-        let expanded = state.isExpanded || !state.devReadyAlerts.isEmpty
+        let expanded = state.isExpanded || !state.devReadyAlerts.isEmpty || state.updateProgress != nil
         let frame = geometry.windowFrame(
             expanded: expanded,
             collapsedContentSize: collapsedContentSize(),

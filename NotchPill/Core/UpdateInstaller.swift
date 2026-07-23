@@ -45,16 +45,22 @@ enum UpdateInstaller {
             return
         }
 
-        let progress = beginProgressAlert(release)
+        // Live progress bar in the notch (see UpdateProgressStore → NotchState).
+        UpdateProgressStore.shared.begin(version: release.version)
 
         Task {
             do {
-                let stagedApp = try await downloadAndStage(release)
+                let stagedApp = try await downloadAndStage(release)      // drives .downloading
+                UpdateProgressStore.shared.setPhase(.verifying)
                 try await verify(stagedApp: stagedApp, matching: destPath)
-                progress?.close()
+                UpdateProgressStore.shared.setPhase(.installing)
+                // Brief beat so the "Installing…" state is visible before the swap.
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                UpdateProgressStore.shared.setPhase(.relaunching)
+                try? await Task.sleep(nanoseconds: 250_000_000)
                 swapAndRelaunch(newApp: stagedApp, destPath: destPath)   // quits the app
             } catch {
-                progress?.close()
+                UpdateProgressStore.shared.clear()
                 isInstalling = false
                 fail((error as? UpdateError) ?? .download, release: release)
             }
@@ -64,18 +70,13 @@ enum UpdateInstaller {
     // MARK: - Steps (run off the main actor)
 
     nonisolated private static func downloadAndStage(_ release: UpdateRelease) async throws -> String {
-        let (tempZip, response) = try await URLSession.shared.download(from: release.zipURL)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw UpdateError.download }
-
-        let work = FileManager.default.temporaryDirectory
-            .appendingPathComponent("NotchPillUpdate-\(release.version)-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-
-        let zipDest = work.appendingPathComponent("update.zip")
-        try FileManager.default.moveItem(at: tempZip, to: zipDest)
+        // Download with byte-level progress so the notch bar fills in real time.
+        let zipDest = try await downloadWithProgress(release.zipURL) { fraction in
+            Task { @MainActor in UpdateProgressStore.shared.setDownload(fraction: fraction) }
+        }
 
         // Unpack with ditto (the release ZIPs are produced by `ditto -c -k`).
-        let unpackDir = work.appendingPathComponent("unpacked")
+        let unpackDir = zipDest.deletingLastPathComponent().appendingPathComponent("unpacked")
         _ = try await run("/usr/bin/ditto", ["-x", "-k", zipDest.path, unpackDir.path])
 
         guard let appPath = firstApp(in: unpackDir.path) else { throw UpdateError.unpack }
@@ -83,6 +84,68 @@ enum UpdateInstaller {
         // Downloads via URLSession aren't quarantined, but strip defensively.
         _ = try? await run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", appPath])
         return appPath
+    }
+
+    /// Downloads a URL to a temp file, reporting 0...1 progress via `onProgress`.
+    nonisolated private static func downloadWithProgress(
+        _ url: URL,
+        onProgress: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
+        final class Delegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+            let onProgress: @Sendable (Double) -> Void
+            let destination: URL
+            var continuation: CheckedContinuation<URL, Error>?
+            private var resumed = false
+
+            init(destination: URL, onProgress: @escaping @Sendable (Double) -> Void) {
+                self.destination = destination
+                self.onProgress = onProgress
+            }
+
+            func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                            didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
+                            totalBytesExpectedToWrite: Int64) {
+                guard totalBytesExpectedToWrite > 0 else { return }
+                onProgress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+            }
+
+            func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                            didFinishDownloadingTo location: URL) {
+                guard !resumed else { return }
+                resumed = true
+                if let http = downloadTask.response as? HTTPURLResponse, http.statusCode != 200 {
+                    continuation?.resume(throwing: UpdateError.download)
+                    return
+                }
+                do {
+                    try? FileManager.default.removeItem(at: destination)
+                    try FileManager.default.moveItem(at: location, to: destination)
+                    continuation?.resume(returning: destination)
+                } catch {
+                    continuation?.resume(throwing: error)
+                }
+            }
+
+            func urlSession(_ session: URLSession, task: URLSessionTask,
+                            didCompleteWithError error: Error?) {
+                guard !resumed else { return }   // success already handled above
+                resumed = true
+                continuation?.resume(throwing: error ?? UpdateError.download)
+            }
+        }
+
+        let work = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchPillUpdate-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        let dest = work.appendingPathComponent("update.zip")
+
+        let delegate = Delegate(destination: dest, onProgress: onProgress)
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        return try await withCheckedThrowingContinuation { continuation in
+            delegate.continuation = continuation
+            session.downloadTask(with: url).resume()
+        }
     }
 
     nonisolated private static func verify(stagedApp: String, matching destPath: String) async throws {
@@ -194,18 +257,6 @@ enum UpdateInstaller {
     }
 
     // MARK: - UI
-
-    private static func beginProgressAlert(_ release: UpdateRelease) -> NSWindow? {
-        let alert = NSAlert()
-        alert.messageText = "Updating to NotchPill \(release.version)…"
-        alert.informativeText = "Downloading and installing. NotchPill will relaunch automatically."
-        alert.addButton(withTitle: "Hide")
-        let window = alert.window
-        window.level = .floating
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        return window
-    }
 
     private static func fail(_ error: UpdateError, release: UpdateRelease) {
         let alert = NSAlert()
