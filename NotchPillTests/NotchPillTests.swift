@@ -485,3 +485,51 @@ struct NowPlayingDisplayResolverTests {
         #expect(resolved?.artist == "Apple")
     }
 }
+
+// MARK: - TerminalReplyInjector (delivery core + targeting policy)
+
+@Suite("TerminalReplyInjector")
+struct TerminalReplyInjectorTests {
+    private func alert(bundleId: String?) -> DevReadyAlert {
+        DevReadyAlert(title: "proj", source: "iTerm", agent: "claude-code", bundleId: bundleId)
+    }
+
+    @Test("canTarget requires a non-empty bundle id")
+    func canTargetRule() {
+        #expect(TerminalReplyInjector.canTarget(alert(bundleId: "com.googlecode.iterm2")))
+        #expect(!TerminalReplyInjector.canTarget(alert(bundleId: nil)))
+        #expect(!TerminalReplyInjector.canTarget(alert(bundleId: "")))
+    }
+
+    @Test("validate rejects empty text")
+    func rejectsEmpty() {
+        #expect(TerminalReplyInjector.validate(text: "   ", bundleId: "x",
+            isRunning: true, accessibilityGranted: true) == .emptyText)
+    }
+
+    @Test("validate rejects missing target")
+    func rejectsNoTarget() {
+        #expect(TerminalReplyInjector.validate(text: "hi", bundleId: nil,
+            isRunning: true, accessibilityGranted: true) == .noTarget)
+        #expect(TerminalReplyInjector.validate(text: "hi", bundleId: "",
+            isRunning: true, accessibilityGranted: true) == .noTarget)
+    }
+
+    @Test("validate rejects when target app not running")
+    func rejectsNotRunning() {
+        #expect(TerminalReplyInjector.validate(text: "hi", bundleId: "x",
+            isRunning: false, accessibilityGranted: true) == .targetNotRunning)
+    }
+
+    @Test("validate rejects when accessibility denied")
+    func rejectsAccessibility() {
+        #expect(TerminalReplyInjector.validate(text: "hi", bundleId: "x",
+            isRunning: true, accessibilityGranted: false) == .accessibilityDenied)
+    }
+
+    @Test("validate passes when all preconditions met")
+    func passes() {
+        #expect(TerminalReplyInjector.validate(text: "hi", bundleId: "x",
+            isRunning: true, accessibilityGranted: true) == nil)
+    }
+}
