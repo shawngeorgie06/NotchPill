@@ -24,6 +24,9 @@ struct NotchRootView: View {
         if state.updateProgress != nil {
             return NotchContentLayout.updateLayout(metrics: metrics)
         }
+        if state.replyCompose != nil {
+            return NotchContentLayout.replyComposeLayout(metrics: metrics)
+        }
         if !state.devReadyAlerts.isEmpty {
             return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: state.devReadyAlerts)
         }
@@ -62,7 +65,7 @@ struct NotchRootView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            if state.isExpanded || !state.devReadyAlerts.isEmpty || state.updateProgress != nil {
+            if state.isExpanded || !state.devReadyAlerts.isEmpty || state.updateProgress != nil || state.replyCompose != nil {
                 expandedBackground
             } else {
                 PillSurface(bottomRadius: collapsedBottomRadius)
@@ -72,6 +75,9 @@ struct NotchRootView: View {
         .overlay(alignment: .top) {
             if let progress = state.updateProgress {
                 updateProgressContent(progress)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            } else if let compose = state.replyCompose {
+                replyComposeContent(compose)
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else if !state.devReadyAlerts.isEmpty {
                 devReadyContent(alerts: state.devReadyAlerts)
@@ -103,6 +109,7 @@ struct NotchRootView: View {
         .animation(contentAnimation, value: state.activity)
         .animation(contentAnimation, value: state.volumeLevel)
         .animation(expandAnimation, value: state.devReadyAlerts.map(\.id))
+        .animation(expandAnimation, value: state.replyCompose != nil)
         .animation(expandAnimation, value: state.updateProgress?.phase)
         .animation(.easeOut(duration: 0.12), value: state.updateProgress?.fraction)
     }
@@ -111,6 +118,18 @@ struct NotchRootView: View {
         VStack(spacing: 0) {
             Color.clear.frame(height: metrics.notchHeight)
             UpdateProgressView(progress: progress)
+                .padding(.top, metrics.topGap + 2)
+                .frame(width: frameSize.width,
+                       height: frameSize.height - metrics.notchHeight - metrics.topGap,
+                       alignment: .top)
+        }
+        .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+    }
+
+    private func replyComposeContent(_ compose: ReplyComposeState) -> some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: metrics.notchHeight)
+            ReplyComposeView(state: state, compose: compose, actions: actions)
                 .padding(.top, metrics.topGap + 2)
                 .frame(width: frameSize.width,
                        height: frameSize.height - metrics.notchHeight - metrics.topGap,
@@ -183,6 +202,61 @@ struct NotchRootView: View {
                        alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+    }
+}
+
+/// In-notch reply composer: a focused text field targeting the finished agent.
+struct ReplyComposeView: View {
+    @ObservedObject var state: NotchState
+    let compose: ReplyComposeState
+    let actions: NotchActions
+    @FocusState private var fieldFocused: Bool
+
+    private var targetLabel: String {
+        let a = compose.targetAlert
+        let terminal = a.source ?? "Terminal"
+        return "→ \(a.title) · \(terminal)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrowshape.turn.up.left.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(NotchDesign.accent)
+                Text(targetLabel)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            TextField("Reply…", text: Binding(
+                get: { state.replyCompose?.draft ?? "" },
+                set: { state.updateReplyDraft($0) }
+            ))
+            .textFieldStyle(.plain)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(.white)
+            .focused($fieldFocused)
+            .onSubmit { actions.sendReply(compose.targetAlert, state.replyCompose?.draft ?? "") }
+            .onExitCommand { state.cancelReply() }   // Esc
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+
+            if let err = compose.errorText {
+                Text(err)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+            } else {
+                Text("Enter to send · Esc to cancel")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onAppear { fieldFocused = true }
     }
 }
 
