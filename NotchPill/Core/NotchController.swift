@@ -120,7 +120,8 @@ final class NotchController {
             shelf.$items.map { _ in () }.eraseToAnyPublisher(),
             TimerStore.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher(),
             state.$devReadyAlerts.map { _ in () }.eraseToAnyPublisher(),
-            state.$updateProgress.map { _ in () }.eraseToAnyPublisher()
+            state.$updateProgress.map { _ in () }.eraseToAnyPublisher(),
+            state.$replyCompose.map { _ in () }.eraseToAnyPublisher()
         )
         .receive(on: RunLoop.main)
         .sink { [weak self] in
@@ -368,6 +369,7 @@ final class NotchController {
 
     private func expandedContentSize() -> CGSize {
         if state.updateProgress != nil { return NotchContentLayout.updateLayout(metrics: metrics).size }
+        if state.replyCompose != nil { return NotchContentLayout.replyComposeLayout(metrics: metrics).size }
         if !state.devReadyAlerts.isEmpty { return devReadyContentSize() }
         let activities = NotchContentSnapshot.expandedActivities(
             state: state, shelf: shelf, timer: TimerStore.shared, settings: AppSettings.shared

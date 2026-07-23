@@ -47,7 +47,7 @@ enum TerminalReplyInjector {
         pb.clearContents()
         pb.setString(text, forType: .string)
 
-        app.activate(options: [.activateIgnoringOtherApps])
+        app.activate()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + activateSettle) {
             postCommandV()
