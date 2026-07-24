@@ -26,6 +26,10 @@ final class NotchController {
     private let systemStats = SystemStatsProvider()
     private let battery = BatteryProvider()
     private let devReady = DevReadyProvider()
+    private let replyHotKey = GlobalHotKey()
+    /// Most-recent finished-agent alert, kept so the reply hotkey can target it
+    /// even after its peek has auto-dismissed.
+    private var lastFinishedAlert: DevReadyAlert?
 
     // Hover.
     private var collapseWorkItem: DispatchWorkItem?
@@ -57,6 +61,8 @@ final class NotchController {
     private var cancellables = Set<AnyCancellable>()
 
     func start() {
+        replyHotKey.onPressed = { [weak self] in self?.openReplyForLatest() }
+        replyHotKey.register()
         hotZoneKeys.onTogglePlayPause = { [weak self] in self?.nowPlaying.togglePlayPause() }
         hotZoneKeys.onNext = { [weak self] in self?.nowPlaying.next() }
         hotZoneKeys.onPrevious = { [weak self] in self?.nowPlaying.previous() }
@@ -143,6 +149,9 @@ final class NotchController {
             .receive(on: RunLoop.main)
             .sink { [weak self] compose in
                 guard let self else { return }
+                // Suspend hot-zone key shortcuts so space/arrows type into the
+                // composer instead of toggling media / skipping tracks.
+                self.hotZoneKeys.suspended = compose != nil
                 if compose != nil {
                     self.devReadyDismissItem?.cancel()      // hold the peek open
                     self.window?.makeKeyAndOrderFront(nil)  // accept typing (nonactivating panel → no app switch)
@@ -219,7 +228,17 @@ final class NotchController {
         hotZoneKeys.stop()
         nowPlaying.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
         systemStats.stop(); battery.stop(); devReady.stop()
+        replyHotKey.unregister()
         window?.orderOut(nil)
+    }
+
+    /// Opens the reply composer for the most-recent finished agent (its peek may
+    /// have already auto-dismissed). Bound to the ⌥⌘R global hotkey.
+    private func openReplyForLatest() {
+        guard AppSettings.shared.agentReplyEnabled else { return }
+        guard let alert = state.devReadyAlerts.last ?? lastFinishedAlert,
+              TerminalReplyInjector.canTarget(alert) else { return }
+        state.beginReply(to: alert)
     }
 
     // MARK: - Providers
@@ -632,6 +651,7 @@ final class NotchController {
         if recentDevReadyFingerprints.contains(where: { $0.0 == fingerprint }) { return }
         recentDevReadyFingerprints.append((fingerprint, now))
 
+        lastFinishedAlert = alert
         pendingDevReadyAlerts.append(alert)
         devReadyCoalesceItem?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.flushDevReadyBatch() }

@@ -9,6 +9,11 @@ final class HotZoneKeyMonitor {
     var onPrevious: () -> Void = {}
     var onVolumeUp: () -> Void = {}
     var onVolumeDown: () -> Void = {}
+    /// When true, hot-zone key shortcuts (space/arrows) are suspended and pass
+    /// through untouched — e.g. while a text field in the notch (the reply
+    /// composer) is capturing keystrokes. Written on the main thread; read from
+    /// the event-tap thread (a benign race on an aligned Bool).
+    var suspended = false
 
     /// Live screen-space hot-zone check (must be safe to call on the main thread).
     var pointerInHotZone: () -> Bool = { false }
@@ -247,6 +252,7 @@ final class HotZoneKeyMonitor {
 
     @discardableResult
     private func dispatchIfNeeded(keyCode: UInt16) -> Bool {
+        guard !suspended else { return false }
         guard isShortcut(keyCode) else { return false }
 
         let now = CFAbsoluteTimeGetCurrent()
