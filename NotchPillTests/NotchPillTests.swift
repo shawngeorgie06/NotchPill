@@ -578,3 +578,36 @@ struct NotchStateReplyTests {
         #expect(s.replyCompose == nil)
     }
 }
+
+@Suite("DevReadyAlert kind/message")
+struct DevReadyAlertKindTests {
+    @Test("legacy JSON without kind decodes as .finished, no message")
+    func legacyDecodes() {
+        let data = #"{"id":"a","title":"proj","subtitle":"finished","bundleId":"com.apple.Terminal"}"#.data(using: .utf8)!
+        let a = DevReadyAlert.parse(from: data)
+        #expect(a != nil)
+        #expect(a?.kind == .finished)
+        #expect(a?.message == nil)
+    }
+
+    @Test("waiting JSON decodes kind + message")
+    func waitingDecodes() {
+        let data = #"{"id":"b","title":"proj","kind":"waiting","message":"Claude needs permission to run Bash","bundleId":"com.apple.Terminal"}"#.data(using: .utf8)!
+        let a = DevReadyAlert.parse(from: data)
+        #expect(a?.kind == .waiting)
+        #expect(a?.message == "Claude needs permission to run Bash")
+    }
+
+    @Test("unknown kind falls back to .finished")
+    func unknownKind() {
+        let data = #"{"id":"c","title":"proj","kind":"bogus"}"#.data(using: .utf8)!
+        #expect(DevReadyAlert.parse(from: data)?.kind == .finished)
+    }
+
+    @Test("userInfo path reads kind + message")
+    func userInfoDecodes() {
+        let a = DevReadyAlert.parse(userInfo: ["title":"proj","kind":"waiting","message":"pick one"])
+        #expect(a?.kind == .waiting)
+        #expect(a?.message == "pick one")
+    }
+}

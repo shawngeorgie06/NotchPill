@@ -52,6 +52,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// Specific agent identity, e.g. Composer, claude-opus-4, Worker 2.
     var agent: String?
     var bundleId: String?
+    var kind: AlertKind = .finished
+    var message: String?
 
     static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
 
@@ -61,7 +63,9 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         subtitle: String? = nil,
         source: String? = nil,
         agent: String? = nil,
-        bundleId: String? = nil
+        bundleId: String? = nil,
+        kind: AlertKind = .finished,
+        message: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -69,6 +73,22 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         self.source = source
         self.agent = agent
         self.bundleId = bundleId
+        self.kind = kind
+        self.message = message
+    }
+
+    enum CodingKeys: String, CodingKey { case id, title, subtitle, source, agent, bundleId, kind, message }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        title = try c.decode(String.self, forKey: .title)
+        subtitle = try? c.decode(String.self, forKey: .subtitle)
+        source = try? c.decode(String.self, forKey: .source)
+        agent = try? c.decode(String.self, forKey: .agent)
+        bundleId = try? c.decode(String.self, forKey: .bundleId)
+        kind = (try? c.decode(AlertKind.self, forKey: .kind)) ?? .finished
+        message = try? c.decode(String.self, forKey: .message)
     }
 
     /// Short label for the agent or source shown in the peek row.
@@ -98,16 +118,22 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !title.isEmpty else { return nil }
         let id = (userInfo["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kindRaw = userInfo["kind"] as? String
         return DevReadyAlert(
             id: (id?.isEmpty == false) ? id! : UUID().uuidString,
             title: title,
             subtitle: userInfo["subtitle"] as? String,
             source: userInfo["source"] as? String,
             agent: userInfo["agent"] as? String,
-            bundleId: userInfo["bundleId"] as? String
+            bundleId: userInfo["bundleId"] as? String,
+            kind: AlertKind(rawValue: kindRaw ?? "") ?? .finished,
+            message: userInfo["message"] as? String
         )
     }
 }
+
+/// Whether an agent alert is a completed task (finished) or a pending question (waiting).
+enum AlertKind: String, Codable { case finished, waiting }
 
 extension Notification.Name {
     static let notchPillTestDevReady = Notification.Name("com.shawngeorgie06.NotchPill.testDevReady")
