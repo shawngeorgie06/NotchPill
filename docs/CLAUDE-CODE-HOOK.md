@@ -68,8 +68,23 @@ prompt's `message` field from stdin JSON and forwards it to
 `notify-notchpill.sh` with `kind=waiting`, which surfaces a **waiting peek**
 with **tap-to-answer buttons** in NotchPill instead of the normal "finished"
 peek — so you can respond to a blocked agent without switching back to its
-terminal. A `kind=waiting` peek bypasses the finished-dedup window, so it's
-never swallowed by a recent "finished" ping.
+terminal.
+
+A `kind=waiting` peek has its own lifecycle, separate from "finished" pings:
+
+- It bypasses the finished-dedup window entirely, so it's never swallowed by a
+  recent "finished" ping — nor by an earlier question from the same
+  project+branch (every question in a session shares that fingerprint).
+- It does **not** fade on the short auto-dismiss timer; a blocked agent stays
+  blocked, so the peek stays up. It clears when you answer it, when a newer
+  question for the same session replaces it, or when you dismiss it. A
+  "finished" ping arriving meanwhile fades only itself.
+- One waiting peek per session: a re-notification for the same terminal *and*
+  project replaces the old one. Two sessions in the same terminal app but
+  different projects coexist.
+- A waiting signal that was queued to disk while NotchPill wasn't running and is
+  more than 5 minutes old is shown without answer buttons — that terminal is
+  probably back at a shell prompt, and an answer keystroke would land there.
 
 Claude Code only reloads `settings.json` at session start (or when you open
 `/hooks`). After adding the hooks, **open `/hooks` once or restart Claude Code**

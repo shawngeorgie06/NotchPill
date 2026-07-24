@@ -55,8 +55,7 @@ final class NotchController {
     private var devReadyDismissItem: DispatchWorkItem?
     private var devReadyCoalesceItem: DispatchWorkItem?
     private var pendingDevReadyAlerts: [DevReadyAlert] = []
-    private var recentDevReadyFingerprints: [(String, Date)] = []
-    private let devReadyDedupInterval: TimeInterval = 12
+    private var devReadyDedup = DevReadyDedup()
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -159,7 +158,11 @@ final class NotchController {
                     // Don't call resignKey() directly (system-owned). On send,
                     // performReply activates the terminal which takes key away;
                     // on cancel the nonactivating panel simply stops needing key.
-                    self.scheduleDevReadyDismiss()          // resume normal timeout
+                    // Only finished peeks fade; a waiting-only peek must not have
+                    // a dismiss timer re-armed behind it.
+                    if self.state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
+                        self.scheduleDevReadyDismiss()      // resume normal timeout
+                    }
                 }
             }
             .store(in: &cancellables)
@@ -233,8 +236,9 @@ final class NotchController {
         window?.orderOut(nil)
     }
 
-    /// Opens the reply composer for the most-recent finished agent (its peek may
-    /// have already auto-dismissed). Bound to the ⌥⌘R global hotkey.
+    /// Opens the reply composer for the agent peek currently on screen, or — when
+    /// nothing is showing — the most-recent *finished* agent (whose peek has since
+    /// auto-dismissed). Bound to the ⌥⌘R global hotkey.
     private func openReplyForLatest() {
         guard AppSettings.shared.agentReplyEnabled else { return }
         guard let alert = state.devReadyAlerts.last ?? lastFinishedAlert,
@@ -649,11 +653,25 @@ final class NotchController {
 
     private func presentDevReady(_ alert: DevReadyAlert) {
         guard AppSettings.shared.showDevReadyPings else { return }
-        let fingerprint = "\(alert.title)|\(alert.subtitle ?? "")"
-        let now = Date()
-        recentDevReadyFingerprints.removeAll { now.timeIntervalSince($0.1) > devReadyDedupInterval }
-        if recentDevReadyFingerprints.contains(where: { $0.0 == fingerprint }) { return }
-        recentDevReadyFingerprints.append((fingerprint, now))
+
+        // Waiting alerts have their own lifecycle and must not touch the finished
+        // path: the finished fingerprint is `title|subtitle`, which for waiting
+        // alerts is project|branch — identical for every question from the same
+        // session, so the dedup window would silently drop the second question and
+        // leave the agent hanging. They also must not be batched into the
+        // auto-dismiss timer (a blocked agent stays blocked past 13s) and must not
+        // become `lastFinishedAlert`.
+        if alert.kind == .waiting {
+            state.enqueueWaiting(alert)   // replace-per-session, no fingerprint dedup
+            engagePill()
+            if AppSettings.shared.devReadyPlaySound {
+                NSSound(named: "Glass")?.play()
+            }
+            applyWindowFrame(animated: true)
+            return
+        }
+
+        if devReadyDedup.shouldSuppress(alert) { return }
 
         lastFinishedAlert = alert
         pendingDevReadyAlerts.append(alert)
@@ -684,11 +702,21 @@ final class NotchController {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
 
+    /// Auto-dismiss / explicit dismiss. Only `.finished` peeks are swept: a
+    /// `.waiting` peek represents a still-blocked agent and clears only when it is
+    /// answered, superseded, or removed as stale. With no waiting alerts present
+    /// this is byte-for-byte the v1.3.0 finished behaviour.
     private func dismissDevReady(id: String? = nil) {
         if let id {
             state.removeDevReady(id: id)
             if !state.devReadyAlerts.isEmpty {
-                scheduleDevReadyDismiss()
+                if state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
+                    scheduleDevReadyDismiss()
+                } else {
+                    // Waiting-only remainder: never re-arm the fade timer.
+                    devReadyDismissItem?.cancel()
+                    devReadyDismissItem = nil
+                }
                 applyWindowFrame(animated: true)
                 return
             }
@@ -697,7 +725,13 @@ final class NotchController {
         guard !state.devReadyAlerts.isEmpty else { return }
         devReadyDismissItem?.cancel()
         devReadyDismissItem = nil
-        state.clearDevReady()
+        state.clearFinishedDevReady()
+
+        guard state.devReadyAlerts.isEmpty else {
+            // Waiting peeks survive; keep the pill open and just resize.
+            applyWindowFrame(animated: true)
+            return
+        }
 
         let mouse = NSEvent.mouseLocation
         if isPointerOverPill(mouse) || expandHoverScreenRect().insetBy(dx: -8, dy: -6).contains(mouse) {
@@ -716,17 +750,36 @@ final class NotchController {
             .activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
     }
 
+    /// Renders a `ReplyError` into the composer's error line. `verb` distinguishes
+    /// the reply and answer wordings.
+    private func showReplyError(_ err: ReplyError, alert: DevReadyAlert, verb: String) {
+        let terminal = alert.source ?? "Terminal"
+        switch err {
+        case .accessibilityDenied:
+            state.setReplyError("Grant Accessibility to \(verb)")
+            AccessibilityAuthorization.requestSystemPrompt()
+        case .targetNotRunning:
+            state.setReplyError("\(terminal) isn't running")
+        case .focusTimeout:
+            state.setReplyError("Couldn't focus \(terminal) — nothing was sent")
+        case .emptyText, .noTarget:
+            state.setReplyError("Couldn't \(verb)")
+        }
+    }
+
     private func performReply(alert: DevReadyAlert, text: String) {
-        if let err = TerminalReplyInjector.send(text: text, bundleId: alert.bundleId) {
-            switch err {
-            case .accessibilityDenied:
-                state.setReplyError("Grant Accessibility to send replies")
-                AccessibilityAuthorization.requestSystemPrompt()
-            case .targetNotRunning:
-                state.setReplyError("\(alert.source ?? "Terminal") isn't running")
-            case .emptyText, .noTarget:
-                state.setReplyError("Couldn't send reply")
-            }
+        let late: (ReplyError?) -> Void = { [weak self] err in
+            guard let self, let err else { return }
+            // The composer was closed optimistically on the synchronous accept —
+            // reopen it with the draft restored so the failure is visible and
+            // the user can retry rather than assume the reply landed.
+            self.state.beginReply(to: alert)
+            self.state.updateReplyDraft(text)
+            self.showReplyError(err, alert: alert, verb: "send replies")
+        }
+        if let err = TerminalReplyInjector.send(text: text, bundleId: alert.bundleId,
+                                                completion: late) {
+            showReplyError(err, alert: alert, verb: "send replies")
             return
         }
         // Success: close composer and dismiss that agent's peek.
@@ -735,22 +788,42 @@ final class NotchController {
     }
 
     private func performAnswer(alert: DevReadyAlert, answer: AgentAnswer) {
-        if let err = TerminalReplyInjector.send(text: answer.keystroke, bundleId: alert.bundleId,
-                                                appendReturn: answer.appendsReturn) {
-            // A tapped answer has no open composer; open one so the error is visible
-            // and the user can retry by typing. Mirrors performReply's error surface.
-            state.beginReply(to: alert)
-            switch err {
-            case .accessibilityDenied:
-                state.setReplyError("Grant Accessibility to answer")
-                AccessibilityAuthorization.requestSystemPrompt()
-            case .targetNotRunning:
-                state.setReplyError("\(alert.source ?? "Terminal") isn't running")
-            case .emptyText, .noTarget:
-                state.setReplyError("Couldn't send answer")
-            }
+        // A tapped answer has no open composer; open one so an error is visible
+        // and the user can retry by typing. Mirrors performReply's error surface.
+        let surface: (ReplyError) -> Void = { [weak self] err in
+            guard let self else { return }
+            self.state.beginReply(to: alert)
+            self.showReplyError(err, alert: alert, verb: "answer")
+        }
+        if let err = TerminalReplyInjector.send(text: answer.keystroke,
+                                                bundleId: alert.bundleId,
+                                                appendReturn: answer.appendsReturn,
+                                                completion: { err in if let err { surface(err) } }) {
+            surface(err)
             return
         }
-        state.removeDevReady(id: alert.id)   // dismiss the answered waiting peek
+        dismissDevReady(id: alert.id)   // dismiss the answered waiting peek
+    }
+}
+
+/// Short suppression window for repeated "finished" pings, keyed on
+/// `title|subtitle`. Extracted from `NotchController` so the routing rule is
+/// unit-testable without an NSWindow.
+///
+/// `.waiting` alerts are deliberately exempt. Their fingerprint is
+/// project|branch, which is identical for *every* question a session asks — a
+/// second permission prompt 5s after the first would be dropped and the agent
+/// would hang with nothing on screen.
+struct DevReadyDedup {
+    var interval: TimeInterval = 12
+    private var recent: [(String, Date)] = []
+
+    mutating func shouldSuppress(_ alert: DevReadyAlert, now: Date = Date()) -> Bool {
+        guard alert.kind == .finished else { return false }
+        let fingerprint = "\(alert.title)|\(alert.subtitle ?? "")"
+        recent.removeAll { now.timeIntervalSince($0.1) > interval }
+        if recent.contains(where: { $0.0 == fingerprint }) { return true }
+        recent.append((fingerprint, now))
+        return false
     }
 }

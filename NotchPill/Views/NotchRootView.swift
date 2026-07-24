@@ -196,8 +196,14 @@ struct NotchRootView: View {
             DevReadyPeekListView(
                 alerts: alerts,
                 actions: actions,
+                // The scroller must be given the same waiting allowance the window
+                // frame was sized with, or a "waiting for A + finished for B" pair
+                // squeezes the tall waiting row into a flat 42pt/row scroller while
+                // the window itself grows — you'd have to scroll the notch overlay
+                // to reach the answer buttons.
                 maxScrollHeight: alerts.count > 1
                     ? NotchContentLayout.devReadyListHeight(rowCount: alerts.count)
+                        + NotchContentLayout.waitingExtraHeight(alerts: alerts)
                     : nil
             )
                 .padding(.top, metrics.topGap + 2)

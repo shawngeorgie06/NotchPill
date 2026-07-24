@@ -56,7 +56,9 @@ esac
 if [[ "$EVENT" == "Notification" ]]; then
   MESSAGE="$(json_field message)"
   [[ -n "$MESSAGE" ]] || MESSAGE="Waiting for your input"
-  exec "$ROOT/Scripts/notify-notchpill.sh" "$PROJECT" "${BRANCH:-}" "$TERM_NAME" "$TERM_BUNDLE" "claude-code" "waiting" "$MESSAGE"
+  # Subtitle mirrors the "finished · <branch>" shape so the row says *why* it's
+  # peeking even when agentReplyEnabled is off and there are no answer buttons.
+  exec "$ROOT/Scripts/notify-notchpill.sh" "$PROJECT" "waiting${BRANCH:+ · $BRANCH}" "$TERM_NAME" "$TERM_BUNDLE" "claude-code" "waiting" "$MESSAGE"
 fi
 
 # Title = project name (the scannable distinguisher). The agent badge already

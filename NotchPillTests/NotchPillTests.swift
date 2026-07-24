@@ -414,15 +414,46 @@ struct DevReadyAlertTests {
 
 @Suite("waitingLayout sizing")
 struct WaitingLayoutTests {
+    // `answerEnabled` is always passed explicitly: reading AppSettings.shared
+    // would couple these to the developer's real UserDefaults, and mutating it
+    // would write to them.
+    private let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                                       designExpandedWidth: 640, designExpandedHeight: 190,
+                                       scale: 0.65, topGap: 10)
+    private let waitingAlerts = [
+        DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal",
+                      kind: .waiting, message: "Allow Bash?")
+    ]
+
     @Test("a waiting alert with a message is taller than the finished peek")
     @MainActor func tallerThanFinished() {
-        let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
-                                   designExpandedWidth: 640, designExpandedHeight: 190,
-                                   scale: 0.65, topGap: 10)
-        let alerts = [DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal", kind: .waiting, message: "Allow Bash?")]
-        let waiting = NotchContentLayout.waitingLayout(metrics: metrics, alerts: alerts).size.height
-        let finished = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: alerts).size.height
+        let waiting = NotchContentLayout
+            .waitingLayout(metrics: metrics, alerts: waitingAlerts, answerEnabled: true).size.height
+        let finished = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: waitingAlerts).size.height
         #expect(waiting > finished)
+    }
+
+    @Test("the extra height budgets every gap the row actually renders")
+    @MainActor func extraMatchesRenderTree() {
+        // 6 (outer VStack spacing) + 30 (2-line message) + 6+24+6 (button row).
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: waitingAlerts, answerEnabled: true) == 72)
+    }
+
+    @Test("with answering off only the message is budgeted")
+    @MainActor func noAnswerButtons() {
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: waitingAlerts, answerEnabled: false) == 36)
+    }
+
+    @Test("an untargetable waiting alert gets no button allowance")
+    @MainActor func untargetable() {
+        let alerts = [DevReadyAlert(title: "proj", kind: .waiting, message: "Allow Bash?")]
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: alerts, answerEnabled: true) == 36)
+    }
+
+    @Test("finished-only alerts get no waiting allowance")
+    @MainActor func finishedOnly() {
+        let alerts = [DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal")]
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: alerts, answerEnabled: true) == 0)
     }
 }
 
@@ -628,11 +659,12 @@ struct DevReadyAlertKindTests {
 
 @MainActor @Suite("NotchState waiting peeks")
 struct NotchStateWaitingTests {
-    private func waiting(_ msg: String, bundle: String = "com.apple.Terminal") -> DevReadyAlert {
-        DevReadyAlert(title: "proj", bundleId: bundle, kind: .waiting, message: msg)
+    private func waiting(_ msg: String, bundle: String = "com.apple.Terminal",
+                         project: String = "proj") -> DevReadyAlert {
+        DevReadyAlert(title: project, bundleId: bundle, kind: .waiting, message: msg)
     }
-    @Test("a new waiting alert replaces a prior waiting alert for the same terminal")
-    func replacesPerTerminal() {
+    @Test("a new waiting alert replaces a prior waiting alert for the same session")
+    func replacesPerSession() {
         let s = NotchState()
         s.enqueueWaiting(waiting("q1"))
         s.enqueueWaiting(waiting("q2"))
@@ -640,12 +672,41 @@ struct NotchStateWaitingTests {
         #expect(waits.count == 1)
         #expect(waits.first?.message == "q2")
     }
-    @Test("waiting alerts for different terminals coexist")
+    @Test("waiting alerts for different terminal apps coexist")
     func differentTerminals() {
         let s = NotchState()
         s.enqueueWaiting(waiting("q1", bundle: "com.apple.Terminal"))
         s.enqueueWaiting(waiting("q2", bundle: "com.googlecode.iterm2"))
         #expect(s.devReadyAlerts.filter { $0.kind == .waiting }.count == 2)
+    }
+    @Test("two projects in the same terminal app coexist (replace key includes title)")
+    func sameBundleDifferentProject() {
+        // Two Claude Code sessions in two iTerm windows share the bundle id;
+        // keying on bundleId alone would let one project clobber the other.
+        let s = NotchState()
+        s.enqueueWaiting(waiting("q1", bundle: "com.googlecode.iterm2", project: "NotchPill"))
+        s.enqueueWaiting(waiting("q2", bundle: "com.googlecode.iterm2", project: "fleetmap"))
+        let waits = s.devReadyAlerts.filter { $0.kind == .waiting }
+        #expect(waits.count == 2)
+        #expect(waits.map(\.message) == ["q1", "q2"])
+    }
+    @Test("a finished ping supersedes that session's waiting peek")
+    func finishedSupersedesOwnSession() {
+        // Waiting peeks never auto-dismiss, so the finished ping is what retires
+        // them: once the agent reports done it is no longer blocked, and leaving
+        // the peek up would offer to type `y` into a terminal that moved on.
+        let s = NotchState()
+        s.enqueueWaiting(waiting("Allow Bash?"))
+        s.enqueueDevReady([DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal")])
+        #expect(s.devReadyAlerts.filter { $0.kind == .waiting }.isEmpty)
+        #expect(s.devReadyAlerts.count == 1)
+    }
+    @Test("a finished ping leaves another session's waiting peek alone")
+    func finishedSparesOtherSession() {
+        let s = NotchState()
+        s.enqueueWaiting(waiting("Allow Bash?", project: "NotchPill"))
+        s.enqueueDevReady([DevReadyAlert(title: "fleetmap", bundleId: "com.apple.Terminal")])
+        #expect(s.devReadyAlerts.filter { $0.kind == .waiting }.count == 1)
     }
     @Test("removeDevReady clears a waiting alert (answered)")
     func answeredClears() {
@@ -654,6 +715,112 @@ struct NotchStateWaitingTests {
         s.enqueueWaiting(a)
         s.removeDevReady(id: a.id)
         #expect(s.devReadyAlerts.isEmpty)
+    }
+    @Test("a finished ping's dismiss sweep leaves a waiting peek standing")
+    func finishedSweepSparesWaiting() {
+        // `dismissDevReady`'s auto-dismiss timer calls clearFinishedDevReady, so a
+        // finished ping from terminal B must not erase terminal A's blocked question.
+        let s = NotchState()
+        let blocked = waiting("Allow Bash?")
+        s.enqueueWaiting(blocked)
+        s.enqueueDevReady([DevReadyAlert(id: "fin", title: "other", subtitle: "finished")])
+        #expect(s.devReadyAlerts.count == 2)
+        s.clearFinishedDevReady()
+        #expect(s.devReadyAlerts.map(\.id) == [blocked.id])
+    }
+    @Test("clearFinishedDevReady empties the list when nothing is waiting")
+    func finishedOnlyClearsFully() {
+        let s = NotchState()
+        s.enqueueDevReady([DevReadyAlert(id: "a", title: "one"), DevReadyAlert(id: "b", title: "two")])
+        s.clearFinishedDevReady()
+        #expect(s.devReadyAlerts.isEmpty)
+    }
+}
+
+@Suite("DevReadyDedup routing")
+struct DevReadyDedupTests {
+    @Test("a repeated finished ping inside the window is suppressed")
+    func finishedSuppressed() {
+        var dedup = DevReadyDedup()
+        let a = DevReadyAlert(title: "proj", subtitle: "finished · main")
+        #expect(dedup.shouldSuppress(a) == false)
+        #expect(dedup.shouldSuppress(a) == true)
+    }
+    @Test("a finished ping past the window is allowed again")
+    func finishedExpires() {
+        var dedup = DevReadyDedup()
+        let now = Date()
+        let a = DevReadyAlert(title: "proj", subtitle: "finished · main")
+        #expect(dedup.shouldSuppress(a, now: now) == false)
+        #expect(dedup.shouldSuppress(a, now: now.addingTimeInterval(13)) == false)
+    }
+    @Test("waiting alerts bypass the fingerprint dedup entirely")
+    func waitingBypasses() {
+        // Every question in a session shares the project|branch fingerprint —
+        // "permission to use Bash" then "permission to use Write" 5s later would
+        // be dropped, and the agent would hang with nothing on screen.
+        var dedup = DevReadyDedup()
+        let q1 = DevReadyAlert(title: "proj", subtitle: "waiting · main",
+                               kind: .waiting, message: "use Bash?")
+        let q2 = DevReadyAlert(title: "proj", subtitle: "waiting · main",
+                               kind: .waiting, message: "use Write?")
+        #expect(dedup.shouldSuppress(q1) == false)
+        #expect(dedup.shouldSuppress(q2) == false)
+    }
+    @Test("a waiting alert does not poison the finished window")
+    func waitingNotRecorded() {
+        var dedup = DevReadyDedup()
+        let waiting = DevReadyAlert(title: "proj", subtitle: "s", kind: .waiting)
+        let finished = DevReadyAlert(title: "proj", subtitle: "s")
+        #expect(dedup.shouldSuppress(waiting) == false)
+        #expect(dedup.shouldSuppress(finished) == false)
+    }
+}
+
+@Suite("stale waiting signals")
+struct StaleWaitingTests {
+    private func waiting(ageSeconds: TimeInterval?) -> DevReadyAlert {
+        DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal", kind: .waiting,
+                      message: "Allow Bash?",
+                      createdAt: ageSeconds.map { Date().timeIntervalSince1970 - $0 })
+    }
+    @Test("a waiting signal older than the TTL is demoted to finished")
+    func staleDemoted() {
+        // Queued at 2pm while NotchPill was closed, delivered at 6pm: the answer
+        // buttons would type `y⏎` into a terminal back at a shell prompt.
+        let demoted = DevReadyProvider.demotingStaleWaiting(waiting(ageSeconds: 4 * 3600))
+        #expect(demoted.kind == .finished)
+        #expect(demoted.message == "Allow Bash?")   // still shown, just not answerable
+    }
+    @Test("a fresh waiting signal stays waiting")
+    func freshKept() {
+        #expect(DevReadyProvider.demotingStaleWaiting(waiting(ageSeconds: 10)).kind == .waiting)
+    }
+    @Test("a missing createdAt is treated as not stale")
+    func missingTimestamp() {
+        #expect(DevReadyProvider.demotingStaleWaiting(waiting(ageSeconds: nil)).kind == .waiting)
+    }
+    @Test("a finished alert is never touched")
+    func finishedUntouched() {
+        let old = DevReadyAlert(title: "proj", createdAt: 1)
+        #expect(DevReadyProvider.demotingStaleWaiting(old).kind == .finished)
+    }
+    @Test("createdAt decodes from a number, a numeric string, or not at all")
+    func createdAtDecoding() {
+        let num = #"{"id":"a","title":"p","createdAt":1750000000}"#.data(using: .utf8)!
+        #expect(DevReadyAlert.parse(from: num)?.createdAt == 1_750_000_000)
+        let str = #"{"id":"a","title":"p","createdAt":"1750000000"}"#.data(using: .utf8)!
+        #expect(DevReadyAlert.parse(from: str)?.createdAt == 1_750_000_000)
+        // Malformed / missing must never drop the alert.
+        let bad = #"{"id":"a","title":"p","createdAt":"not-a-number"}"#.data(using: .utf8)!
+        #expect(DevReadyAlert.parse(from: bad)?.createdAt == nil)
+        #expect(DevReadyAlert.parse(from: bad)?.title == "p")
+        let none = #"{"id":"a","title":"p"}"#.data(using: .utf8)!
+        #expect(DevReadyAlert.parse(from: none)?.createdAt == nil)
+        // userInfo path too.
+        #expect(DevReadyAlert.parse(userInfo: ["title": "p", "createdAt": 1_750_000_000])?
+            .createdAt == 1_750_000_000)
+        #expect(DevReadyAlert.parse(userInfo: ["title": "p", "createdAt": "bogus"])?.createdAt == nil)
     }
 }
 

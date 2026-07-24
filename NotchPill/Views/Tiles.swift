@@ -524,6 +524,9 @@ struct DevReadyPeekRow: View {
                                 .background(Capsule().fill(Color.white.opacity(0.12)))
                         }
                         .buttonStyle(.plain)
+                        // "1"/"2"/"3" are meaningless read aloud on their own.
+                        .accessibilityLabel(ans.accessibilityLabel)
+                        .help(ans.accessibilityLabel)
                     }
                 }
                 .padding(.horizontal, 12)

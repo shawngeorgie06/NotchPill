@@ -54,8 +54,19 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     var bundleId: String?
     var kind: AlertKind = .finished
     var message: String?
+    /// When the signal was written, as Unix epoch seconds. Optional: signals from
+    /// older hook scripts have none, and a missing value means "unknown age",
+    /// never "stale".
+    var createdAt: TimeInterval?
 
     static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
+
+    /// Whether two alerts came from the same agent session, keyed on the terminal
+    /// app plus the project. `bundleId` alone is the terminal *app*, so two Claude
+    /// Code sessions in two iTerm windows would collide on it.
+    func isSameSession(as other: DevReadyAlert) -> Bool {
+        bundleId == other.bundleId && title == other.title
+    }
 
     init(
         id: String = UUID().uuidString,
@@ -65,7 +76,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         agent: String? = nil,
         bundleId: String? = nil,
         kind: AlertKind = .finished,
-        message: String? = nil
+        message: String? = nil,
+        createdAt: TimeInterval? = nil
     ) {
         self.id = id
         self.title = title
@@ -75,9 +87,12 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         self.bundleId = bundleId
         self.kind = kind
         self.message = message
+        self.createdAt = createdAt
     }
 
-    enum CodingKeys: String, CodingKey { case id, title, subtitle, source, agent, bundleId, kind, message }
+    enum CodingKeys: String, CodingKey {
+        case id, title, subtitle, source, agent, bundleId, kind, message, createdAt
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -89,6 +104,32 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         bundleId = try? c.decode(String.self, forKey: .bundleId)
         kind = (try? c.decode(AlertKind.self, forKey: .kind)) ?? .finished
         message = try? c.decode(String.self, forKey: .message)
+        // Tolerate a number, a numeric string, or nothing at all — a malformed
+        // timestamp must never drop an alert (matching the fields above).
+        createdAt = Self.epochSeconds(
+            (try? c.decode(Double.self, forKey: .createdAt))
+                ?? (try? c.decode(String.self, forKey: .createdAt))
+        )
+    }
+
+    /// Normalises a JSON `createdAt` (number or numeric string) to epoch seconds.
+    /// Non-positive and unparseable values become nil = "unknown age".
+    static func epochSeconds(_ raw: Any?) -> TimeInterval? {
+        let value: TimeInterval?
+        switch raw {
+        case let d as Double: value = d
+        case let i as Int: value = TimeInterval(i)
+        case let s as String: value = TimeInterval(s.trimmingCharacters(in: .whitespaces))
+        default: value = nil
+        }
+        guard let value, value > 0, value.isFinite else { return nil }
+        return value
+    }
+
+    /// Age in seconds, or nil when the signal carries no usable timestamp.
+    func age(at now: Date = Date()) -> TimeInterval? {
+        guard let createdAt else { return nil }
+        return now.timeIntervalSince1970 - createdAt
     }
 
     /// Short label for the agent or source shown in the peek row.
@@ -127,7 +168,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
             agent: userInfo["agent"] as? String,
             bundleId: userInfo["bundleId"] as? String,
             kind: AlertKind(rawValue: kindRaw ?? "") ?? .finished,
-            message: userInfo["message"] as? String
+            message: userInfo["message"] as? String,
+            createdAt: epochSeconds(userInfo["createdAt"])
         )
     }
 }

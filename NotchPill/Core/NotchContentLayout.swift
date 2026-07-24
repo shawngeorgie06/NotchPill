@@ -129,24 +129,59 @@ enum NotchContentLayout {
         )
     }
 
-    /// Taller peek for `.waiting` alerts — adds room for the question message line
-    /// and (when answerable) the Yes/No/1/2/3 button row, matching what
-    /// `DevReadyPeekRow` actually renders so the window is never over- or
-    /// under-sized. Computed from the same predicates the view gates on.
-    /// NOTE: a single flat allowance covers the waiting rows; with 2+ simultaneous
-    /// `.waiting` alerts the taller rows scroll inside the peek's ScrollView rather
-    /// than each getting its own allowance (accepted v1 limitation — `enqueueWaiting`
-    /// replaces per-terminal, so concurrent waiting peeks are uncommon).
+    /// Extra height a `.waiting` row needs on top of `devReadyRowHeight`, budgeted
+    /// against what `DevReadyPeekRow` actually renders (Tiles.swift):
+    ///
+    /// - `6`  — the row's outer `VStack(spacing: 6)` between the tap row and the
+    ///          waiting section (the section is always present for `.waiting`).
+    /// - `30` — the two-line `.lineLimit(2)` message at 11pt (2 × ~14pt leading
+    ///          plus a little slack), when any waiting alert carries one.
+    /// - `36` — the answer button row: the inner `VStack(spacing: 6)` gap, the
+    ///          ~24pt capsule (12pt text + 5pt vertical padding × 2), and the row's
+    ///          `.padding(.bottom, 6)`.
+    ///
+    /// Under-budgeting here is not cosmetic: a single-alert peek skips the
+    /// `ScrollView` and `devReadyContent` pins the list to the window height, so
+    /// anything past it draws outside the NSWindow — clipped *and* not
+    /// hit-testable, i.e. the answer capsules stop taking clicks.
+    ///
+    /// NOTE: a single flat allowance covers all waiting rows. Two simultaneous
+    /// `.waiting` alerts (different sessions — `enqueueWaiting` replaces only
+    /// within a session) share one allowance and scroll inside the peek's
+    /// ScrollView; accepted v1 limitation.
     @MainActor
-    static func waitingLayout(metrics: NotchMetrics, alerts: [DevReadyAlert]) -> NotchContentLayoutMetrics {
-        let base = devReadyLayout(metrics: metrics, alerts: alerts)
+    /// - Parameter answerEnabled: overrides `AppSettings.shared.agentReplyEnabled`.
+    ///   Tests pass it explicitly so they never read (or write) the developer's
+    ///   real UserDefaults. (It is `Bool?` rather than a defaulted `Bool` because
+    ///   a default argument is evaluated in a nonisolated context and cannot
+    ///   touch the main-actor singleton.)
+    static func waitingExtraHeight(
+        alerts: [DevReadyAlert],
+        answerEnabled: Bool? = nil
+    ) -> CGFloat {
+        guard alerts.contains(where: { $0.kind == .waiting }) else { return 0 }
         let hasMessage = alerts.contains { $0.kind == .waiting && !($0.message ?? "").isEmpty }
-        let canAnswer = AppSettings.shared.agentReplyEnabled
+        let canAnswer = (answerEnabled ?? AppSettings.shared.agentReplyEnabled)
             && alerts.contains { $0.kind == .waiting && TerminalReplyInjector.canTarget($0) }
-        let messageExtra: CGFloat = hasMessage ? 26 : 0
-        let buttonExtra: CGFloat = canAnswer ? 38 : 0
+        let sectionSpacing: CGFloat = 6
+        let messageExtra: CGFloat = hasMessage ? 30 : 0
+        let buttonExtra: CGFloat = canAnswer ? 6 + 24 + 6 : 0
+        return sectionSpacing + messageExtra + buttonExtra
+    }
+
+    /// Taller peek for `.waiting` alerts — adds room for the question message line
+    /// and (when answerable) the Yes/No/1/2/3 button row. See
+    /// `waitingExtraHeight` for the per-component budget.
+    @MainActor
+    static func waitingLayout(
+        metrics: NotchMetrics,
+        alerts: [DevReadyAlert],
+        answerEnabled: Bool? = nil
+    ) -> NotchContentLayoutMetrics {
+        let base = devReadyLayout(metrics: metrics, alerts: alerts)
+        let extra = waitingExtraHeight(alerts: alerts, answerEnabled: answerEnabled)
         return NotchContentLayoutMetrics(
-            size: CGSize(width: base.size.width, height: base.size.height + messageExtra + buttonExtra),
+            size: CGSize(width: base.size.width, height: base.size.height + extra),
             readability: base.readability,
             textScale: base.textScale
         )

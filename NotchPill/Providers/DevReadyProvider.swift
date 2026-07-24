@@ -28,12 +28,35 @@ final class DevReadyProvider {
             queue: .main
         ) { [weak self] notification in
             guard let alert = DevReadyAlert.parse(userInfo: notification.userInfo ?? [:]) else { return }
-            self?.onDevReady?(alert)
+            // Live path — a notification can only arrive while the app is running,
+            // so this is a no-op in practice; applied for uniformity.
+            self?.onDevReady?(Self.demotingStaleWaiting(alert))
         }
 
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.scanSignalFiles() }
         }
+    }
+
+    /// A `.waiting` signal older than this no longer describes a live question.
+    /// Signals queued while NotchPill wasn't running can be hours old; in Phase 1
+    /// a stale one was a cosmetic ghost peek, but a waiting peek carries live
+    /// answer buttons, so tapping one would focus a terminal that is back at a
+    /// shell prompt and type `y⏎` into it.
+    nonisolated static let waitingStaleAfter: TimeInterval = 300
+
+    /// Demotes an aged `.waiting` alert to `.finished`: still shown (you probably
+    /// want to know the agent asked), but with no answer buttons. Alerts with no
+    /// usable `createdAt` are treated as fresh — a missing timestamp must not
+    /// silently disable the feature.
+    nonisolated static func demotingStaleWaiting(_ alert: DevReadyAlert,
+                                                 now: Date = Date()) -> DevReadyAlert {
+        guard alert.kind == .waiting,
+              let age = alert.age(at: now),
+              age > waitingStaleAfter else { return alert }
+        var demoted = alert
+        demoted.kind = .finished
+        return demoted
     }
 
     func stop() {
@@ -60,7 +83,7 @@ final class DevReadyProvider {
 
             guard let data = try? Data(contentsOf: url),
                   let alert = DevReadyAlert.parse(from: data) else { continue }
-            onDevReady?(alert)
+            onDevReady?(Self.demotingStaleWaiting(alert))
         }
     }
 }

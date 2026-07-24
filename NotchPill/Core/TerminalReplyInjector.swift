@@ -6,6 +6,9 @@ import AppKit
 /// are validated manually.
 enum ReplyError: Error, Equatable {
     case emptyText, noTarget, targetNotRunning, accessibilityDenied
+    /// The target app never became frontmost within the focus window, so the
+    /// paste was aborted rather than fired into whatever else was focused.
+    case focusTimeout
 }
 
 enum TerminalReplyInjector {
@@ -28,8 +31,17 @@ enum TerminalReplyInjector {
         return nil
     }
 
+    /// Sends `text` to `bundleId`'s frontmost window.
+    ///
+    /// The synchronous return reports **pre-flight** failures only (`validate`)
+    /// — Phase 1's `performReply` and Phase 2's `performAnswer` both rely on
+    /// `nil` meaning "accepted". Failures that can only be discovered later (the
+    /// target never taking focus) are reported through `completion`, which fires
+    /// at most once and only for the async outcome.
     @MainActor
-    static func send(text: String, bundleId: String?, appendReturn: Bool = true) -> ReplyError? {
+    @discardableResult
+    static func send(text: String, bundleId: String?, appendReturn: Bool = true,
+                     completion: ((ReplyError?) -> Void)? = nil) -> ReplyError? {
         let app = (bundleId?.isEmpty == false)
             ? NSRunningApplication.runningApplications(withBundleIdentifier: bundleId!).first
             : nil
@@ -48,16 +60,27 @@ enum TerminalReplyInjector {
         let targetBundleId = bundleId ?? ""
         app.activate()
 
+        let restoreClipboard = {
+            pb.clearContents()
+            if let saved { pb.setString(saved, forType: .string) }
+        }
+
         // Condition-based wait: only paste once the target is actually the
         // frontmost app, so a slow cross-app switch never drops the paste into
-        // whatever happened to be focused. Falls through after the timeout.
-        waitUntilFrontmost(targetBundleId, attemptsLeft: 30) {
+        // whatever happened to be focused. On timeout we *abort* — never
+        // blind-fire: a stray ⏎ into a frontmost modal confirms its default button.
+        waitUntilFrontmost(targetBundleId, attemptsLeft: 30) { becameFrontmost in
+            guard becameFrontmost else {
+                restoreClipboard()
+                completion?(.focusTimeout)
+                return
+            }
             postCommandV()
             DispatchQueue.main.asyncAfter(deadline: .now() + pasteToReturn) {
                 if appendReturn { postReturn() }
                 DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
-                    pb.clearContents()
-                    if let saved { pb.setString(saved, forType: .string) }
+                    restoreClipboard()
+                    completion?(nil)
                 }
             }
         }
@@ -65,13 +88,17 @@ enum TerminalReplyInjector {
     }
 
     /// Polls (every 20ms, up to `attemptsLeft`) until `bundleId` is frontmost,
-    /// then runs `body`. Runs `body` anyway once attempts are exhausted.
+    /// then runs `body(true)`. Once attempts are exhausted it runs `body(false)`
+    /// so the caller can abort — it never assumes focus it didn't observe.
     @MainActor
     private static func waitUntilFrontmost(_ bundleId: String, attemptsLeft: Int,
-                                           then body: @escaping () -> Void) {
-        if attemptsLeft <= 0
-            || NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleId {
-            body()
+                                           then body: @escaping (Bool) -> Void) {
+        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleId {
+            body(true)
+            return
+        }
+        if attemptsLeft <= 0 {
+            body(false)
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
