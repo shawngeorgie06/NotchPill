@@ -229,6 +229,17 @@ struct ReplyComposeView: View {
                     .foregroundStyle(.white.opacity(0.6))
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                Button {
+                    // Close the composer and dismiss this agent's peek entirely.
+                    state.cancelReply()
+                    actions.dismissDevReady(compose.targetAlert.id)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+                .buttonStyle(.plain)
+                .help("Close")
             }
             TextField("Reply…", text: Binding(
                 get: { state.replyCompose?.draft ?? "" },
@@ -249,7 +260,7 @@ struct ReplyComposeView: View {
                     .foregroundStyle(.orange)
                     .lineLimit(1)
             } else {
-                Text("Enter to send · Esc to cancel")
+                Text("Enter to send · ✕ to close")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.35))
             }
