@@ -9,8 +9,6 @@ enum ReplyError: Error, Equatable {
 }
 
 enum TerminalReplyInjector {
-    /// Settle delay after activating the terminal before pasting.
-    private static let activateSettle: TimeInterval = 0.12
     /// Delay after paste before pressing Return.
     private static let pasteToReturn: TimeInterval = 0.05
     /// Delay after Return before restoring the previous clipboard.
@@ -47,9 +45,13 @@ enum TerminalReplyInjector {
         pb.clearContents()
         pb.setString(text, forType: .string)
 
+        let targetBundleId = bundleId ?? ""
         app.activate()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + activateSettle) {
+        // Condition-based wait: only paste once the target is actually the
+        // frontmost app, so a slow cross-app switch never drops the paste into
+        // whatever happened to be focused. Falls through after the timeout.
+        waitUntilFrontmost(targetBundleId, attemptsLeft: 30) {
             postCommandV()
             DispatchQueue.main.asyncAfter(deadline: .now() + pasteToReturn) {
                 postReturn()
@@ -60,6 +62,21 @@ enum TerminalReplyInjector {
             }
         }
         return nil
+    }
+
+    /// Polls (every 20ms, up to `attemptsLeft`) until `bundleId` is frontmost,
+    /// then runs `body`. Runs `body` anyway once attempts are exhausted.
+    @MainActor
+    private static func waitUntilFrontmost(_ bundleId: String, attemptsLeft: Int,
+                                           then body: @escaping () -> Void) {
+        if attemptsLeft <= 0
+            || NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleId {
+            body()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+            waitUntilFrontmost(bundleId, attemptsLeft: attemptsLeft - 1, then: body)
+        }
     }
 
     // MARK: - CGEvent posting (virtual keycodes: v = 9, return = 36)
