@@ -410,6 +410,15 @@ struct DevReadyPeekRow: View {
     @State private var pulse = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            tapRow
+            if alert.kind == .waiting, AppSettings.shared.agentReplyEnabled, TerminalReplyInjector.canTarget(alert) {
+                waitingAnswerRow
+            }
+        }
+    }
+
+    private var tapRow: some View {
         HStack(spacing: 6) {
             Button(action: handleTap) {
                 HStack(spacing: 10) {
@@ -481,6 +490,37 @@ struct DevReadyPeekRow: View {
                 .help("Reply in the notch")
                 .padding(.trailing, 8)
             }
+        }
+    }
+
+    /// `.waiting`-only: the agent's question plus quick-answer buttons (Yes/No/1/2/3)
+    /// that deliver a keystroke to the blocked terminal. Gated the same as the
+    /// reply ↰ button above — never blind-fires into an untargetable terminal.
+    @ViewBuilder
+    private var waitingAnswerRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let message = alert.message, !message.isEmpty {
+                Text(message)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(2)
+                    .padding(.horizontal, 12)
+            }
+            HStack(spacing: 6) {
+                ForEach(AgentAnswer.standardSet.indices, id: \.self) { i in
+                    let ans = AgentAnswer.standardSet[i]
+                    Button { actions.answer(alert, ans) } label: {
+                        Text(ans.label)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Capsule().fill(Color.white.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
         }
     }
 

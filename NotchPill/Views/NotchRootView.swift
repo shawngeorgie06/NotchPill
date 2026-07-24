@@ -28,6 +28,9 @@ struct NotchRootView: View {
             return NotchContentLayout.replyComposeLayout(metrics: metrics)
         }
         if !state.devReadyAlerts.isEmpty {
+            if state.devReadyAlerts.contains(where: { $0.kind == .waiting }) {
+                return NotchContentLayout.waitingLayout(metrics: metrics, alerts: state.devReadyAlerts)
+            }
             return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: state.devReadyAlerts)
         }
         if state.isExpanded {

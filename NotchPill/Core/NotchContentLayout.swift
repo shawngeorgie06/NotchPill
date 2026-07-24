@@ -129,6 +129,18 @@ enum NotchContentLayout {
         )
     }
 
+    /// Taller peek for `.waiting` alerts — room for the question message line and
+    /// the answer-button row on top of the base dev-ready peek. Height tuned via E2E.
+    static func waitingLayout(metrics: NotchMetrics, alerts: [DevReadyAlert]) -> NotchContentLayoutMetrics {
+        let base = devReadyLayout(metrics: metrics, alerts: alerts)
+        let waitingExtra: CGFloat = 64   // message (≤2 lines) + Yes/No/1/2/3 button row + padding
+        return NotchContentLayoutMetrics(
+            size: CGSize(width: base.size.width, height: base.size.height + waitingExtra),
+            readability: base.readability,
+            textScale: base.textScale
+        )
+    }
+
     /// Fixed-size peek for the in-app update progress bar.
     static func updateLayout(metrics: NotchMetrics) -> NotchContentLayoutMetrics {
         let width = min(metrics.designExpandedWidth * metrics.scale,

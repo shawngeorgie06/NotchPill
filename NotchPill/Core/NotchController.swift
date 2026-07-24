@@ -401,6 +401,9 @@ final class NotchController {
         guard !state.devReadyAlerts.isEmpty else {
             return CGSize(width: metrics.notchWidth + 96, height: metrics.notchHeight + metrics.topGap + 54)
         }
+        if state.devReadyAlerts.contains(where: { $0.kind == .waiting }) {
+            return NotchContentLayout.waitingLayout(metrics: metrics, alerts: state.devReadyAlerts).size
+        }
         return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: state.devReadyAlerts).size
     }
 
