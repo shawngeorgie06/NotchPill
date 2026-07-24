@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Claude Code Stop / SubagentStop hook → NotchPill dev-ready ping.
+# Claude Code Stop / SubagentStop / Notification hook → NotchPill peek.
 #
 # Wire it up in ~/.claude/settings.json (see docs/CLAUDE-CODE-HOOK.md):
 #   "Stop":         [ { "hooks": [ { "type": "command", "command": "…/Scripts/claude-code-notify.sh Stop" } ] } ]
 #   "SubagentStop": [ { "hooks": [ { "type": "command", "command": "…/Scripts/claude-code-notify.sh SubagentStop" } ] } ]
+#   "Notification": [ { "hooks": [ { "type": "command", "command": "…/Scripts/claude-code-notify.sh Notification" } ] } ]
 #
-# The peek is labelled with the PROJECT folder name (plus git branch and the
-# terminal app) so you can tell which of several running Claude Code sessions
-# just finished. Tapping it focuses that terminal app.
+# Stop/SubagentStop: the peek is labelled with the PROJECT folder name (plus
+# git branch and the terminal app) so you can tell which of several running
+# Claude Code sessions just finished. Tapping it focuses that terminal app.
+#
+# Notification: fires on a permission prompt or ~60s idle-waiting-for-input;
+# sends a kind=waiting peek carrying the prompt's message text.
 set -euo pipefail
 
 EVENT="${1:-Stop}"
@@ -46,6 +50,14 @@ case "${TERM_PROGRAM:-}" in
   Hyper)           TERM_NAME="Hyper";     TERM_BUNDLE="co.zeit.hyper" ;;
   *)               TERM_NAME="${TERM_PROGRAM:-Terminal}"; TERM_BUNDLE="" ;;
 esac
+
+# Notification (permission prompt / idle-waiting-for-input) → a "waiting" peek
+# carrying the question text, bypassing the finished title/subtitle logic below.
+if [[ "$EVENT" == "Notification" ]]; then
+  MESSAGE="$(json_field message)"
+  [[ -n "$MESSAGE" ]] || MESSAGE="Waiting for your input"
+  exec "$ROOT/Scripts/notify-notchpill.sh" "$PROJECT" "${BRANCH:-}" "$TERM_NAME" "$TERM_BUNDLE" "claude-code" "waiting" "$MESSAGE"
+fi
 
 # Title = project name (the scannable distinguisher). The agent badge already
 # says "claude-code", so the subtitle just carries status + branch.
