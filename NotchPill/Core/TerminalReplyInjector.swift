@@ -29,7 +29,7 @@ enum TerminalReplyInjector {
     }
 
     @MainActor
-    static func send(text: String, bundleId: String?) -> ReplyError? {
+    static func send(text: String, bundleId: String?, appendReturn: Bool = true) -> ReplyError? {
         let app = (bundleId?.isEmpty == false)
             ? NSRunningApplication.runningApplications(withBundleIdentifier: bundleId!).first
             : nil
@@ -54,7 +54,7 @@ enum TerminalReplyInjector {
         waitUntilFrontmost(targetBundleId, attemptsLeft: 30) {
             postCommandV()
             DispatchQueue.main.asyncAfter(deadline: .now() + pasteToReturn) {
-                postReturn()
+                if appendReturn { postReturn() }
                 DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
                     pb.clearContents()
                     if let saved { pb.setString(saved, forType: .string) }

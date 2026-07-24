@@ -9,10 +9,12 @@ struct NotchActions {
     var dismissDevReady: (String) -> Void
     var beginReply: (DevReadyAlert) -> Void
     var sendReply: (DevReadyAlert, String) -> Void
+    var answer: (DevReadyAlert, AgentAnswer) -> Void
 
     static let noop = NotchActions(
         togglePlayPause: {}, next: {}, previous: {},
         focusApp: { _ in }, dismissDevReady: { _ in },
-        beginReply: { _ in }, sendReply: { _, _ in }
+        beginReply: { _ in }, sendReply: { _, _ in },
+        answer: { _, _ in }
     )
 }

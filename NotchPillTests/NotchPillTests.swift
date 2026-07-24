@@ -642,3 +642,24 @@ struct NotchStateWaitingTests {
         #expect(s.devReadyAlerts.isEmpty)
     }
 }
+
+// MARK: - AgentAnswer
+
+@Suite("AgentAnswer")
+struct AgentAnswerTests {
+    @Test("keystrokes map correctly")
+    func keystrokes() {
+        #expect(AgentAnswer.yes.keystroke == "y")
+        #expect(AgentAnswer.no.keystroke == "n")
+        #expect(AgentAnswer.digit(2).keystroke == "2")
+    }
+    @Test("labels")
+    func labels() {
+        #expect(AgentAnswer.yes.label == "Yes")
+        #expect(AgentAnswer.digit(3).label == "3")
+    }
+    @Test("standard set is Yes/No/1/2/3")
+    func standard() {
+        #expect(AgentAnswer.standardSet == [.yes, .no, .digit(1), .digit(2), .digit(3)])
+    }
+}

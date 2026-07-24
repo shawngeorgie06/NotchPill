@@ -211,7 +211,8 @@ final class NotchController {
             focusApp: { [weak self] bundleId in self?.focusSourceApp(bundleId: bundleId) },
             dismissDevReady: { [weak self] id in self?.dismissDevReady(id: id) },
             beginReply: { [weak self] alert in self?.state.beginReply(to: alert) },
-            sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) }
+            sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) },
+            answer: { [weak self] alert, ans in self?.performAnswer(alert: alert, answer: ans) }
         )
         return NotchRootView(state: state, shelf: shelf, timer: TimerStore.shared, metrics: metrics, actions: actions)
     }
@@ -728,5 +729,25 @@ final class NotchController {
         // Success: close composer and dismiss that agent's peek.
         state.cancelReply()
         dismissDevReady(id: alert.id)
+    }
+
+    private func performAnswer(alert: DevReadyAlert, answer: AgentAnswer) {
+        if let err = TerminalReplyInjector.send(text: answer.keystroke, bundleId: alert.bundleId,
+                                                appendReturn: answer.appendsReturn) {
+            // A tapped answer has no open composer; open one so the error is visible
+            // and the user can retry by typing. Mirrors performReply's error surface.
+            state.beginReply(to: alert)
+            switch err {
+            case .accessibilityDenied:
+                state.setReplyError("Grant Accessibility to answer")
+                AccessibilityAuthorization.requestSystemPrompt()
+            case .targetNotRunning:
+                state.setReplyError("\(alert.source ?? "Terminal") isn't running")
+            case .emptyText, .noTarget:
+                state.setReplyError("Couldn't send answer")
+            }
+            return
+        }
+        state.removeDevReady(id: alert.id)   // dismiss the answered waiting peek
     }
 }
