@@ -94,6 +94,7 @@ struct PreferencesView: View {
             Toggle("Show dev-ready notifications", isOn: $settings.showDevReadyPings)
             Toggle("Play a sound", isOn: $settings.devReadyPlaySound)
                 .disabled(!settings.showDevReadyPings)
+            Toggle("Reply to agents from the notch", isOn: $settings.agentReplyEnabled)
             HStack {
                 Text("Peek duration")
                 Spacer()

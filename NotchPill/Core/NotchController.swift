@@ -26,6 +26,10 @@ final class NotchController {
     private let systemStats = SystemStatsProvider()
     private let battery = BatteryProvider()
     private let devReady = DevReadyProvider()
+    private let replyHotKey = GlobalHotKey()
+    /// Most-recent finished-agent alert, kept so the reply hotkey can target it
+    /// even after its peek has auto-dismissed.
+    private var lastFinishedAlert: DevReadyAlert?
 
     // Hover.
     private var collapseWorkItem: DispatchWorkItem?
@@ -57,6 +61,8 @@ final class NotchController {
     private var cancellables = Set<AnyCancellable>()
 
     func start() {
+        replyHotKey.onPressed = { [weak self] in self?.openReplyForLatest() }
+        replyHotKey.register()
         hotZoneKeys.onTogglePlayPause = { [weak self] in self?.nowPlaying.togglePlayPause() }
         hotZoneKeys.onNext = { [weak self] in self?.nowPlaying.next() }
         hotZoneKeys.onPrevious = { [weak self] in self?.nowPlaying.previous() }
@@ -120,7 +126,8 @@ final class NotchController {
             shelf.$items.map { _ in () }.eraseToAnyPublisher(),
             TimerStore.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher(),
             state.$devReadyAlerts.map { _ in () }.eraseToAnyPublisher(),
-            state.$updateProgress.map { _ in () }.eraseToAnyPublisher()
+            state.$updateProgress.map { _ in () }.eraseToAnyPublisher(),
+            state.$replyCompose.map { _ in () }.eraseToAnyPublisher()
         )
         .receive(on: RunLoop.main)
         .sink { [weak self] in
@@ -135,6 +142,26 @@ final class NotchController {
         UpdateProgressStore.shared.$progress
             .receive(on: RunLoop.main)
             .sink { [weak self] progress in self?.state.updateProgress = progress }
+            .store(in: &cancellables)
+
+        // Pause auto-dismiss and take key focus while the reply composer is open.
+        state.$replyCompose
+            .receive(on: RunLoop.main)
+            .sink { [weak self] compose in
+                guard let self else { return }
+                // Suspend hot-zone key shortcuts so space/arrows type into the
+                // composer instead of toggling media / skipping tracks.
+                self.hotZoneKeys.suspended = compose != nil
+                if compose != nil {
+                    self.devReadyDismissItem?.cancel()      // hold the peek open
+                    self.window?.makeKeyAndOrderFront(nil)  // accept typing (nonactivating panel → no app switch)
+                } else {
+                    // Don't call resignKey() directly (system-owned). On send,
+                    // performReply activates the terminal which takes key away;
+                    // on cancel the nonactivating panel simply stops needing key.
+                    self.scheduleDevReadyDismiss()          // resume normal timeout
+                }
+            }
             .store(in: &cancellables)
     }
 
@@ -182,7 +209,9 @@ final class NotchController {
             next: { [weak self] in self?.nowPlaying.next() },
             previous: { [weak self] in self?.nowPlaying.previous() },
             focusApp: { [weak self] bundleId in self?.focusSourceApp(bundleId: bundleId) },
-            dismissDevReady: { [weak self] id in self?.dismissDevReady(id: id) }
+            dismissDevReady: { [weak self] id in self?.dismissDevReady(id: id) },
+            beginReply: { [weak self] alert in self?.state.beginReply(to: alert) },
+            sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) }
         )
         return NotchRootView(state: state, shelf: shelf, timer: TimerStore.shared, metrics: metrics, actions: actions)
     }
@@ -199,7 +228,17 @@ final class NotchController {
         hotZoneKeys.stop()
         nowPlaying.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
         systemStats.stop(); battery.stop(); devReady.stop()
+        replyHotKey.unregister()
         window?.orderOut(nil)
+    }
+
+    /// Opens the reply composer for the most-recent finished agent (its peek may
+    /// have already auto-dismissed). Bound to the ⌥⌘R global hotkey.
+    private func openReplyForLatest() {
+        guard AppSettings.shared.agentReplyEnabled else { return }
+        guard let alert = state.devReadyAlerts.last ?? lastFinishedAlert,
+              TerminalReplyInjector.canTarget(alert) else { return }
+        state.beginReply(to: alert)
     }
 
     // MARK: - Providers
@@ -349,6 +388,7 @@ final class NotchController {
 
     private func expandedContentSize() -> CGSize {
         if state.updateProgress != nil { return NotchContentLayout.updateLayout(metrics: metrics).size }
+        if state.replyCompose != nil { return NotchContentLayout.replyComposeLayout(metrics: metrics).size }
         if !state.devReadyAlerts.isEmpty { return devReadyContentSize() }
         let activities = NotchContentSnapshot.expandedActivities(
             state: state, shelf: shelf, timer: TimerStore.shared, settings: AppSettings.shared
@@ -611,6 +651,7 @@ final class NotchController {
         if recentDevReadyFingerprints.contains(where: { $0.0 == fingerprint }) { return }
         recentDevReadyFingerprints.append((fingerprint, now))
 
+        lastFinishedAlert = alert
         pendingDevReadyAlerts.append(alert)
         devReadyCoalesceItem?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.flushDevReadyBatch() }
@@ -669,5 +710,23 @@ final class NotchController {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
             .first?
             .activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
+    }
+
+    private func performReply(alert: DevReadyAlert, text: String) {
+        if let err = TerminalReplyInjector.send(text: text, bundleId: alert.bundleId) {
+            switch err {
+            case .accessibilityDenied:
+                state.setReplyError("Grant Accessibility to send replies")
+                AccessibilityAuthorization.requestSystemPrompt()
+            case .targetNotRunning:
+                state.setReplyError("\(alert.source ?? "Terminal") isn't running")
+            case .emptyText, .noTarget:
+                state.setReplyError("Couldn't send reply")
+            }
+            return
+        }
+        // Success: close composer and dismiss that agent's peek.
+        state.cancelReply()
+        dismissDevReady(id: alert.id)
     }
 }
