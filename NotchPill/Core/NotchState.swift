@@ -68,6 +68,14 @@ final class NotchState: ObservableObject {
         }
     }
 
+    /// Enqueues a "waiting" peek (an agent blocked on a permission/choice prompt).
+    /// A re-notification for the same terminal replaces its prior waiting peek;
+    /// different terminals coexist.
+    func enqueueWaiting(_ alert: DevReadyAlert) {
+        devReadyAlerts.removeAll { $0.kind == .waiting && $0.bundleId == alert.bundleId }
+        devReadyAlerts.append(alert)
+    }
+
     func removeDevReady(id: String) {
         devReadyAlerts.removeAll { $0.id == id }
     }

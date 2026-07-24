@@ -611,3 +611,34 @@ struct DevReadyAlertKindTests {
         #expect(a?.message == "pick one")
     }
 }
+
+@MainActor @Suite("NotchState waiting peeks")
+struct NotchStateWaitingTests {
+    private func waiting(_ msg: String, bundle: String = "com.apple.Terminal") -> DevReadyAlert {
+        DevReadyAlert(title: "proj", bundleId: bundle, kind: .waiting, message: msg)
+    }
+    @Test("a new waiting alert replaces a prior waiting alert for the same terminal")
+    func replacesPerTerminal() {
+        let s = NotchState()
+        s.enqueueWaiting(waiting("q1"))
+        s.enqueueWaiting(waiting("q2"))
+        let waits = s.devReadyAlerts.filter { $0.kind == .waiting }
+        #expect(waits.count == 1)
+        #expect(waits.first?.message == "q2")
+    }
+    @Test("waiting alerts for different terminals coexist")
+    func differentTerminals() {
+        let s = NotchState()
+        s.enqueueWaiting(waiting("q1", bundle: "com.apple.Terminal"))
+        s.enqueueWaiting(waiting("q2", bundle: "com.googlecode.iterm2"))
+        #expect(s.devReadyAlerts.filter { $0.kind == .waiting }.count == 2)
+    }
+    @Test("removeDevReady clears a waiting alert (answered)")
+    func answeredClears() {
+        let s = NotchState()
+        let a = waiting("q1")
+        s.enqueueWaiting(a)
+        s.removeDevReady(id: a.id)
+        #expect(s.devReadyAlerts.isEmpty)
+    }
+}
