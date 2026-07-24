@@ -129,13 +129,24 @@ enum NotchContentLayout {
         )
     }
 
-    /// Taller peek for `.waiting` alerts — room for the question message line and
-    /// the answer-button row on top of the base dev-ready peek. Height tuned via E2E.
+    /// Taller peek for `.waiting` alerts — adds room for the question message line
+    /// and (when answerable) the Yes/No/1/2/3 button row, matching what
+    /// `DevReadyPeekRow` actually renders so the window is never over- or
+    /// under-sized. Computed from the same predicates the view gates on.
+    /// NOTE: a single flat allowance covers the waiting rows; with 2+ simultaneous
+    /// `.waiting` alerts the taller rows scroll inside the peek's ScrollView rather
+    /// than each getting its own allowance (accepted v1 limitation — `enqueueWaiting`
+    /// replaces per-terminal, so concurrent waiting peeks are uncommon).
+    @MainActor
     static func waitingLayout(metrics: NotchMetrics, alerts: [DevReadyAlert]) -> NotchContentLayoutMetrics {
         let base = devReadyLayout(metrics: metrics, alerts: alerts)
-        let waitingExtra: CGFloat = 64   // message (≤2 lines) + Yes/No/1/2/3 button row + padding
+        let hasMessage = alerts.contains { $0.kind == .waiting && !($0.message ?? "").isEmpty }
+        let canAnswer = AppSettings.shared.agentReplyEnabled
+            && alerts.contains { $0.kind == .waiting && TerminalReplyInjector.canTarget($0) }
+        let messageExtra: CGFloat = hasMessage ? 26 : 0
+        let buttonExtra: CGFloat = canAnswer ? 38 : 0
         return NotchContentLayoutMetrics(
-            size: CGSize(width: base.size.width, height: base.size.height + waitingExtra),
+            size: CGSize(width: base.size.width, height: base.size.height + messageExtra + buttonExtra),
             readability: base.readability,
             textScale: base.textScale
         )

@@ -412,6 +412,20 @@ struct DevReadyAlertTests {
     }
 }
 
+@Suite("waitingLayout sizing")
+struct WaitingLayoutTests {
+    @Test("a waiting alert with a message is taller than the finished peek")
+    @MainActor func tallerThanFinished() {
+        let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                                   designExpandedWidth: 640, designExpandedHeight: 190,
+                                   scale: 0.65, topGap: 10)
+        let alerts = [DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal", kind: .waiting, message: "Allow Bash?")]
+        let waiting = NotchContentLayout.waitingLayout(metrics: metrics, alerts: alerts).size.height
+        let finished = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: alerts).size.height
+        #expect(waiting > finished)
+    }
+}
+
 @Suite("NowPlayingDisplayResolver")
 struct NowPlayingDisplayResolverTests {
     @Test("streaming domain is not shown as artist")

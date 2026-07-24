@@ -409,10 +409,15 @@ struct DevReadyPeekRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
 
+    /// Reply/answer affordances require the feature on AND a targetable terminal.
+    private var canAnswer: Bool {
+        AppSettings.shared.agentReplyEnabled && TerminalReplyInjector.canTarget(alert)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             tapRow
-            if alert.kind == .waiting, AppSettings.shared.agentReplyEnabled, TerminalReplyInjector.canTarget(alert) {
+            if alert.kind == .waiting {
                 waitingAnswerRow
             }
         }
@@ -476,7 +481,7 @@ struct DevReadyPeekRow: View {
             .buttonStyle(DevReadyRowButtonStyle())
             .onAppear { pulse = !reduceMotion }
 
-            if AppSettings.shared.agentReplyEnabled, TerminalReplyInjector.canTarget(alert) {
+            if canAnswer {
                 Button {
                     actions.beginReply(alert)
                 } label: {
@@ -493,9 +498,10 @@ struct DevReadyPeekRow: View {
         }
     }
 
-    /// `.waiting`-only: the agent's question plus quick-answer buttons (Yes/No/1/2/3)
-    /// that deliver a keystroke to the blocked terminal. Gated the same as the
-    /// reply ↰ button above — never blind-fires into an untargetable terminal.
+    /// `.waiting`-only: the agent's question, always visible, plus quick-answer
+    /// buttons (Yes/No/1/2/3) gated on `canAnswer` — the message must never be
+    /// hidden just because reply/answer isn't available, but we never blind-fire
+    /// a keystroke into an untargetable terminal.
     @ViewBuilder
     private var waitingAnswerRow: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -506,21 +512,23 @@ struct DevReadyPeekRow: View {
                     .lineLimit(2)
                     .padding(.horizontal, 12)
             }
-            HStack(spacing: 6) {
-                ForEach(AgentAnswer.standardSet.indices, id: \.self) { i in
-                    let ans = AgentAnswer.standardSet[i]
-                    Button { actions.answer(alert, ans) } label: {
-                        Text(ans.label)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(Capsule().fill(Color.white.opacity(0.12)))
+            if canAnswer {
+                HStack(spacing: 6) {
+                    ForEach(AgentAnswer.standardSet.indices, id: \.self) { i in
+                        let ans = AgentAnswer.standardSet[i]
+                        Button { actions.answer(alert, ans) } label: {
+                            Text(ans.label)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Capsule().fill(Color.white.opacity(0.12)))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 6)
         }
     }
 
