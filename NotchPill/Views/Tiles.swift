@@ -495,6 +495,24 @@ struct DevReadyPeekRow: View {
                 .help("Reply in the notch")
                 .padding(.trailing, 8)
             }
+
+            // Explicit dismiss. Tapping the row also clears the peek, but it
+            // focuses the terminal on the way out — a waiting peek needs a way to
+            // be sent away without stealing focus, and (unlike a finished ping)
+            // it never fades on its own.
+            Button {
+                actions.dismissPeek(alert.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss (Esc)")
+            .accessibilityLabel("Dismiss")
+            .padding(.trailing, 8)
         }
     }
 

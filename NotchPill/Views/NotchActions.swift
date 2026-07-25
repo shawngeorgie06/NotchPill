@@ -7,6 +7,8 @@ struct NotchActions {
     var previous: () -> Void
     var focusApp: (String) -> Void
     var dismissDevReady: (String) -> Void
+    /// Explicit dismissal that also clears `.waiting` peeks, which never time out.
+    var dismissPeek: (String) -> Void
     var beginReply: (DevReadyAlert) -> Void
     var sendReply: (DevReadyAlert, String) -> Void
     var answer: (DevReadyAlert, AgentAnswer) -> Void
@@ -14,6 +16,7 @@ struct NotchActions {
     static let noop = NotchActions(
         togglePlayPause: {}, next: {}, previous: {},
         focusApp: { _ in }, dismissDevReady: { _ in },
+        dismissPeek: { _ in },
         beginReply: { _ in }, sendReply: { _, _ in },
         answer: { _, _ in }
     )

@@ -100,6 +100,13 @@ final class NotchState: ObservableObject {
         devReadyAlerts.removeAll { $0.kind == .finished }
     }
 
+    /// Drops every peek including `.waiting`. Only for *explicit* user dismissal
+    /// (the ✕ button or Escape) — a `.waiting` peek doesn't time out, so this is
+    /// the user's way to say "I dealt with it, go away."
+    func clearAllDevReady() {
+        devReadyAlerts = []
+    }
+
     /// Shows the volume HUD briefly after a keyboard adjustment.
     func showVolume(_ level: Int) {
         systemVolume = level

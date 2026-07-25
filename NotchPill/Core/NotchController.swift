@@ -56,6 +56,8 @@ final class NotchController {
     private var devReadyCoalesceItem: DispatchWorkItem?
     private var pendingDevReadyAlerts: [DevReadyAlert] = []
     private var devReadyDedup = DevReadyDedup()
+    /// Escape-key monitors, installed only while a peek is showing.
+    private var peekEscapeMonitors: [Any] = []
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -133,6 +135,7 @@ final class NotchController {
             // Defer so @Published settings and state are committed before relayout.
             DispatchQueue.main.async {
                 self?.refreshOverlayContent(animated: true)
+                self?.syncPeekEscapeMonitors()
             }
         }
         .store(in: &cancellables)
@@ -213,6 +216,7 @@ final class NotchController {
             previous: { [weak self] in self?.nowPlaying.previous() },
             focusApp: { [weak self] bundleId in self?.focusSourceApp(bundleId: bundleId) },
             dismissDevReady: { [weak self] id in self?.dismissDevReady(id: id) },
+            dismissPeek: { [weak self] id in self?.dismissPeek(id: id) },
             beginReply: { [weak self] alert in self?.state.beginReply(to: alert) },
             sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) },
             answer: { [weak self] alert, ans in self?.performAnswer(alert: alert, answer: ans) }
@@ -233,6 +237,8 @@ final class NotchController {
         nowPlaying.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
         systemStats.stop(); battery.stop(); devReady.stop()
         replyHotKey.unregister()
+        peekEscapeMonitors.forEach(NSEvent.removeMonitor)
+        peekEscapeMonitors = []
         window?.orderOut(nil)
     }
 
@@ -742,6 +748,78 @@ final class NotchController {
         pillEngaged = false
         state.setExpanded(false)
         applyWindowFrame(animated: true)
+    }
+
+    /// Explicit dismissal of one peek (its ✕). Unlike tapping the row this does
+    /// not focus the terminal, and unlike the fade timer it will clear a
+    /// `.waiting` peek — which otherwise has no way to go away.
+    private func dismissPeek(id: String) {
+        state.removeDevReady(id: id)
+        guard state.devReadyAlerts.isEmpty else {
+            if !state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
+                devReadyDismissItem?.cancel()
+                devReadyDismissItem = nil
+            }
+            applyWindowFrame(animated: true)
+            return
+        }
+        collapseAfterDevReady()
+    }
+
+    /// Explicit user dismissal of everything — Escape. Clears **every** peek
+    /// including `.waiting`, which the auto-dismiss path deliberately spares.
+    private func dismissAllDevReady() {
+        guard !state.devReadyAlerts.isEmpty else { return }
+        state.clearAllDevReady()
+        collapseAfterDevReady()
+    }
+
+    /// Cancels the fade timer and collapses the pill, unless the pointer is still
+    /// on it (in which case hover keeps it open and we only resize).
+    private func collapseAfterDevReady() {
+        devReadyDismissItem?.cancel()
+        devReadyDismissItem = nil
+
+        let mouse = NSEvent.mouseLocation
+        if isPointerOverPill(mouse) || expandHoverScreenRect().insetBy(dx: -8, dy: -6).contains(mouse) {
+            applyWindowFrame(animated: true)
+            return
+        }
+        pillEngaged = false
+        state.setExpanded(false)
+        applyWindowFrame(animated: true)
+    }
+
+    /// Escape-to-dismiss, live **only** while a peek is on screen — the monitors
+    /// are torn down the moment the last one clears, so this is never a standing
+    /// system-wide key watcher.
+    private func syncPeekEscapeMonitors() {
+        let wantsMonitors = !state.devReadyAlerts.isEmpty
+        guard wantsMonitors != !peekEscapeMonitors.isEmpty else { return }
+
+        guard wantsMonitors else {
+            peekEscapeMonitors.forEach(NSEvent.removeMonitor)
+            peekEscapeMonitors = []
+            return
+        }
+        // Escape belongs to the composer whenever one is open (it cancels the
+        // reply); only take it for the peek when no composer has it.
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            guard let self, self.state.replyCompose == nil else { return }
+            self.dismissAllDevReady()
+        }) {
+            peekEscapeMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard event.keyCode == 53, let self,
+                  self.state.replyCompose == nil,
+                  !self.state.devReadyAlerts.isEmpty else { return event }
+            self.dismissAllDevReady()
+            return nil
+        }) {
+            peekEscapeMonitors.append(local)
+        }
     }
 
     private func focusSourceApp(bundleId: String) {
