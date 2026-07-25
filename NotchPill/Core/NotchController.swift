@@ -848,8 +848,13 @@ final class NotchController {
             // Code's own permission prompt it means "reject". Swallowing every
             // peek because the user rejected a prompt in the terminal would
             // destroy other sessions' still-blocked questions, which nothing else
-            // records. Only act when the user is demonstrably looking at the pill.
-            guard self.isPointerOverPill(NSEvent.mouseLocation) else { return }
+            // records. So require the pointer near the notch — but use the same
+            // generous zone hover-collapse uses, not the bare pill rect: aiming
+            // at a 200pt strip before hitting Escape is not a real affordance.
+            let mouse = NSEvent.mouseLocation
+            guard self.isPointerOverPill(mouse)
+                    || self.expandHoverScreenRect().insetBy(dx: -8, dy: -6).contains(mouse)
+            else { return }
             self.dismissAllDevReady()
         }) {
             peekEscapeMonitors.append(global)
