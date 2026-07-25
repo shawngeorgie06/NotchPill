@@ -100,6 +100,19 @@ final class NotchState: ObservableObject {
         devReadyAlerts.removeAll { $0.kind == .finished }
     }
 
+    /// Demotes on-screen `.waiting` peeks that have aged past the stale window to
+    /// `.finished`, dropping their answer buttons. The ingest-time check can't
+    /// cover this: a waiting peek never fades, so the one on screen is exactly the
+    /// thing that can sit there for hours while the terminal moves on.
+    /// Returns true if anything changed.
+    @discardableResult
+    func demoteStaleWaiting(now: Date = Date()) -> Bool {
+        let updated = devReadyAlerts.map { DevReadyProvider.demotingStaleWaiting($0, now: now) }
+        guard updated != devReadyAlerts else { return false }
+        devReadyAlerts = updated
+        return true
+    }
+
     /// Drops every peek including `.waiting`. Only for *explicit* user dismissal
     /// (the ✕ button or Escape) — a `.waiting` peek doesn't time out, so this is
     /// the user's way to say "I dealt with it, go away."

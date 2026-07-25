@@ -411,7 +411,9 @@ struct DevReadyPeekRow: View {
 
     /// Reply/answer affordances require the feature on AND a targetable terminal.
     private var canAnswer: Bool {
-        AppSettings.shared.agentReplyEnabled && TerminalReplyInjector.canTarget(alert)
+        AppSettings.shared.agentReplyEnabled
+            && TerminalReplyInjector.canTarget(alert)
+            && DevReadyProvider.demotingStaleWaiting(alert).kind == alert.kind
     }
 
     var body: some View {
@@ -496,23 +498,27 @@ struct DevReadyPeekRow: View {
                 .padding(.trailing, 8)
             }
 
-            // Explicit dismiss. Tapping the row also clears the peek, but it
-            // focuses the terminal on the way out — a waiting peek needs a way to
-            // be sent away without stealing focus, and (unlike a finished ping)
-            // it never fades on its own.
-            Button {
-                actions.dismissPeek(alert.id)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
+            // Explicit dismiss, `.waiting` only. Tapping the row also clears a
+            // peek, but it focuses the terminal on the way out — and a waiting
+            // peek never fades, so it needs a way to be sent away without
+            // stealing focus. Finished rows deliberately don't get one: they
+            // fade on their own, and adding a control here would eat ~32pt of
+            // their title width, changing the v1.3.0 peek.
+            if alert.kind == .waiting {
+                Button {
+                    actions.dismissPeek(alert.id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss · Esc dismisses all")
+                .accessibilityLabel("Dismiss")
+                .padding(.trailing, 8)
             }
-            .buttonStyle(.plain)
-            .help("Dismiss (Esc)")
-            .accessibilityLabel("Dismiss")
-            .padding(.trailing, 8)
         }
     }
 

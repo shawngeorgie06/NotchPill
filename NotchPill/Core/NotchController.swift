@@ -58,6 +58,8 @@ final class NotchController {
     private var devReadyDedup = DevReadyDedup()
     /// Escape-key monitors, installed only while a peek is showing.
     private var peekEscapeMonitors: [Any] = []
+    /// Ages out on-screen waiting peeks; runs only while one is up.
+    private var waitingStaleTimer: Timer?
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -136,6 +138,7 @@ final class NotchController {
             DispatchQueue.main.async {
                 self?.refreshOverlayContent(animated: true)
                 self?.syncPeekEscapeMonitors()
+                self?.syncWaitingStaleTimer()
             }
         }
         .store(in: &cancellables)
@@ -239,6 +242,8 @@ final class NotchController {
         replyHotKey.unregister()
         peekEscapeMonitors.forEach(NSEvent.removeMonitor)
         peekEscapeMonitors = []
+        waitingStaleTimer?.invalidate()
+        waitingStaleTimer = nil
         window?.orderOut(nil)
     }
 
@@ -419,7 +424,12 @@ final class NotchController {
 
     private func applyWindowFrame(animated: Bool) {
         guard let geometry, let window else { return }
-        let expanded = state.isExpanded || !state.devReadyAlerts.isEmpty || state.updateProgress != nil
+        // `replyCompose` must be here: the SwiftUI tree and `contentLayout` both
+        // size for the composer, so omitting it hands them a collapsed window and
+        // clips the composer to nothing. Reachable whenever a late send error
+        // reopens the composer after the pill has already collapsed.
+        let expanded = state.isExpanded || !state.devReadyAlerts.isEmpty
+            || state.updateProgress != nil || state.replyCompose != nil
         let frame = geometry.windowFrame(
             expanded: expanded,
             collapsedContentSize: collapsedContentSize(),
@@ -790,11 +800,38 @@ final class NotchController {
         applyWindowFrame(animated: true)
     }
 
-    /// Escape-to-dismiss, live **only** while a peek is on screen — the monitors
-    /// are torn down the moment the last one clears, so this is never a standing
-    /// system-wide key watcher.
+    /// Escape-to-dismiss, live **only** while a peek is actually on a rendered
+    /// notch — the monitors are torn down the moment the last peek clears, so
+    /// this is never a standing system-wide key watcher.
+    /// Runs a slow sweep while any `.waiting` peek is up, so one that outlives its
+    /// question loses its answer buttons instead of offering to type into a
+    /// terminal that has moved on. Stops as soon as no waiting peek remains.
+    private func syncWaitingStaleTimer() {
+        let wantsTimer = state.devReadyAlerts.contains { $0.kind == .waiting }
+        guard wantsTimer != (waitingStaleTimer != nil) else { return }
+
+        guard wantsTimer else {
+            waitingStaleTimer?.invalidate()
+            waitingStaleTimer = nil
+            return
+        }
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.state.demoteStaleWaiting()
+                self.syncWaitingStaleTimer()
+            }
+        }
+        timer.tolerance = 15
+        RunLoop.main.add(timer, forMode: .common)
+        waitingStaleTimer = timer
+    }
+
     private func syncPeekEscapeMonitors() {
-        let wantsMonitors = !state.devReadyAlerts.isEmpty
+        // `window == nil` on an external-only/clamshell setup: the peek is
+        // enqueued but never rendered and never fades, so without this the
+        // monitors would stay installed forever with nothing to dismiss.
+        let wantsMonitors = !state.devReadyAlerts.isEmpty && window != nil
         guard wantsMonitors != !peekEscapeMonitors.isEmpty else { return }
 
         guard wantsMonitors else {
@@ -807,6 +844,12 @@ final class NotchController {
         if let global = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
             guard event.keyCode == 53 else { return }
             guard let self, self.state.replyCompose == nil else { return }
+            // Escape in *another* app is that app's key, not ours — and in Claude
+            // Code's own permission prompt it means "reject". Swallowing every
+            // peek because the user rejected a prompt in the terminal would
+            // destroy other sessions' still-blocked questions, which nothing else
+            // records. Only act when the user is demonstrably looking at the pill.
+            guard self.isPointerOverPill(NSEvent.mouseLocation) else { return }
             self.dismissAllDevReady()
         }) {
             peekEscapeMonitors.append(global)
@@ -815,6 +858,10 @@ final class NotchController {
             guard event.keyCode == 53, let self,
                   self.state.replyCompose == nil,
                   !self.state.devReadyAlerts.isEmpty else { return event }
+            // Local monitors are app-wide, not window-scoped: without this,
+            // Escape in the Preferences window (or a sheet it opens) would be
+            // consumed here instead of closing it.
+            guard event.window === self.window else { return event }
             self.dismissAllDevReady()
             return nil
         }) {
@@ -828,20 +875,22 @@ final class NotchController {
             .activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
     }
 
-    /// Renders a `ReplyError` into the composer's error line. `verb` distinguishes
-    /// the reply and answer wordings.
-    private func showReplyError(_ err: ReplyError, alert: DevReadyAlert, verb: String) {
+    /// Renders a `ReplyError` into the composer's error line. The two call sites
+    /// pass their own copy — the reply wording is v1.3.0's verbatim and must not
+    /// drift, so it isn't derived from a shared verb.
+    private func showReplyError(_ err: ReplyError, alert: DevReadyAlert,
+                                grantCopy: String, failCopy: String) {
         let terminal = alert.source ?? "Terminal"
         switch err {
         case .accessibilityDenied:
-            state.setReplyError("Grant Accessibility to \(verb)")
+            state.setReplyError(grantCopy)
             AccessibilityAuthorization.requestSystemPrompt()
         case .targetNotRunning:
             state.setReplyError("\(terminal) isn't running")
         case .focusTimeout:
             state.setReplyError("Couldn't focus \(terminal) — nothing was sent")
         case .emptyText, .noTarget:
-            state.setReplyError("Couldn't \(verb)")
+            state.setReplyError(failCopy)
         }
     }
 
@@ -853,11 +902,15 @@ final class NotchController {
             // the user can retry rather than assume the reply landed.
             self.state.beginReply(to: alert)
             self.state.updateReplyDraft(text)
-            self.showReplyError(err, alert: alert, verb: "send replies")
+            self.showReplyError(err, alert: alert,
+                                grantCopy: "Grant Accessibility to send replies",
+                                failCopy: "Couldn't send reply")
         }
         if let err = TerminalReplyInjector.send(text: text, bundleId: alert.bundleId,
                                                 completion: late) {
-            showReplyError(err, alert: alert, verb: "send replies")
+            showReplyError(err, alert: alert,
+                           grantCopy: "Grant Accessibility to send replies",
+                           failCopy: "Couldn't send reply")
             return
         }
         // Success: close composer and dismiss that agent's peek.
@@ -871,7 +924,9 @@ final class NotchController {
         let surface: (ReplyError) -> Void = { [weak self] err in
             guard let self else { return }
             self.state.beginReply(to: alert)
-            self.showReplyError(err, alert: alert, verb: "answer")
+            self.showReplyError(err, alert: alert,
+                                grantCopy: "Grant Accessibility to answer",
+                                failCopy: "Couldn't send answer")
         }
         if let err = TerminalReplyInjector.send(text: answer.keystroke,
                                                 bundleId: alert.bundleId,

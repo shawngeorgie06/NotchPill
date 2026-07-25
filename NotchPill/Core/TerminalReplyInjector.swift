@@ -69,7 +69,11 @@ enum TerminalReplyInjector {
         // frontmost app, so a slow cross-app switch never drops the paste into
         // whatever happened to be focused. On timeout we *abort* — never
         // blind-fire: a stray ⏎ into a frontmost modal confirms its default button.
-        waitUntilFrontmost(targetBundleId, attemptsLeft: 30) { becameFrontmost in
+        // 125 × 20ms ≈ 2.5s. Generous on purpose: exceeding this now *discards*
+        // the send rather than firing it blind, and the case this feature exists
+        // for — the terminal is on another Space — routinely costs more than the
+        // 600ms that was fine back when overrunning it was harmless.
+        waitUntilFrontmost(targetBundleId, attemptsLeft: 125) { becameFrontmost in
             guard becameFrontmost else {
                 restoreClipboard()
                 completion?(.focusTimeout)

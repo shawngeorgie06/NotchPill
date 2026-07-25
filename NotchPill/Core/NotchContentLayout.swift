@@ -149,20 +149,25 @@ enum NotchContentLayout {
     /// `.waiting` alerts (different sessions — `enqueueWaiting` replaces only
     /// within a session) share one allowance and scroll inside the peek's
     /// ScrollView; accepted v1 limitation.
-    @MainActor
     /// - Parameter answerEnabled: overrides `AppSettings.shared.agentReplyEnabled`.
     ///   Tests pass it explicitly so they never read (or write) the developer's
     ///   real UserDefaults. (It is `Bool?` rather than a defaulted `Bool` because
     ///   a default argument is evaluated in a nonisolated context and cannot
     ///   touch the main-actor singleton.)
+    @MainActor
     static func waitingExtraHeight(
         alerts: [DevReadyAlert],
         answerEnabled: Bool? = nil
     ) -> CGFloat {
         guard alerts.contains(where: { $0.kind == .waiting }) else { return 0 }
         let hasMessage = alerts.contains { $0.kind == .waiting && !($0.message ?? "").isEmpty }
+        // Must mirror `DevReadyPeekRow.canAnswer` exactly, staleness included, or
+        // the budget reserves space for buttons the row won't draw.
         let canAnswer = (answerEnabled ?? AppSettings.shared.agentReplyEnabled)
-            && alerts.contains { $0.kind == .waiting && TerminalReplyInjector.canTarget($0) }
+            && alerts.contains {
+                $0.kind == .waiting && TerminalReplyInjector.canTarget($0)
+                    && DevReadyProvider.demotingStaleWaiting($0).kind == $0.kind
+            }
         let sectionSpacing: CGFloat = 6
         let messageExtra: CGFloat = hasMessage ? 30 : 0
         let buttonExtra: CGFloat = canAnswer ? 6 + 24 + 6 : 0

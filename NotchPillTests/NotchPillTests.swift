@@ -708,6 +708,41 @@ struct NotchStateWaitingTests {
         s.enqueueDevReady([DevReadyAlert(title: "fleetmap", bundleId: "com.apple.Terminal")])
         #expect(s.devReadyAlerts.filter { $0.kind == .waiting }.count == 1)
     }
+    @Test("clearAll drops waiting peeks where the finished sweep spares them")
+    func clearAllVsFinishedSweep() {
+        // The pair's contract: the fade timer must never take a waiting peek,
+        // but an explicit ✕/Escape must.
+        let s = NotchState()
+        s.enqueueWaiting(waiting("Allow Bash?"))
+        s.enqueueDevReady([DevReadyAlert(title: "other", bundleId: "com.apple.Terminal")])
+        s.clearFinishedDevReady()
+        #expect(s.devReadyAlerts.map(\.kind) == [.waiting])
+        s.clearAllDevReady()
+        #expect(s.devReadyAlerts.isEmpty)
+    }
+    @Test("an on-screen waiting peek demotes once it ages past the stale window")
+    func staleWaitingDemotes() {
+        // The ingest check can't cover this: a waiting peek never fades, so the
+        // one on screen is what sits there while the terminal moves on.
+        let s = NotchState()
+        let now = Date()
+        var old = waiting("Allow Bash?")
+        old.createdAt = now.timeIntervalSince1970 - (DevReadyProvider.waitingStaleAfter + 60)
+        s.enqueueWaiting(old)
+        #expect(s.demoteStaleWaiting(now: now))
+        #expect(s.devReadyAlerts.map(\.kind) == [.finished])
+        #expect(!s.demoteStaleWaiting(now: now))   // idempotent
+    }
+    @Test("a fresh waiting peek is left alone by the stale sweep")
+    func freshWaitingSurvives() {
+        let s = NotchState()
+        let now = Date()
+        var fresh = waiting("Allow Bash?")
+        fresh.createdAt = now.timeIntervalSince1970 - 5
+        s.enqueueWaiting(fresh)
+        #expect(!s.demoteStaleWaiting(now: now))
+        #expect(s.devReadyAlerts.map(\.kind) == [.waiting])
+    }
     @Test("removeDevReady clears a waiting alert (answered)")
     func answeredClears() {
         let s = NotchState()
