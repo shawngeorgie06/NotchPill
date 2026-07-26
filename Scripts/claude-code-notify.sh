@@ -51,6 +51,23 @@ case "${TERM_PROGRAM:-}" in
   *)               TERM_NAME="${TERM_PROGRAM:-Terminal}"; TERM_BUNDLE="" ;;
 esac
 
+# `TERM_PROGRAM` names the terminal *engine*, which is not always the app you
+# need to focus. Wrappers that embed another terminal report the engine: cmux
+# embeds Ghostty and sets TERM_PROGRAM=ghostty, so the table above resolves to
+# com.mitchellh.ghostty — an app that may not even be installed, leaving the
+# answer keystroke with nowhere to go. macOS sets __CFBundleIdentifier to the
+# bundle id of the app that actually launched this process, so prefer it.
+if [[ -n "${__CFBundleIdentifier:-}" && "${__CFBundleIdentifier}" != "$TERM_BUNDLE" ]]; then
+  TERM_BUNDLE="${__CFBundleIdentifier}"
+  # Name the host app rather than the engine, so the peek says "cmux", not
+  # "Ghostty". Cosmetic — never let the lookup fail the notify.
+  HOST_APP="$(mdfind -literal "kMDItemCFBundleIdentifier == '${__CFBundleIdentifier}'" 2>/dev/null | head -1 || true)"
+  if [[ -n "$HOST_APP" ]]; then
+    HOST_NAME="$(basename "$HOST_APP" .app)"
+    [[ -n "$HOST_NAME" ]] && TERM_NAME="$HOST_NAME"
+  fi
+fi
+
 # Notification (permission prompt / idle-waiting-for-input) → a "waiting" peek
 # carrying the question text, bypassing the finished title/subtitle logic below.
 if [[ "$EVENT" == "Notification" ]]; then

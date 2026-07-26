@@ -12,6 +12,16 @@ enum ReplyError: Error, Equatable {
 }
 
 enum TerminalReplyInjector {
+    /// Traces the whole delivery path (NOTCHPILL_LOG_REPLY=1). Every failure mode
+    /// here — a denied TCC grant, a target that isn't running, a focus handoff
+    /// that never lands — looks identical from the outside: "the answer just
+    /// didn't arrive". Without this you are guessing.
+    static let logReply = ProcessInfo.processInfo.environment["NOTCHPILL_LOG_REPLY"] == "1"
+    static func log(_ msg: @autoclosure () -> String) {
+        guard logReply else { return }
+        print("REPLY \(msg())")
+    }
+
     /// Delay after paste before pressing Return.
     private static let pasteToReturn: TimeInterval = 0.05
     /// Delay after Return before restoring the previous clipboard.
@@ -31,6 +41,19 @@ enum TerminalReplyInjector {
         return nil
     }
 
+    /// How the text reaches the terminal.
+    enum Delivery {
+        /// Clipboard + ⌘V. Right for free-text replies: the terminal emits it as a
+        /// *bracketed paste*, which a TUI routes to its text input.
+        case paste
+        /// Synthetic key events, one per character. Required for answering a TUI
+        /// prompt: Claude Code's permission prompt selects on **keypress**, and a
+        /// bracketed paste is not a keypress — verified end-to-end, where a pasted
+        /// `y` landed in the composer and submitted as a chat message while the
+        /// prompt sat untouched.
+        case keystrokes
+    }
+
     /// Sends `text` to `bundleId`'s frontmost window.
     ///
     /// The synchronous return reports **pre-flight** failures only (`validate`)
@@ -41,26 +64,37 @@ enum TerminalReplyInjector {
     @MainActor
     @discardableResult
     static func send(text: String, bundleId: String?, appendReturn: Bool = true,
+                     delivery: Delivery = .paste,
                      completion: ((ReplyError?) -> Void)? = nil) -> ReplyError? {
         let app = (bundleId?.isEmpty == false)
             ? NSRunningApplication.runningApplications(withBundleIdentifier: bundleId!).first
             : nil
+        let granted = AccessibilityAuthorization.isGranted
+        log("send text=\(text.debugDescription) bundleId=\(bundleId ?? "nil") "
+            + "appRunning=\(app != nil) accessibilityGranted=\(granted) appendReturn=\(appendReturn)")
+        log("frontmost at entry=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil")")
         if let err = validate(text: text, bundleId: bundleId,
                               isRunning: app != nil,
-                              accessibilityGranted: AccessibilityAuthorization.isGranted) {
+                              accessibilityGranted: granted) {
+            log("REJECTED pre-flight: \(err)")
             return err
         }
-        guard let app else { return .targetNotRunning }
+        guard let app else { log("REJECTED: app vanished"); return .targetNotRunning }
 
+        // Keystroke delivery never touches the clipboard — nothing to save or
+        // restore, and no window where the user's clipboard holds our payload.
         let pb = NSPasteboard.general
-        let saved = pb.string(forType: .string)
-        pb.clearContents()
-        pb.setString(text, forType: .string)
+        let saved = (delivery == .paste) ? pb.string(forType: .string) : nil
+        if delivery == .paste {
+            pb.clearContents()
+            pb.setString(text, forType: .string)
+        }
 
         let targetBundleId = bundleId ?? ""
         app.activate()
 
         let restoreClipboard = {
+            guard delivery == .paste else { return }
             pb.clearContents()
             if let saved { pb.setString(saved, forType: .string) }
         }
@@ -75,15 +109,25 @@ enum TerminalReplyInjector {
         // 600ms that was fine back when overrunning it was harmless.
         waitUntilFrontmost(targetBundleId, attemptsLeft: 125) { becameFrontmost in
             guard becameFrontmost else {
+                log("ABORT: \(targetBundleId) never became frontmost "
+                    + "(still \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"))")
                 restoreClipboard()
                 completion?(.focusTimeout)
                 return
             }
-            postCommandV()
+            switch delivery {
+            case .paste:
+                log("focused \(targetBundleId) — posting ⌘V")
+                postCommandV()
+            case .keystrokes:
+                log("focused \(targetBundleId) — typing \(text.debugDescription) as key events")
+                postCharacters(text)
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + pasteToReturn) {
-                if appendReturn { postReturn() }
+                if appendReturn { log("posting ⏎"); postReturn() }
                 DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
                     restoreClipboard()
+                    log("done — clipboard restored")
                     completion?(nil)
                 }
             }
@@ -115,6 +159,25 @@ enum TerminalReplyInjector {
     @MainActor private static func postCommandV() {
         postKey(9, flags: .maskCommand)
     }
+
+    /// Types `text` as individual key events. Uses `keyboardSetUnicodeString`
+    /// rather than a character→virtual-keycode table so it doesn't depend on the
+    /// user's keyboard layout — the terminal writes these straight through to the
+    /// pty as ordinary input, with none of the bracketed-paste framing that makes
+    /// a TUI treat the payload as text instead of a keypress.
+    @MainActor private static func postCharacters(_ text: String) {
+        let src = CGEventSource(stateID: .combinedSessionState)
+        for char in text.unicodeScalars {
+            var utf16 = Array(String(char).utf16)
+            guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false)
+            else { log("CGEvent creation FAILED for \(char.debugDescription)"); continue }
+            down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+            up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+        }
+    }
     @MainActor private static func postReturn() {
         postKey(36, flags: [])
     }
@@ -122,7 +185,7 @@ enum TerminalReplyInjector {
         let src = CGEventSource(stateID: .combinedSessionState)
         guard let down = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true),
               let up = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false)
-        else { return }
+        else { log("CGEvent creation FAILED for keyCode \(keyCode)"); return }
         down.flags = flags
         up.flags = flags
         down.post(tap: .cghidEventTap)

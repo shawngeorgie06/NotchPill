@@ -924,6 +924,9 @@ final class NotchController {
     }
 
     private func performAnswer(alert: DevReadyAlert, answer: AgentAnswer) {
+        TerminalReplyInjector.log("performAnswer tapped: \(answer.label) -> "
+            + "\(answer.keystroke.debugDescription) for alert=\(alert.title) "
+            + "kind=\(alert.kind) bundleId=\(alert.bundleId ?? "nil")")
         // A tapped answer has no open composer; open one so an error is visible
         // and the user can retry by typing. Mirrors performReply's error surface.
         let surface: (ReplyError) -> Void = { [weak self] err in
@@ -933,9 +936,12 @@ final class NotchController {
                                 grantCopy: "Grant Accessibility to answer",
                                 failCopy: "Couldn't send answer")
         }
+        // Key events, not a paste: a TUI permission prompt selects on keypress,
+        // and a bracketed paste lands in its composer instead.
         if let err = TerminalReplyInjector.send(text: answer.keystroke,
                                                 bundleId: alert.bundleId,
                                                 appendReturn: answer.appendsReturn,
+                                                delivery: .keystrokes,
                                                 completion: { err in if let err { surface(err) } }) {
             surface(err)
             return
