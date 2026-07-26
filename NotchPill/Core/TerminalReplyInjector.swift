@@ -22,8 +22,14 @@ enum TerminalReplyInjector {
         print("REPLY \(msg())")
     }
 
-    /// Delay after paste before pressing Return.
-    private static let pasteToReturn: TimeInterval = 0.05
+    /// Delay after a *paste* before pressing Return. Deliberately generous: a
+    /// TUI receives a bracketed paste as one chunk, and a Return arriving inside
+    /// that window is treated as a newline *within* the pasted text rather than
+    /// "submit" — the reply then sits in the composer, typed but never sent.
+    private static let pasteToReturn: TimeInterval = 0.35
+    /// Delay after *typed* characters before Return. These are already discrete
+    /// key events, so Return only has to land after the last one.
+    private static let keystrokeToReturn: TimeInterval = 0.08
     /// Delay after Return before restoring the previous clipboard.
     private static let restoreDelay: TimeInterval = 0.30
 
@@ -115,15 +121,18 @@ enum TerminalReplyInjector {
                 completion?(.focusTimeout)
                 return
             }
+            let settle: TimeInterval
             switch delivery {
             case .paste:
                 log("focused \(targetBundleId) — posting ⌘V")
                 postCommandV()
+                settle = pasteToReturn
             case .keystrokes:
                 log("focused \(targetBundleId) — typing \(text.debugDescription) as key events")
                 postCharacters(text)
+                settle = keystrokeToReturn
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + pasteToReturn) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + settle) {
                 if appendReturn { log("posting ⏎"); postReturn() }
                 DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
                     restoreClipboard()
