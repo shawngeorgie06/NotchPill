@@ -160,7 +160,7 @@ enum NotchContentLayout {
         answerEnabled: Bool? = nil
     ) -> CGFloat {
         guard alerts.contains(where: { $0.kind == .waiting }) else { return 0 }
-        let hasMessage = alerts.contains { $0.kind == .waiting && !($0.message ?? "").isEmpty }
+        let hasMessage = alerts.contains { $0.questionText != nil }
         // Must mirror `DevReadyPeekRow.canAnswer` exactly, staleness included, or
         // the budget reserves space for buttons the row won't draw.
         let canAnswer = (answerEnabled ?? AppSettings.shared.agentReplyEnabled)
@@ -204,11 +204,19 @@ enum NotchContentLayout {
         )
     }
 
-    /// Fixed-size composer panel for the in-notch reply field.
-    static func replyComposeLayout(metrics: NotchMetrics) -> NotchContentLayoutMetrics {
+    /// Room for the agent's question above the field: two 11pt lines plus the
+    /// VStack's spacing. Must match what `ReplyComposeView` renders.
+    static let replyQuestionExtra: CGFloat = 36
+
+    /// Composer panel for the in-notch reply field. Grows when the target is a
+    /// question, so the user can read what was asked while typing the answer
+    /// instead of switching back to the terminal to re-read it.
+    static func replyComposeLayout(metrics: NotchMetrics,
+                                   hasQuestion: Bool = false) -> NotchContentLayoutMetrics {
         let width = min(metrics.designExpandedWidth * metrics.scale,
                         max(metrics.notchWidth + 240, 380))
         let height = metrics.notchHeight + metrics.topGap + 92
+            + (hasQuestion ? replyQuestionExtra : 0)
         return NotchContentLayoutMetrics(
             size: CGSize(width: width, height: height),
             readability: 1.05,

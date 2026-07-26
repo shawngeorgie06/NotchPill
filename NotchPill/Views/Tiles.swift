@@ -529,8 +529,8 @@ struct DevReadyPeekRow: View {
     @ViewBuilder
     private var waitingAnswerRow: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let message = alert.message, !message.isEmpty {
-                Text(message)
+            if let question = alert.questionText {
+                Text(question)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(2)

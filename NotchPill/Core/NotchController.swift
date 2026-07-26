@@ -396,7 +396,12 @@ final class NotchController {
 
     private func expandedContentSize() -> CGSize {
         if state.updateProgress != nil { return NotchContentLayout.updateLayout(metrics: metrics).size }
-        if state.replyCompose != nil { return NotchContentLayout.replyComposeLayout(metrics: metrics).size }
+        if let compose = state.replyCompose {
+            return NotchContentLayout.replyComposeLayout(
+                metrics: metrics,
+                hasQuestion: compose.targetAlert.questionText != nil
+            ).size
+        }
         if !state.devReadyAlerts.isEmpty { return devReadyContentSize() }
         let activities = NotchContentSnapshot.expandedActivities(
             state: state, shelf: shelf, timer: TimerStore.shared, settings: AppSettings.shared

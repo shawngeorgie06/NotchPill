@@ -24,8 +24,11 @@ struct NotchRootView: View {
         if state.updateProgress != nil {
             return NotchContentLayout.updateLayout(metrics: metrics)
         }
-        if state.replyCompose != nil {
-            return NotchContentLayout.replyComposeLayout(metrics: metrics)
+        if let compose = state.replyCompose {
+            return NotchContentLayout.replyComposeLayout(
+                metrics: metrics,
+                hasQuestion: compose.targetAlert.questionText != nil
+            )
         }
         if !state.devReadyAlerts.isEmpty {
             if state.devReadyAlerts.contains(where: { $0.kind == .waiting }) {
@@ -250,7 +253,19 @@ struct ReplyComposeView: View {
                 .buttonStyle(.plain)
                 .help("Close")
             }
-            TextField("Reply…", text: Binding(
+            // The question, verbatim, above the field. The whole point of
+            // answering from the notch is not having to switch back to the
+            // terminal — which you'd have to do just to re-read what was asked.
+            if let question = compose.targetAlert.questionText {
+                Text(question)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            TextField(compose.targetAlert.questionText != nil ? "Your answer…" : "Reply…",
+                      text: Binding(
                 get: { state.replyCompose?.draft ?? "" },
                 set: { state.updateReplyDraft($0) }
             ))

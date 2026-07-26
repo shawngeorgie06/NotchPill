@@ -61,6 +61,15 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
 
     static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
 
+    /// The agent's question, when this alert is one. Single source of truth for
+    /// "is there a question to show" — the peek row, the composer, and both
+    /// height budgets read it, so they can't disagree about whether the space is
+    /// reserved and whether anything fills it.
+    var questionText: String? {
+        guard kind == .waiting, let message, !message.isEmpty else { return nil }
+        return message
+    }
+
     /// Whether two alerts came from the same agent session, keyed on the terminal
     /// app plus the project. `bundleId` alone is the terminal *app*, so two Claude
     /// Code sessions in two iTerm windows would collide on it.

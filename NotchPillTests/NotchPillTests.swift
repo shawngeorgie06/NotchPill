@@ -412,6 +412,39 @@ struct DevReadyAlertTests {
     }
 }
 
+@Suite("DevReadyAlert.questionText")
+struct QuestionTextTests {
+    @Test("only a waiting alert with a non-empty message has a question")
+    func onlyWaitingWithMessage() {
+        #expect(DevReadyAlert(title: "p", kind: .waiting, message: "Allow Bash?").questionText == "Allow Bash?")
+        // A finished ping's message is not a question — showing it in the
+        // composer would invite an answer nothing is waiting for.
+        #expect(DevReadyAlert(title: "p", kind: .finished, message: "Allow Bash?").questionText == nil)
+        #expect(DevReadyAlert(title: "p", kind: .waiting, message: "").questionText == nil)
+        #expect(DevReadyAlert(title: "p", kind: .waiting).questionText == nil)
+    }
+}
+
+@MainActor @Suite("replyComposeLayout")
+struct ReplyComposeLayoutTests {
+    private var metrics: NotchMetrics {
+        NotchMetrics(notchWidth: 180, notchHeight: 32,
+                     designExpandedWidth: 640, designExpandedHeight: 190,
+                     scale: 0.65, topGap: 10)
+    }
+    @Test("the composer reserves extra height when it shows a question")
+    func growsForQuestion() {
+        let plain = NotchContentLayout.replyComposeLayout(metrics: metrics).size.height
+        let withQ = NotchContentLayout.replyComposeLayout(metrics: metrics, hasQuestion: true).size.height
+        #expect(withQ - plain == NotchContentLayout.replyQuestionExtra)
+    }
+    @Test("width is unchanged by the question")
+    func widthUnchanged() {
+        #expect(NotchContentLayout.replyComposeLayout(metrics: metrics).size.width
+                == NotchContentLayout.replyComposeLayout(metrics: metrics, hasQuestion: true).size.width)
+    }
+}
+
 @Suite("waitingLayout sizing")
 struct WaitingLayoutTests {
     // `answerEnabled` is always passed explicitly: reading AppSettings.shared
