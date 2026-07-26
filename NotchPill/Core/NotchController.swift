@@ -338,10 +338,6 @@ final class NotchController {
             container.isExpandedProvider = { [weak self] in self?.state.isExpanded ?? false }
             container.collapsedContentSizeProvider = { [weak self] in self?.collapsedContentSize() ?? .zero }
             container.expandedContentSizeProvider = { [weak self] in self?.expandedContentSize() ?? .zero }
-            container.browserFlankContains = { [weak self] point in
-                guard let screen = self?.geometry?.screen else { return false }
-                return NotchGeometry.pointIsInBrowserFlank(point, on: screen)
-            }
             container.onSpacePressed = { [weak self] in self?.nowPlaying.togglePlayPause() }
             container.onPillEngaged = { [weak self] in self?.engagePill() }
             container.onDropFiles = { [weak self] urls in self?.shelf.add(urls: urls) }
@@ -372,10 +368,6 @@ final class NotchController {
             container?.metrics = metrics
             container?.collapsedContentSizeProvider = { [weak self] in self?.collapsedContentSize() ?? .zero }
             container?.expandedContentSizeProvider = { [weak self] in self?.expandedContentSize() ?? .zero }
-            container?.browserFlankContains = { [weak self] point in
-                guard let screen = self?.geometry?.screen else { return false }
-                return NotchGeometry.pointIsInBrowserFlank(point, on: screen)
-            }
             if let hosting = container?.subviews.first as? PassthroughHostingView<NotchRootView> {
                 hosting.rootView = root
                 hosting.acceptsScreenPoint = { [weak container] point in
@@ -481,7 +473,7 @@ final class NotchController {
 
     private func isPointerOverPill(_ point: NSPoint) -> Bool {
         if container?.isPointOnInteractivePill(point) == true { return true }
-        guard let geometry else { return false }
+        guard geometry != nil else { return false }
         let pad: CGFloat = state.isExpanded ? 16 : 10
         let rect = state.isExpanded ? expandedInteractionRect() : collapsedInteractionRect()
         return rect.insetBy(dx: -pad, dy: -pad).contains(point)
