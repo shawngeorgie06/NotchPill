@@ -55,8 +55,11 @@ final class NotchController {
     private var devReadyDismissItem: DispatchWorkItem?
     private var devReadyCoalesceItem: DispatchWorkItem?
     private var pendingDevReadyAlerts: [DevReadyAlert] = []
-    private var recentDevReadyFingerprints: [(String, Date)] = []
-    private let devReadyDedupInterval: TimeInterval = 12
+    private var devReadyDedup = DevReadyDedup()
+    /// Escape-key monitors, installed only while a peek is showing.
+    private var peekEscapeMonitors: [Any] = []
+    /// Ages out on-screen waiting peeks; runs only while one is up.
+    private var waitingStaleTimer: Timer?
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -134,6 +137,8 @@ final class NotchController {
             // Defer so @Published settings and state are committed before relayout.
             DispatchQueue.main.async {
                 self?.refreshOverlayContent(animated: true)
+                self?.syncPeekEscapeMonitors()
+                self?.syncWaitingStaleTimer()
             }
         }
         .store(in: &cancellables)
@@ -159,7 +164,11 @@ final class NotchController {
                     // Don't call resignKey() directly (system-owned). On send,
                     // performReply activates the terminal which takes key away;
                     // on cancel the nonactivating panel simply stops needing key.
-                    self.scheduleDevReadyDismiss()          // resume normal timeout
+                    // Only finished peeks fade; a waiting-only peek must not have
+                    // a dismiss timer re-armed behind it.
+                    if self.state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
+                        self.scheduleDevReadyDismiss()      // resume normal timeout
+                    }
                 }
             }
             .store(in: &cancellables)
@@ -210,8 +219,10 @@ final class NotchController {
             previous: { [weak self] in self?.nowPlaying.previous() },
             focusApp: { [weak self] bundleId in self?.focusSourceApp(bundleId: bundleId) },
             dismissDevReady: { [weak self] id in self?.dismissDevReady(id: id) },
+            dismissPeek: { [weak self] id in self?.dismissPeek(id: id) },
             beginReply: { [weak self] alert in self?.state.beginReply(to: alert) },
-            sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) }
+            sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) },
+            answer: { [weak self] alert, ans in self?.performAnswer(alert: alert, answer: ans) }
         )
         return NotchRootView(state: state, shelf: shelf, timer: TimerStore.shared, metrics: metrics, actions: actions)
     }
@@ -229,11 +240,16 @@ final class NotchController {
         nowPlaying.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
         systemStats.stop(); battery.stop(); devReady.stop()
         replyHotKey.unregister()
+        peekEscapeMonitors.forEach(NSEvent.removeMonitor)
+        peekEscapeMonitors = []
+        waitingStaleTimer?.invalidate()
+        waitingStaleTimer = nil
         window?.orderOut(nil)
     }
 
-    /// Opens the reply composer for the most-recent finished agent (its peek may
-    /// have already auto-dismissed). Bound to the ⌥⌘R global hotkey.
+    /// Opens the reply composer for the agent peek currently on screen, or — when
+    /// nothing is showing — the most-recent *finished* agent (whose peek has since
+    /// auto-dismissed). Bound to the ⌥⌘R global hotkey.
     private func openReplyForLatest() {
         guard AppSettings.shared.agentReplyEnabled else { return }
         guard let alert = state.devReadyAlerts.last ?? lastFinishedAlert,
@@ -322,10 +338,6 @@ final class NotchController {
             container.isExpandedProvider = { [weak self] in self?.state.isExpanded ?? false }
             container.collapsedContentSizeProvider = { [weak self] in self?.collapsedContentSize() ?? .zero }
             container.expandedContentSizeProvider = { [weak self] in self?.expandedContentSize() ?? .zero }
-            container.browserFlankContains = { [weak self] point in
-                guard let screen = self?.geometry?.screen else { return false }
-                return NotchGeometry.pointIsInBrowserFlank(point, on: screen)
-            }
             container.onSpacePressed = { [weak self] in self?.nowPlaying.togglePlayPause() }
             container.onPillEngaged = { [weak self] in self?.engagePill() }
             container.onDropFiles = { [weak self] urls in self?.shelf.add(urls: urls) }
@@ -356,10 +368,6 @@ final class NotchController {
             container?.metrics = metrics
             container?.collapsedContentSizeProvider = { [weak self] in self?.collapsedContentSize() ?? .zero }
             container?.expandedContentSizeProvider = { [weak self] in self?.expandedContentSize() ?? .zero }
-            container?.browserFlankContains = { [weak self] point in
-                guard let screen = self?.geometry?.screen else { return false }
-                return NotchGeometry.pointIsInBrowserFlank(point, on: screen)
-            }
             if let hosting = container?.subviews.first as? PassthroughHostingView<NotchRootView> {
                 hosting.rootView = root
                 hosting.acceptsScreenPoint = { [weak container] point in
@@ -388,7 +396,12 @@ final class NotchController {
 
     private func expandedContentSize() -> CGSize {
         if state.updateProgress != nil { return NotchContentLayout.updateLayout(metrics: metrics).size }
-        if state.replyCompose != nil { return NotchContentLayout.replyComposeLayout(metrics: metrics).size }
+        if let compose = state.replyCompose {
+            return NotchContentLayout.replyComposeLayout(
+                metrics: metrics,
+                hasQuestion: compose.targetAlert.questionText != nil
+            ).size
+        }
         if !state.devReadyAlerts.isEmpty { return devReadyContentSize() }
         let activities = NotchContentSnapshot.expandedActivities(
             state: state, shelf: shelf, timer: TimerStore.shared, settings: AppSettings.shared
@@ -400,12 +413,20 @@ final class NotchController {
         guard !state.devReadyAlerts.isEmpty else {
             return CGSize(width: metrics.notchWidth + 96, height: metrics.notchHeight + metrics.topGap + 54)
         }
+        if state.devReadyAlerts.contains(where: { $0.kind == .waiting }) {
+            return NotchContentLayout.waitingLayout(metrics: metrics, alerts: state.devReadyAlerts).size
+        }
         return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: state.devReadyAlerts).size
     }
 
     private func applyWindowFrame(animated: Bool) {
         guard let geometry, let window else { return }
-        let expanded = state.isExpanded || !state.devReadyAlerts.isEmpty || state.updateProgress != nil
+        // `replyCompose` must be here: the SwiftUI tree and `contentLayout` both
+        // size for the composer, so omitting it hands them a collapsed window and
+        // clips the composer to nothing. Reachable whenever a late send error
+        // reopens the composer after the pill has already collapsed.
+        let expanded = state.isExpanded || !state.devReadyAlerts.isEmpty
+            || state.updateProgress != nil || state.replyCompose != nil
         let frame = geometry.windowFrame(
             expanded: expanded,
             collapsedContentSize: collapsedContentSize(),
@@ -457,7 +478,7 @@ final class NotchController {
 
     private func isPointerOverPill(_ point: NSPoint) -> Bool {
         if container?.isPointOnInteractivePill(point) == true { return true }
-        guard let geometry else { return false }
+        guard geometry != nil else { return false }
         let pad: CGFloat = state.isExpanded ? 16 : 10
         let rect = state.isExpanded ? expandedInteractionRect() : collapsedInteractionRect()
         return rect.insetBy(dx: -pad, dy: -pad).contains(point)
@@ -645,11 +666,25 @@ final class NotchController {
 
     private func presentDevReady(_ alert: DevReadyAlert) {
         guard AppSettings.shared.showDevReadyPings else { return }
-        let fingerprint = "\(alert.title)|\(alert.subtitle ?? "")"
-        let now = Date()
-        recentDevReadyFingerprints.removeAll { now.timeIntervalSince($0.1) > devReadyDedupInterval }
-        if recentDevReadyFingerprints.contains(where: { $0.0 == fingerprint }) { return }
-        recentDevReadyFingerprints.append((fingerprint, now))
+
+        // Waiting alerts have their own lifecycle and must not touch the finished
+        // path: the finished fingerprint is `title|subtitle`, which for waiting
+        // alerts is project|branch — identical for every question from the same
+        // session, so the dedup window would silently drop the second question and
+        // leave the agent hanging. They also must not be batched into the
+        // auto-dismiss timer (a blocked agent stays blocked past 13s) and must not
+        // become `lastFinishedAlert`.
+        if alert.kind == .waiting {
+            state.enqueueWaiting(alert)   // replace-per-session, no fingerprint dedup
+            engagePill()
+            if AppSettings.shared.devReadyPlaySound {
+                NSSound(named: "Glass")?.play()
+            }
+            applyWindowFrame(animated: true)
+            return
+        }
+
+        if devReadyDedup.shouldSuppress(alert) { return }
 
         lastFinishedAlert = alert
         pendingDevReadyAlerts.append(alert)
@@ -680,11 +715,21 @@ final class NotchController {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
 
+    /// Auto-dismiss / explicit dismiss. Only `.finished` peeks are swept: a
+    /// `.waiting` peek represents a still-blocked agent and clears only when it is
+    /// answered, superseded, or removed as stale. With no waiting alerts present
+    /// this is byte-for-byte the v1.3.0 finished behaviour.
     private func dismissDevReady(id: String? = nil) {
         if let id {
             state.removeDevReady(id: id)
             if !state.devReadyAlerts.isEmpty {
-                scheduleDevReadyDismiss()
+                if state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
+                    scheduleDevReadyDismiss()
+                } else {
+                    // Waiting-only remainder: never re-arm the fade timer.
+                    devReadyDismissItem?.cancel()
+                    devReadyDismissItem = nil
+                }
                 applyWindowFrame(animated: true)
                 return
             }
@@ -693,7 +738,13 @@ final class NotchController {
         guard !state.devReadyAlerts.isEmpty else { return }
         devReadyDismissItem?.cancel()
         devReadyDismissItem = nil
-        state.clearDevReady()
+        state.clearFinishedDevReady()
+
+        guard state.devReadyAlerts.isEmpty else {
+            // Waiting peeks survive; keep the pill open and just resize.
+            applyWindowFrame(animated: true)
+            return
+        }
 
         let mouse = NSEvent.mouseLocation
         if isPointerOverPill(mouse) || expandHoverScreenRect().insetBy(dx: -8, dy: -6).contains(mouse) {
@@ -706,27 +757,214 @@ final class NotchController {
         applyWindowFrame(animated: true)
     }
 
+    /// Explicit dismissal of one peek (its ✕). Unlike tapping the row this does
+    /// not focus the terminal, and unlike the fade timer it will clear a
+    /// `.waiting` peek — which otherwise has no way to go away.
+    private func dismissPeek(id: String) {
+        state.removeDevReady(id: id)
+        guard state.devReadyAlerts.isEmpty else {
+            if !state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
+                devReadyDismissItem?.cancel()
+                devReadyDismissItem = nil
+            }
+            applyWindowFrame(animated: true)
+            return
+        }
+        collapseAfterDevReady()
+    }
+
+    /// Explicit user dismissal of everything — Escape. Clears **every** peek
+    /// including `.waiting`, which the auto-dismiss path deliberately spares.
+    private func dismissAllDevReady() {
+        guard !state.devReadyAlerts.isEmpty else { return }
+        state.clearAllDevReady()
+        collapseAfterDevReady()
+    }
+
+    /// Cancels the fade timer and collapses the pill, unless the pointer is still
+    /// on it (in which case hover keeps it open and we only resize).
+    private func collapseAfterDevReady() {
+        devReadyDismissItem?.cancel()
+        devReadyDismissItem = nil
+
+        let mouse = NSEvent.mouseLocation
+        if isPointerOverPill(mouse) || expandHoverScreenRect().insetBy(dx: -8, dy: -6).contains(mouse) {
+            applyWindowFrame(animated: true)
+            return
+        }
+        pillEngaged = false
+        state.setExpanded(false)
+        applyWindowFrame(animated: true)
+    }
+
+    /// Escape-to-dismiss, live **only** while a peek is actually on a rendered
+    /// notch — the monitors are torn down the moment the last peek clears, so
+    /// this is never a standing system-wide key watcher.
+    /// Runs a slow sweep while any `.waiting` peek is up, so one that outlives its
+    /// question loses its answer buttons instead of offering to type into a
+    /// terminal that has moved on. Stops as soon as no waiting peek remains.
+    private func syncWaitingStaleTimer() {
+        let wantsTimer = state.devReadyAlerts.contains { $0.kind == .waiting }
+        guard wantsTimer != (waitingStaleTimer != nil) else { return }
+
+        guard wantsTimer else {
+            waitingStaleTimer?.invalidate()
+            waitingStaleTimer = nil
+            return
+        }
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.state.demoteStaleWaiting()
+                self.syncWaitingStaleTimer()
+            }
+        }
+        timer.tolerance = 15
+        RunLoop.main.add(timer, forMode: .common)
+        waitingStaleTimer = timer
+    }
+
+    private func syncPeekEscapeMonitors() {
+        // `window == nil` on an external-only/clamshell setup: the peek is
+        // enqueued but never rendered and never fades, so without this the
+        // monitors would stay installed forever with nothing to dismiss.
+        let wantsMonitors = !state.devReadyAlerts.isEmpty && window != nil
+        guard wantsMonitors != !peekEscapeMonitors.isEmpty else { return }
+
+        guard wantsMonitors else {
+            peekEscapeMonitors.forEach(NSEvent.removeMonitor)
+            peekEscapeMonitors = []
+            return
+        }
+        // Escape belongs to the composer whenever one is open (it cancels the
+        // reply); only take it for the peek when no composer has it.
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            guard let self, self.state.replyCompose == nil else { return }
+            // Escape in *another* app is that app's key, not ours — and in Claude
+            // Code's own permission prompt it means "reject". Swallowing every
+            // peek because the user rejected a prompt in the terminal would
+            // destroy other sessions' still-blocked questions, which nothing else
+            // records. So require the pointer near the notch — but use the same
+            // generous zone hover-collapse uses, not the bare pill rect: aiming
+            // at a 200pt strip before hitting Escape is not a real affordance.
+            let mouse = NSEvent.mouseLocation
+            guard self.isPointerOverPill(mouse)
+                    || self.expandHoverScreenRect().insetBy(dx: -8, dy: -6).contains(mouse)
+            else { return }
+            self.dismissAllDevReady()
+        }) {
+            peekEscapeMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard event.keyCode == 53, let self,
+                  self.state.replyCompose == nil,
+                  !self.state.devReadyAlerts.isEmpty else { return event }
+            // Local monitors are app-wide, not window-scoped: without this,
+            // Escape in the Preferences window (or a sheet it opens) would be
+            // consumed here instead of closing it.
+            guard event.window === self.window else { return event }
+            self.dismissAllDevReady()
+            return nil
+        }) {
+            peekEscapeMonitors.append(local)
+        }
+    }
+
     private func focusSourceApp(bundleId: String) {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
             .first?
             .activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
     }
 
+    /// Renders a `ReplyError` into the composer's error line. The two call sites
+    /// pass their own copy — the reply wording is v1.3.0's verbatim and must not
+    /// drift, so it isn't derived from a shared verb.
+    private func showReplyError(_ err: ReplyError, alert: DevReadyAlert,
+                                grantCopy: String, failCopy: String) {
+        let terminal = alert.source ?? "Terminal"
+        switch err {
+        case .accessibilityDenied:
+            state.setReplyError(grantCopy)
+            AccessibilityAuthorization.requestSystemPrompt()
+        case .targetNotRunning:
+            state.setReplyError("\(terminal) isn't running")
+        case .focusTimeout:
+            state.setReplyError("Couldn't focus \(terminal) — nothing was sent")
+        case .emptyText, .noTarget:
+            state.setReplyError(failCopy)
+        }
+    }
+
     private func performReply(alert: DevReadyAlert, text: String) {
-        if let err = TerminalReplyInjector.send(text: text, bundleId: alert.bundleId) {
-            switch err {
-            case .accessibilityDenied:
-                state.setReplyError("Grant Accessibility to send replies")
-                AccessibilityAuthorization.requestSystemPrompt()
-            case .targetNotRunning:
-                state.setReplyError("\(alert.source ?? "Terminal") isn't running")
-            case .emptyText, .noTarget:
-                state.setReplyError("Couldn't send reply")
-            }
+        let late: (ReplyError?) -> Void = { [weak self] err in
+            guard let self, let err else { return }
+            // The composer was closed optimistically on the synchronous accept —
+            // reopen it with the draft restored so the failure is visible and
+            // the user can retry rather than assume the reply landed.
+            self.state.beginReply(to: alert)
+            self.state.updateReplyDraft(text)
+            self.showReplyError(err, alert: alert,
+                                grantCopy: "Grant Accessibility to send replies",
+                                failCopy: "Couldn't send reply")
+        }
+        if let err = TerminalReplyInjector.send(text: text, bundleId: alert.bundleId,
+                                                completion: late) {
+            showReplyError(err, alert: alert,
+                           grantCopy: "Grant Accessibility to send replies",
+                           failCopy: "Couldn't send reply")
             return
         }
         // Success: close composer and dismiss that agent's peek.
         state.cancelReply()
         dismissDevReady(id: alert.id)
+    }
+
+    private func performAnswer(alert: DevReadyAlert, answer: AgentAnswer) {
+        TerminalReplyInjector.log("performAnswer tapped: \(answer.label) -> "
+            + "\(answer.keystroke.debugDescription) for alert=\(alert.title) "
+            + "kind=\(alert.kind) bundleId=\(alert.bundleId ?? "nil")")
+        // A tapped answer has no open composer; open one so an error is visible
+        // and the user can retry by typing. Mirrors performReply's error surface.
+        let surface: (ReplyError) -> Void = { [weak self] err in
+            guard let self else { return }
+            self.state.beginReply(to: alert)
+            self.showReplyError(err, alert: alert,
+                                grantCopy: "Grant Accessibility to answer",
+                                failCopy: "Couldn't send answer")
+        }
+        // Key events, not a paste: a TUI permission prompt selects on keypress,
+        // and a bracketed paste lands in its composer instead.
+        if let err = TerminalReplyInjector.send(text: answer.keystroke,
+                                                bundleId: alert.bundleId,
+                                                appendReturn: answer.appendsReturn,
+                                                delivery: .keystrokes,
+                                                completion: { err in if let err { surface(err) } }) {
+            surface(err)
+            return
+        }
+        dismissDevReady(id: alert.id)   // dismiss the answered waiting peek
+    }
+}
+
+/// Short suppression window for repeated "finished" pings, keyed on
+/// `title|subtitle`. Extracted from `NotchController` so the routing rule is
+/// unit-testable without an NSWindow.
+///
+/// `.waiting` alerts are deliberately exempt. Their fingerprint is
+/// project|branch, which is identical for *every* question a session asks — a
+/// second permission prompt 5s after the first would be dropped and the agent
+/// would hang with nothing on screen.
+struct DevReadyDedup {
+    var interval: TimeInterval = 12
+    private var recent: [(String, Date)] = []
+
+    mutating func shouldSuppress(_ alert: DevReadyAlert, now: Date = Date()) -> Bool {
+        guard alert.kind == .finished else { return false }
+        let fingerprint = "\(alert.title)|\(alert.subtitle ?? "")"
+        recent.removeAll { now.timeIntervalSince($0.1) > interval }
+        if recent.contains(where: { $0.0 == fingerprint }) { return true }
+        recent.append((fingerprint, now))
+        return false
     }
 }

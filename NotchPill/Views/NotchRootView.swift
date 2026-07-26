@@ -24,10 +24,16 @@ struct NotchRootView: View {
         if state.updateProgress != nil {
             return NotchContentLayout.updateLayout(metrics: metrics)
         }
-        if state.replyCompose != nil {
-            return NotchContentLayout.replyComposeLayout(metrics: metrics)
+        if let compose = state.replyCompose {
+            return NotchContentLayout.replyComposeLayout(
+                metrics: metrics,
+                hasQuestion: compose.targetAlert.questionText != nil
+            )
         }
         if !state.devReadyAlerts.isEmpty {
+            if state.devReadyAlerts.contains(where: { $0.kind == .waiting }) {
+                return NotchContentLayout.waitingLayout(metrics: metrics, alerts: state.devReadyAlerts)
+            }
             return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: state.devReadyAlerts)
         }
         if state.isExpanded {
@@ -193,8 +199,14 @@ struct NotchRootView: View {
             DevReadyPeekListView(
                 alerts: alerts,
                 actions: actions,
+                // The scroller must be given the same waiting allowance the window
+                // frame was sized with, or a "waiting for A + finished for B" pair
+                // squeezes the tall waiting row into a flat 42pt/row scroller while
+                // the window itself grows — you'd have to scroll the notch overlay
+                // to reach the answer buttons.
                 maxScrollHeight: alerts.count > 1
                     ? NotchContentLayout.devReadyListHeight(rowCount: alerts.count)
+                        + NotchContentLayout.waitingExtraHeight(alerts: alerts)
                     : nil
             )
                 .padding(.top, metrics.topGap + 2)
@@ -241,7 +253,19 @@ struct ReplyComposeView: View {
                 .buttonStyle(.plain)
                 .help("Close")
             }
-            TextField("Reply…", text: Binding(
+            // The question, verbatim, above the field. The whole point of
+            // answering from the notch is not having to switch back to the
+            // terminal — which you'd have to do just to re-read what was asked.
+            if let question = compose.targetAlert.questionText {
+                Text(question)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            TextField(compose.targetAlert.questionText != nil ? "Your answer…" : "Reply…",
+                      text: Binding(
                 get: { state.replyCompose?.draft ?? "" },
                 set: { state.updateReplyDraft($0) }
             ))

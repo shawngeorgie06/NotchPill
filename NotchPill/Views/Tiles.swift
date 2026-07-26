@@ -409,7 +409,23 @@ struct DevReadyPeekRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
 
+    /// Reply/answer affordances require the feature on AND a targetable terminal.
+    private var canAnswer: Bool {
+        AppSettings.shared.agentReplyEnabled
+            && TerminalReplyInjector.canTarget(alert)
+            && DevReadyProvider.demotingStaleWaiting(alert).kind == alert.kind
+    }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            tapRow
+            if alert.kind == .waiting {
+                waitingAnswerRow
+            }
+        }
+    }
+
+    private var tapRow: some View {
         HStack(spacing: 6) {
             Button(action: handleTap) {
                 HStack(spacing: 10) {
@@ -467,7 +483,7 @@ struct DevReadyPeekRow: View {
             .buttonStyle(DevReadyRowButtonStyle())
             .onAppear { pulse = !reduceMotion }
 
-            if AppSettings.shared.agentReplyEnabled, TerminalReplyInjector.canTarget(alert) {
+            if canAnswer {
                 Button {
                     actions.beginReply(alert)
                 } label: {
@@ -480,6 +496,65 @@ struct DevReadyPeekRow: View {
                 .buttonStyle(.plain)
                 .help("Reply in the notch")
                 .padding(.trailing, 8)
+            }
+
+            // Explicit dismiss, `.waiting` only. Tapping the row also clears a
+            // peek, but it focuses the terminal on the way out — and a waiting
+            // peek never fades, so it needs a way to be sent away without
+            // stealing focus. Finished rows deliberately don't get one: they
+            // fade on their own, and adding a control here would eat ~32pt of
+            // their title width, changing the v1.3.0 peek.
+            if alert.kind == .waiting {
+                Button {
+                    actions.dismissPeek(alert.id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss · Esc dismisses all")
+                .accessibilityLabel("Dismiss")
+                .padding(.trailing, 8)
+            }
+        }
+    }
+
+    /// `.waiting`-only: the agent's question, always visible, plus quick-answer
+    /// buttons (Yes/No/1/2/3) gated on `canAnswer` — the message must never be
+    /// hidden just because reply/answer isn't available, but we never blind-fire
+    /// a keystroke into an untargetable terminal.
+    @ViewBuilder
+    private var waitingAnswerRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let question = alert.questionText {
+                Text(question)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(2)
+                    .padding(.horizontal, 12)
+            }
+            if canAnswer {
+                HStack(spacing: 6) {
+                    ForEach(AgentAnswer.standardSet.indices, id: \.self) { i in
+                        let ans = AgentAnswer.standardSet[i]
+                        Button { actions.answer(alert, ans) } label: {
+                            Text(ans.label)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Capsule().fill(Color.white.opacity(0.12)))
+                        }
+                        .buttonStyle(.plain)
+                        // "1"/"2"/"3" are meaningless read aloud on their own.
+                        .accessibilityLabel(ans.accessibilityLabel)
+                        .help(ans.accessibilityLabel)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
             }
         }
     }

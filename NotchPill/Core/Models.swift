@@ -52,8 +52,30 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// Specific agent identity, e.g. Composer, claude-opus-4, Worker 2.
     var agent: String?
     var bundleId: String?
+    var kind: AlertKind = .finished
+    var message: String?
+    /// When the signal was written, as Unix epoch seconds. Optional: signals from
+    /// older hook scripts have none, and a missing value means "unknown age",
+    /// never "stale".
+    var createdAt: TimeInterval?
 
     static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
+
+    /// The agent's question, when this alert is one. Single source of truth for
+    /// "is there a question to show" — the peek row, the composer, and both
+    /// height budgets read it, so they can't disagree about whether the space is
+    /// reserved and whether anything fills it.
+    var questionText: String? {
+        guard kind == .waiting, let message, !message.isEmpty else { return nil }
+        return message
+    }
+
+    /// Whether two alerts came from the same agent session, keyed on the terminal
+    /// app plus the project. `bundleId` alone is the terminal *app*, so two Claude
+    /// Code sessions in two iTerm windows would collide on it.
+    func isSameSession(as other: DevReadyAlert) -> Bool {
+        bundleId == other.bundleId && title == other.title
+    }
 
     init(
         id: String = UUID().uuidString,
@@ -61,7 +83,10 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         subtitle: String? = nil,
         source: String? = nil,
         agent: String? = nil,
-        bundleId: String? = nil
+        bundleId: String? = nil,
+        kind: AlertKind = .finished,
+        message: String? = nil,
+        createdAt: TimeInterval? = nil
     ) {
         self.id = id
         self.title = title
@@ -69,6 +94,51 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         self.source = source
         self.agent = agent
         self.bundleId = bundleId
+        self.kind = kind
+        self.message = message
+        self.createdAt = createdAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, subtitle, source, agent, bundleId, kind, message, createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        title = try c.decode(String.self, forKey: .title)
+        subtitle = try? c.decode(String.self, forKey: .subtitle)
+        source = try? c.decode(String.self, forKey: .source)
+        agent = try? c.decode(String.self, forKey: .agent)
+        bundleId = try? c.decode(String.self, forKey: .bundleId)
+        kind = (try? c.decode(AlertKind.self, forKey: .kind)) ?? .finished
+        message = try? c.decode(String.self, forKey: .message)
+        // Tolerate a number, a numeric string, or nothing at all — a malformed
+        // timestamp must never drop an alert (matching the fields above).
+        createdAt = Self.epochSeconds(
+            (try? c.decode(Double.self, forKey: .createdAt))
+                ?? (try? c.decode(String.self, forKey: .createdAt))
+        )
+    }
+
+    /// Normalises a JSON `createdAt` (number or numeric string) to epoch seconds.
+    /// Non-positive and unparseable values become nil = "unknown age".
+    static func epochSeconds(_ raw: Any?) -> TimeInterval? {
+        let value: TimeInterval?
+        switch raw {
+        case let d as Double: value = d
+        case let i as Int: value = TimeInterval(i)
+        case let s as String: value = TimeInterval(s.trimmingCharacters(in: .whitespaces))
+        default: value = nil
+        }
+        guard let value, value > 0, value.isFinite else { return nil }
+        return value
+    }
+
+    /// Age in seconds, or nil when the signal carries no usable timestamp.
+    func age(at now: Date = Date()) -> TimeInterval? {
+        guard let createdAt else { return nil }
+        return now.timeIntervalSince1970 - createdAt
     }
 
     /// Short label for the agent or source shown in the peek row.
@@ -98,16 +168,23 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !title.isEmpty else { return nil }
         let id = (userInfo["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kindRaw = userInfo["kind"] as? String
         return DevReadyAlert(
             id: (id?.isEmpty == false) ? id! : UUID().uuidString,
             title: title,
             subtitle: userInfo["subtitle"] as? String,
             source: userInfo["source"] as? String,
             agent: userInfo["agent"] as? String,
-            bundleId: userInfo["bundleId"] as? String
+            bundleId: userInfo["bundleId"] as? String,
+            kind: AlertKind(rawValue: kindRaw ?? "") ?? .finished,
+            message: userInfo["message"] as? String,
+            createdAt: epochSeconds(userInfo["createdAt"])
         )
     }
 }
+
+/// Whether an agent alert is a completed task (finished) or a pending question (waiting).
+enum AlertKind: String, Codable { case finished, waiting }
 
 extension Notification.Name {
     static let notchPillTestDevReady = Notification.Name("com.shawngeorgie06.NotchPill.testDevReady")

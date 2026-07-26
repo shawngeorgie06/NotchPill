@@ -60,6 +60,14 @@ final class NotchState: ObservableObject {
     func enqueueDevReady(_ alerts: [DevReadyAlert]) {
         guard !alerts.isEmpty else { return }
         for alert in alerts {
+            // A finished ping means that session is no longer blocked, so it
+            // supersedes that session's waiting peek. Without this, waiting peeks
+            // (which deliberately never auto-dismiss) would outlive the question:
+            // the answer buttons would sit there offering to type `y` into a
+            // terminal that has already moved on.
+            if alert.kind == .finished {
+                devReadyAlerts.removeAll { $0.kind == .waiting && $0.isSameSession(as: alert) }
+            }
             if let index = devReadyAlerts.firstIndex(where: { $0.id == alert.id }) {
                 devReadyAlerts[index] = alert
             } else {
@@ -68,11 +76,47 @@ final class NotchState: ObservableObject {
         }
     }
 
+    /// Enqueues a "waiting" peek (an agent blocked on a permission/choice prompt).
+    /// A re-notification for the same *session* replaces its prior waiting peek;
+    /// other sessions coexist.
+    ///
+    /// The replace key is `bundleId` **plus** `title` (the project), not
+    /// `bundleId` alone: `bundleId` identifies the terminal *app*, so two Claude
+    /// Code sessions in two iTerm windows share `com.googlecode.iterm2` and one
+    /// project's question would otherwise clobber the other's.
+    func enqueueWaiting(_ alert: DevReadyAlert) {
+        devReadyAlerts.removeAll { $0.kind == .waiting && $0.isSameSession(as: alert) }
+        devReadyAlerts.append(alert)
+    }
+
     func removeDevReady(id: String) {
         devReadyAlerts.removeAll { $0.id == id }
     }
 
-    func clearDevReady() {
+    /// Drops only `.finished` peeks, leaving `.waiting` peeks in place. The
+    /// finished auto-dismiss timer uses this so a finished ping from terminal B
+    /// can never erase terminal A's still-blocked question.
+    func clearFinishedDevReady() {
+        devReadyAlerts.removeAll { $0.kind == .finished }
+    }
+
+    /// Demotes on-screen `.waiting` peeks that have aged past the stale window to
+    /// `.finished`, dropping their answer buttons. The ingest-time check can't
+    /// cover this: a waiting peek never fades, so the one on screen is exactly the
+    /// thing that can sit there for hours while the terminal moves on.
+    /// Returns true if anything changed.
+    @discardableResult
+    func demoteStaleWaiting(now: Date = Date()) -> Bool {
+        let updated = devReadyAlerts.map { DevReadyProvider.demotingStaleWaiting($0, now: now) }
+        guard updated != devReadyAlerts else { return false }
+        devReadyAlerts = updated
+        return true
+    }
+
+    /// Drops every peek including `.waiting`. Only for *explicit* user dismissal
+    /// (the ✕ button or Escape) — a `.waiting` peek doesn't time out, so this is
+    /// the user's way to say "I dealt with it, go away."
+    func clearAllDevReady() {
         devReadyAlerts = []
     }
 

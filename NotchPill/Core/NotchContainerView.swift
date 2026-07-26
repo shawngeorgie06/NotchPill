@@ -12,8 +12,6 @@ final class NotchContainerView: NSView {
     var isExpandedProvider: () -> Bool = { false }
     var collapsedContentSizeProvider: () -> CGSize = { .zero }
     var expandedContentSizeProvider: () -> CGSize = { .zero }
-    /// Screen-coordinate test for browser tab flanks beside the notch.
-    var browserFlankContains: (NSPoint) -> Bool = { _ in false }
     var onHotEntered: () -> Void = {}
     var onHotExited: () -> Void = {}
     var onPillEngaged: () -> Void = {}
@@ -88,11 +86,16 @@ final class NotchContainerView: NSView {
     }
 
     func isPointOnInteractivePill(_ screenPoint: NSPoint) -> Bool {
-        if browserFlankContains(screenPoint) { return false }
         guard let window else { return false }
         let windowPoint = window.convertPoint(fromScreen: screenPoint)
         let local = convert(windowPoint, from: nil)
         if isInTabEar(at: local) { return false }
+        // The pill's own pixels win over the browser flank. The flank rects run
+        // 52pt below the menu bar (for unified tab bars), and an expanded peek is
+        // wider than the notch — so a blanket flank rejection here made the peek's
+        // trailing controls (reply ↰, ✕) unclickable and dropped the click onto
+        // the browser behind, pausing whatever was playing. `isInTabEar` already
+        // protects the strip beside the notch, which is what tabs actually need.
         return interactiveRectsLocal().contains { $0.insetBy(dx: -2, dy: -2).contains(local) }
     }
 
@@ -103,13 +106,15 @@ final class NotchContainerView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard let window else { return nil }
-        let screenPoint = window.convertToScreen(NSRect(origin: point, size: .zero)).origin
-        if browserFlankContains(screenPoint) { return nil }
         // Pass clicks through to browser tabs / menu bar unless expanded over the pill.
         guard isExpandedProvider() else { return nil }
         let local = convert(point, from: superview)
         if isInTabEar(at: local) { return nil }
+        // Same rule as `isPointOnInteractivePill`: inside the pill body the pill
+        // owns the click, even where a browser flank rect overlaps it. These two
+        // must agree — `updateMousePassthrough` decides whether the window accepts
+        // the event at all, and `hitTest` decides which view gets it. Disagreement
+        // means a window that accepts a click and then routes it nowhere.
         guard interactiveRectsLocal().contains(where: { $0.contains(local) }) else { return nil }
         return super.hitTest(point)
     }
