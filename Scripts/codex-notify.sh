@@ -91,7 +91,19 @@ case "$EVENT" in
       MESSAGE="$(json_field "$k")"
       [[ -n "$MESSAGE" ]] && break
     done
-    [[ -n "$MESSAGE" ]] || MESSAGE="Codex is waiting for your approval"
+    if [[ -z "$MESSAGE" ]]; then
+      MESSAGE="Codex is waiting for your approval"
+      # None of the guesses matched, so this payload is the one thing needed to
+      # finish the integration — keep a copy. Written once and never overwritten:
+      # the file's presence means "still unidentified", and once someone reads it
+      # and adds the right field name, the branch above stops being reached.
+      # Best-effort; a hook must never fail the turn over diagnostics.
+      DUMP="${HOME}/.notchpill/codex-permission-payload.json"
+      if [[ ! -f "$DUMP" ]]; then
+        mkdir -p "${HOME}/.notchpill" 2>/dev/null \
+          && printf '%s' "$INPUT" > "$DUMP" 2>/dev/null || true
+      fi
+    fi
     notify "$PROJECT" "waiting${BRANCH:+ · $BRANCH}" "$HOST_NAME" "$HOST_BUNDLE" \
            "codex" "waiting" "$MESSAGE" "$SESSION_ID"
     ;;

@@ -101,8 +101,19 @@ something small. On finish the notch peeks with the project folder name, a
   fire under `codex exec` (non-interactive runs have no human to ask), so it has
   only been exercised with a synthetic payload. `codex-notify.sh` tries
   `message`, `permission_request`, `reason`, `tool_name`, `command`, and
-  `description` in order, falling back to a generic line. If your waiting peeks
-  show the generic text, capture a real payload and add the right field.
+  `description` in order, falling back to a generic line.
+
+  It closes this gap by itself: when none of those match, it writes the raw
+  payload once to `~/.notchpill/codex-permission-payload.json`. So just use
+  Codex normally —
+
+  - no such file after a Codex approval ⇒ a guess matched, nothing to do;
+  - file present ⇒ it holds the real payload. Add the field that carries the
+    request text to the loop in `codex-notify.sh`, then delete the file.
+
+  It is written once and never overwritten, so its presence means "still
+  unidentified". Until then the peek still names the blocked session and still
+  focuses it on tap; only the question text is generic.
 - **Tap-to-answer does not work for Codex.** NotchPill's answer buttons are
   hardcoded to Claude Code's prompt shape (`Yes`/`No`/`1`/`2`/`3` in
   `AgentAnswer.standardSet`). Codex has its own approval keymap
