@@ -62,6 +62,13 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// hook passes one. This is the only field that distinguishes two agent
     /// sessions running in the *same project* from the *same terminal app*.
     var sessionId: String?
+    /// How this agent wants to be answered, e.g. `Yes:y|No:n|1|2|3`. See
+    /// `AgentAnswer.parse`. Absent means Claude Code's set — what every hook
+    /// written before this sent implicitly.
+    var answerSpec: String?
+    /// How an answer should reach the agent: `keystrokes` (default), `paste`, or
+    /// `none` for an agent that cannot be answered from the notch at all.
+    var deliverySpec: String?
 
     static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
 
@@ -106,7 +113,9 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         kind: AlertKind = .finished,
         message: String? = nil,
         createdAt: TimeInterval? = nil,
-        sessionId: String? = nil
+        sessionId: String? = nil,
+        answerSpec: String? = nil,
+        deliverySpec: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -118,10 +127,13 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         self.message = message
         self.createdAt = createdAt
         self.sessionId = Self.normalized(sessionId)
+        self.answerSpec = Self.normalized(answerSpec)
+        self.deliverySpec = Self.normalized(deliverySpec)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, subtitle, source, agent, bundleId, kind, message, createdAt, sessionId
+        case answerSpec = "answers", deliverySpec = "delivery"
     }
 
     /// Blank/whitespace-only ids are the same as absent — the shell writers omit
@@ -149,6 +161,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
                 ?? (try? c.decode(String.self, forKey: .createdAt))
         )
         sessionId = Self.normalized(try? c.decode(String.self, forKey: .sessionId))
+        answerSpec = Self.normalized(try? c.decode(String.self, forKey: .answerSpec))
+        deliverySpec = Self.normalized(try? c.decode(String.self, forKey: .deliverySpec))
     }
 
     /// Normalises a JSON `createdAt` (number or numeric string) to epoch seconds.
@@ -215,13 +229,28 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// Unrecognised producers keep the previous behaviour: someone wiring their
     /// own terminal agent to `notify-notchpill.sh` opted in by sending
     /// `kind=waiting`, and silently dropping their buttons would be a regression.
-    /// The real fix is for the answer set and delivery to travel in the signal
-    /// rather than being hardcoded to Claude Code's shape.
+    ///
+    /// A signal that *declares* how to answer it overrides all of this — the
+    /// guesswork above only exists for hooks that say nothing.
     var supportsTypedAnswers: Bool {
+        if deliverySpec?.lowercased() == "none" { return false }
+        if AgentAnswer.parse(answerSpec) != nil { return true }
         switch knownAgent {
         case .claudeCode, nil: return true
         case .codex, .cursor: return false
         }
+    }
+
+    /// The buttons to offer. Declared by the signal, else Claude Code's set.
+    var answers: [AgentAnswer] {
+        AgentAnswer.parse(answerSpec) ?? AgentAnswer.standardSet
+    }
+
+    /// How to deliver an answer. Keystrokes by default: a permission prompt in a
+    /// TUI selects on keypress, and a clipboard paste arrives as a bracketed
+    /// paste, which such a prompt routes to its text field instead.
+    var answerDelivery: TerminalReplyInjector.Delivery {
+        deliverySpec?.lowercased() == "paste" ? .paste : .keystrokes
     }
 
     /// Icon of the *agent's own* app, preferred over the host terminal's: the
@@ -269,7 +298,9 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
             kind: AlertKind(rawValue: kindRaw ?? "") ?? .finished,
             message: userInfo["message"] as? String,
             createdAt: epochSeconds(userInfo["createdAt"]),
-            sessionId: userInfo["sessionId"] as? String
+            sessionId: userInfo["sessionId"] as? String,
+            answerSpec: userInfo["answers"] as? String,
+            deliverySpec: userInfo["delivery"] as? String
         )
     }
 }

@@ -114,8 +114,12 @@ case "$EVENT" in
           && printf '%s' "$INPUT" > "$DUMP" 2>/dev/null || true
       fi
     fi
+    # `delivery=none`: Codex's approval prompt has its own keymap, and in the
+    # desktop app there is no TUI to type into at all — so say so in the signal
+    # rather than leaving NotchPill to infer it from the agent name. The peek
+    # still shows the question and focuses the session on tap.
     notify "$PROJECT" "waiting${BRANCH:+ · $BRANCH}" "$HOST_NAME" "$HOST_BUNDLE" \
-           "codex" "waiting" "$MESSAGE" "$SESSION_ID"
+           "codex" "waiting" "$MESSAGE" "$SESSION_ID" "" "none"
     ;;
   SubagentStop)
     notify "$PROJECT" "subagent finished${BRANCH:+ · $BRANCH}" "$HOST_NAME" "$HOST_BUNDLE" \

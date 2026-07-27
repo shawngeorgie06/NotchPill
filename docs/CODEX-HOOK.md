@@ -129,16 +129,38 @@ approval has to reach *you*, not the reviewer.
   It is written once and never overwritten, so its presence means "still
   unidentified". Until then the peek still names the blocked session and still
   focuses it on tap; only the question text is generic.
-- **Tap-to-answer does not work for Codex, and the buttons are hidden there.**
-  NotchPill's answer set is hardcoded to Claude Code's prompt shape
-  (`Yes`/`No`/`1`/`2`/`3` in `AgentAnswer.standardSet`) and delivered as
-  synthetic keystrokes to the host's frontmost window. Codex has its own approval
-  keymap (`approval.approve_for_session`, `approval.deny`, …), so those keys are
-  wrong — and in the desktop app there is no TUI to type into at all. Rather than
-  show buttons that quietly do the wrong thing, `DevReadyAlert.supportsTypedAnswers`
-  hides them for Codex (and Cursor, a GUI app for the same reason). The peek
-  still names the blocked session, shows the question, and focuses it on tap.
+- **Tap-to-answer is off for Codex**, declared by the hook as `delivery=none`.
+  Codex has its own approval keymap (`approval.approve_for_session`,
+  `approval.deny`, …), so `Yes`/`No`/`1`/`2`/`3` would be the wrong keys — and in
+  the desktop app there is no TUI to type into at all. The peek still names the
+  blocked session, shows the question, and focuses it on tap.
 
-  Making the answer set *and* the delivery method travel in the signal — the
-  sender saying "this prompt takes 1/2/3" or "send this over stdin" — is what
-  would let any agent be answered from the notch.
+  If you work out which keys Codex's prompt accepts in your setup, you can turn
+  answering on without touching NotchPill — see **Answering other agents** below.
+
+## Answering other agents
+
+The answer buttons are no longer Claude Code's. Any signal can declare its own
+set and how it should be delivered, as the last two arguments to
+`notify-notchpill.sh`:
+
+```bash
+notify-notchpill.sh "myproject" "waiting · main" MyTool com.example.term mytool \
+    waiting "Deploy to production?" "$SESSION_ID" \
+    'Approve:a|Deny:d|Later:l' keystrokes
+```
+
+- **answers** — `Label:keystroke` items separated by `|`; a bare `Label` means
+  the label is also the key (handy for `1|2|3`). `|` and `:` are the separators
+  so a label can contain spaces and commas (`Allow for session:a`). A trailing
+  `!` on the keystroke suppresses the Return that is otherwise appended —
+  use it for a TUI that self-confirms on keypress, where a stray Return would
+  confirm whatever prompt came next.
+- **delivery** — `keystrokes` (default), `paste`, or `none`. Keystrokes are right
+  for a TUI prompt, which selects on keypress; a clipboard paste arrives as a
+  *bracketed paste* and gets routed to the text field instead. Use `none` for an
+  agent that can't be answered this way at all.
+
+Omit both and you get Claude Code's set over keystrokes, which is what every
+hook written before this sent implicitly. A declared set also overrides
+NotchPill's per-agent guesswork — the signal knows better than the heuristic.

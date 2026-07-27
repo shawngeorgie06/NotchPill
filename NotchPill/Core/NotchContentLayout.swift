@@ -100,6 +100,12 @@ enum NotchContentLayout {
     // MARK: - Dev ready peek
 
     static let devReadyRowHeight: CGFloat = 42
+    /// Answer capsule size. Also the minimum *width*, so a one-character label
+    /// ("1") is still a square target rather than a sliver. 32 rather than the
+    /// old ~24: these are the primary action on a waiting peek and were the
+    /// smallest thing on it.
+    static let answerButtonHeight: CGFloat = 32
+    static let answerButtonSpacing: CGFloat = 8
     static let devReadyMaxVisibleRows = 3
     /// Wider than collapsed/hover chips so agent names and subtitles fit comfortably.
     static let devReadyMinWidth: CGFloat = 380
@@ -136,9 +142,8 @@ enum NotchContentLayout {
     ///          waiting section (the section is always present for `.waiting`).
     /// - `30` — the two-line `.lineLimit(2)` message at 11pt (2 × ~14pt leading
     ///          plus a little slack), when that alert carries one.
-    /// - `36` — the answer button row: the inner `VStack(spacing: 6)` gap, the
-    ///          ~24pt capsule (12pt text + 5pt vertical padding × 2), and the row's
-    ///          `.padding(.bottom, 6)`.
+    /// - the answer button row: the inner `VStack(spacing: 6)` gap, the capsule
+    ///   (`answerButtonHeight`), and the row's `.padding(.bottom, 6)`.
     ///
     /// Under-budgeting here is not cosmetic: a single-alert peek skips the
     /// `ScrollView` and `devReadyContent` pins the list to the window height, so
@@ -193,7 +198,7 @@ enum NotchContentLayout {
             && DevReadyProvider.demotingStaleWaiting(alert).kind == alert.kind
         let sectionSpacing: CGFloat = 6
         let messageExtra: CGFloat = alert.questionText != nil ? 30 : 0
-        let buttonExtra: CGFloat = canAnswer ? 6 + 24 + 6 : 0
+        let buttonExtra: CGFloat = canAnswer ? 6 + answerButtonHeight + 6 : 0
         return sectionSpacing + messageExtra + buttonExtra
     }
 

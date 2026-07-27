@@ -933,12 +933,13 @@ final class NotchController {
                                 grantCopy: "Grant Accessibility to answer",
                                 failCopy: "Couldn't send answer")
         }
-        // Key events, not a paste: a TUI permission prompt selects on keypress,
-        // and a bracketed paste lands in its composer instead.
+        // Key events by default: a TUI permission prompt selects on keypress, and
+        // a bracketed paste lands in its composer instead. An agent that wants
+        // otherwise says so in the signal (`delivery=paste`).
         if let err = TerminalReplyInjector.send(text: answer.keystroke,
                                                 bundleId: alert.bundleId,
                                                 appendReturn: answer.appendsReturn,
-                                                delivery: .keystrokes,
+                                                delivery: alert.answerDelivery,
                                                 completion: { err in if let err { surface(err) } }) {
             surface(err)
             return

@@ -412,6 +412,92 @@ struct DevReadyAlertTests {
     }
 }
 
+@Suite("answer sets declared by the signal")
+struct AgentAnswerSpecTests {
+    @Test("label:keystroke pairs, and bare labels that are their own key")
+    func parsesPairs() {
+        let parsed = AgentAnswer.parse("Yes:y|No:n|1|2|3")
+        #expect(parsed?.map(\.label) == ["Yes", "No", "1", "2", "3"])
+        #expect(parsed?.map(\.keystroke) == ["y", "n", "1", "2", "3"])
+    }
+
+    @Test("labels may contain spaces and commas")
+    func labelsWithPunctuation() {
+        // `|` and `:` separate precisely so a label like this stays intact.
+        let parsed = AgentAnswer.parse("Allow for session:a|Deny, always:d")
+        #expect(parsed?.map(\.label) == ["Allow for session", "Deny, always"])
+        #expect(parsed?.map(\.keystroke) == ["a", "d"])
+    }
+
+    @Test("a trailing ! suppresses Return")
+    func suppressesReturn() {
+        // A TUI that self-confirms on keypress must not also get a Return — it
+        // would confirm whatever prompt came next.
+        let parsed = AgentAnswer.parse("Approve:a!|Deny:d")
+        #expect(parsed?.first?.appendsReturn == false)
+        #expect(parsed?.last?.appendsReturn == true)
+    }
+
+    @Test("empty and malformed specs fall back rather than render nothing")
+    func emptySpecs() {
+        #expect(AgentAnswer.parse(nil) == nil)
+        #expect(AgentAnswer.parse("") == nil)
+        #expect(AgentAnswer.parse("   ") == nil)
+        #expect(AgentAnswer.parse("||") == nil)
+        #expect(AgentAnswer.parse(":x") == nil)     // no label
+        #expect(AgentAnswer.parse("Label:") == nil) // no keystroke
+    }
+
+    @Test("an alert with no spec still offers Claude Code's set")
+    func defaultsPreserved() {
+        // Every hook written before this sent no spec at all.
+        let alert = DevReadyAlert(title: "p", agent: "claude-code",
+                                  bundleId: "com.apple.Terminal", kind: .waiting)
+        #expect(alert.answers == AgentAnswer.standardSet)
+        #expect(alert.answerDelivery == .keystrokes)
+    }
+
+    @Test("a declared set overrides the per-agent guesswork")
+    func declarationWins() {
+        // Codex would be refused by name, but a signal that says how to answer it
+        // knows better than our heuristic.
+        let alert = DevReadyAlert(title: "p", agent: "codex", bundleId: "com.apple.Terminal",
+                                  kind: .waiting, answerSpec: "Approve:a|Deny:d")
+        #expect(alert.supportsTypedAnswers)
+        #expect(alert.answers.map(\.label) == ["Approve", "Deny"])
+    }
+
+    @Test("delivery=none refuses answers even with a declared set")
+    func deliveryNone() {
+        let alert = DevReadyAlert(title: "p", bundleId: "com.apple.Terminal", kind: .waiting,
+                                  answerSpec: "Yes:y", deliverySpec: "none")
+        #expect(!alert.supportsTypedAnswers)
+    }
+
+    @Test("delivery=paste is honoured")
+    func deliveryPaste() {
+        let alert = DevReadyAlert(title: "p", bundleId: "com.apple.Terminal", kind: .waiting,
+                                  deliverySpec: "paste")
+        #expect(alert.answerDelivery == .paste)
+    }
+
+    @Test("answers and delivery survive both signal transports")
+    func roundTrips() throws {
+        let data = Data("""
+        {"id":"a1","title":"p","kind":"waiting","answers":"Approve:a|Deny:d","delivery":"paste"}
+        """.utf8)
+        let decoded = try #require(DevReadyAlert.parse(from: data))
+        #expect(decoded.answers.map(\.keystroke) == ["a", "d"])
+        #expect(decoded.answerDelivery == .paste)
+
+        let posted = DevReadyAlert.parse(userInfo: [
+            "title": "p", "kind": "waiting", "answers": "Approve:a", "delivery": "none"
+        ])
+        #expect(posted?.answers.map(\.label) == ["Approve"])
+        #expect(posted?.supportsTypedAnswers == false)
+    }
+}
+
 @Suite("agent branding")
 struct AgentBrandingTests {
     @Test("the agent field identifies a brandable agent")
@@ -462,8 +548,10 @@ struct AgentBrandingTests {
                                   kind: .waiting, message: "Approve?")
         let claude = DevReadyAlert(title: "p", agent: "claude-code", bundleId: "com.apple.Terminal",
                                    kind: .waiting, message: "Approve?")
-        #expect(NotchContentLayout.waitingExtraHeight(alerts: [codex], answerEnabled: true) == 36)
-        #expect(NotchContentLayout.waitingExtraHeight(alerts: [claude], answerEnabled: true) == 72)
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: [codex], answerEnabled: true)
+                == WaitingLayoutTests.messageOnlyExtra)
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: [claude], answerEnabled: true)
+                == WaitingLayoutTests.withButtonsExtra)
     }
 
     @Test("an agent with no app installed has no agent icon to show")
@@ -532,21 +620,32 @@ struct WaitingLayoutTests {
         #expect(waiting > finished)
     }
 
+    /// 6 (outer VStack spacing) + 30 (2-line message), with no button row.
+    static let messageOnlyExtra: CGFloat = 36
+    /// …plus the button row: 6 gap + capsule + 6 bottom padding. Derived from the
+    /// capsule constant so resizing the buttons updates the budget with it —
+    /// under-budgeting clips them outside the window, where they stop hit-testing.
+    static var withButtonsExtra: CGFloat {
+        messageOnlyExtra + 6 + NotchContentLayout.answerButtonHeight + 6
+    }
+
     @Test("the extra height budgets every gap the row actually renders")
     @MainActor func extraMatchesRenderTree() {
-        // 6 (outer VStack spacing) + 30 (2-line message) + 6+24+6 (button row).
-        #expect(NotchContentLayout.waitingExtraHeight(alerts: waitingAlerts, answerEnabled: true) == 72)
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: waitingAlerts, answerEnabled: true)
+                == Self.withButtonsExtra)
     }
 
     @Test("with answering off only the message is budgeted")
     @MainActor func noAnswerButtons() {
-        #expect(NotchContentLayout.waitingExtraHeight(alerts: waitingAlerts, answerEnabled: false) == 36)
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: waitingAlerts, answerEnabled: false)
+                == Self.messageOnlyExtra)
     }
 
     @Test("an untargetable waiting alert gets no button allowance")
     @MainActor func untargetable() {
         let alerts = [DevReadyAlert(title: "proj", kind: .waiting, message: "Allow Bash?")]
-        #expect(NotchContentLayout.waitingExtraHeight(alerts: alerts, answerEnabled: true) == 36)
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: alerts, answerEnabled: true)
+                == Self.messageOnlyExtra)
     }
 
     @Test("finished-only alerts get no waiting allowance")
@@ -565,14 +664,16 @@ struct WaitingLayoutTests {
         // The flat allowance left every row after the first with no room for its
         // question, so its buttons rendered under the previous row's text.
         let two = [waiting("Allow Bash?", session: "a"), waiting("Allow Write?", session: "b")]
-        #expect(NotchContentLayout.waitingExtraHeight(alerts: two, answerEnabled: true) == 144)
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: two, answerEnabled: true)
+                == Self.withButtonsExtra * 2)
     }
 
     @Test("a finished row alongside a waiting one adds no allowance")
     @MainActor func mixedKinds() {
         let mixed = [waiting("Allow Bash?", session: "a"),
                      DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal")]
-        #expect(NotchContentLayout.waitingExtraHeight(alerts: mixed, answerEnabled: true) == 72)
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: mixed, answerEnabled: true)
+                == Self.withButtonsExtra)
     }
 
     @Test("only the visible rows are budgeted, taking the tallest")
@@ -583,7 +684,7 @@ struct WaitingLayoutTests {
         let four = (1...4).map { waiting("Allow Bash \($0)?", session: "s\($0)") }
         let capped = NotchContentLayout.devReadyMaxVisibleRows
         #expect(NotchContentLayout.waitingExtraHeight(alerts: four, answerEnabled: true)
-                == CGFloat(capped) * 72)
+                == CGFloat(capped) * Self.withButtonsExtra)
     }
 
     @Test("a peek with two waiting rows is taller than one with a single row")
@@ -596,7 +697,7 @@ struct WaitingLayoutTests {
             alerts: [waiting("Allow Bash?", session: "a"), waiting("Allow Write?", session: "b")],
             answerEnabled: true).size.height
         // Both the base row and its own waiting allowance must be added.
-        #expect(two >= one + NotchContentLayout.devReadyRowHeight + 72)
+        #expect(two >= one + NotchContentLayout.devReadyRowHeight + Self.withButtonsExtra)
     }
 }
 

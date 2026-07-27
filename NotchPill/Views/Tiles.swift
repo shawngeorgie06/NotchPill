@@ -542,15 +542,25 @@ struct DevReadyPeekRow: View {
                     .padding(.horizontal, 12)
             }
             if canAnswer {
-                HStack(spacing: 6) {
-                    ForEach(AgentAnswer.standardSet.indices, id: \.self) { i in
-                        let ans = AgentAnswer.standardSet[i]
+                // The set comes from the alert, not a constant: an agent that
+                // declares `Approve:a|Deny:d` gets those buttons and those keys.
+                let answers = alert.answers
+                HStack(spacing: NotchContentLayout.answerButtonSpacing) {
+                    ForEach(answers.indices, id: \.self) { i in
+                        let ans = answers[i]
                         Button { actions.answer(alert, ans) } label: {
                             Text(ans.label)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .padding(.horizontal, 10).padding(.vertical, 5)
-                                .background(Capsule().fill(Color.white.opacity(0.12)))
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .lineLimit(1)
+                                .padding(.horizontal, 14)
+                                .frame(minWidth: NotchContentLayout.answerButtonHeight,
+                                       minHeight: NotchContentLayout.answerButtonHeight)
+                                .background(Capsule().fill(Color.white.opacity(0.14)))
+                                // Without this the capsule's transparent corners
+                                // don't take clicks, so the target is smaller than
+                                // it looks — the reason these felt fiddly.
+                                .contentShape(Capsule())
                         }
                         .buttonStyle(.plain)
                         // "1"/"2"/"3" are meaningless read aloud on their own.
