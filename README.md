@@ -39,6 +39,38 @@ now-playing controls, live status cards, and optional collapsed activity chips.
 
 - macOS 14+ (built and tested on macOS 26, Xcode 26, a notched MacBook)
 
+## Agent notifications
+
+Getting your coding agents to peek the notch is one menu click:
+
+**NotchPill menu bar icon → Set Up Agent Notifications…**
+
+It detects Claude Code, Codex and Cursor, writes the hooks each one needs, backs
+up every config it touches, and reports what it did. Re-running it is safe — you
+get one set of hooks, not two — and it leaves any hooks you already had alone.
+
+The same thing from a terminal, including removal:
+
+```bash
+SCRIPTS="/Applications/NotchPill.app/Contents/Resources/Scripts"
+"$SCRIPTS/install-agent-hooks.sh"             # set up everything found
+"$SCRIPTS/install-agent-hooks.sh" --status    # what's wired up?
+"$SCRIPTS/install-agent-hooks.sh" --uninstall # remove NotchPill's hooks
+```
+
+Everything NotchPill needs ships **inside the app**, so this works whether you
+installed via Homebrew, the installer, or a git clone — no checkout required.
+
+Two things it can't do for you:
+
+- **Claude Code** only reads `settings.json` at session start — restart it, or
+  run `/hooks` once.
+- **Codex** must be restarted so it re-reads `config.toml`.
+
+Per-agent detail, including how to answer *any* agent from the notch:
+**[docs/CLAUDE-CODE-HOOK.md](docs/CLAUDE-CODE-HOOK.md)** ·
+**[docs/CODEX-HOOK.md](docs/CODEX-HOOK.md)**
+
 ## Install
 
 macOS 14+ on Apple Silicon. NotchPill is self-signed (no paid Apple Developer

@@ -15,6 +15,19 @@ Because Codex's payload uses the same `session_id` field, the
 one-waiting-peek-per-session rule works identically — several Codex sessions on
 one repo each keep their own peek.
 
+## The easy way
+
+```bash
+/Applications/NotchPill.app/Contents/Resources/Scripts/install-agent-hooks.sh codex
+```
+
+or the menu bar icon → **Set Up Agent Notifications…**. It writes the hooks *and*
+does the hash-trust step, which is the part that silently costs you an afternoon
+if you do it by hand — an untrusted hook registers, reports `enabled: true`, and
+never runs. Restart the Codex app afterwards so it re-reads `config.toml`.
+
+The rest of this page is what it does, and why each part is the way it is.
+
 ## Requirements
 
 The `hooks` feature must be on. Check with:

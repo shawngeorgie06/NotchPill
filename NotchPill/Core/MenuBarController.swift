@@ -79,6 +79,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
+        let setupAgents = NSMenuItem(title: "Set Up Agent Notifications…",
+                                     action: #selector(setUpAgentHooks), keyEquivalent: "")
+        setupAgents.target = self
+        menu.addItem(setupAgents)
+
+        menu.addItem(.separator())
+
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
@@ -148,6 +155,53 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func handleToggle(_ sender: NSMenuItem) {
         (sender.representedObject as? Action)?.run()
+    }
+
+    /// Wires Claude Code / Codex / Cursor up to the notch by running the bundled
+    /// `install-agent-hooks.sh`. It ships inside the app, so this works for
+    /// someone who installed via Homebrew and never cloned the repo — which is
+    /// the whole point: the hooks used to require a git checkout to exist.
+    @objc private func setUpAgentHooks() {
+        guard let script = Bundle.main.url(forResource: "install-agent-hooks",
+                                           withExtension: "sh",
+                                           subdirectory: "Scripts") else {
+            presentAgentHookResult(title: "Setup script missing",
+                                   body: "This build of NotchPill did not ship "
+                                       + "Scripts/install-agent-hooks.sh.")
+            return
+        }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/bash")
+        task.arguments = [script.path]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = pipe
+        DispatchQueue.global(qos: .userInitiated).async {
+            var output = ""
+            do {
+                try task.run()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                task.waitUntilExit()
+                output = String(data: data, encoding: .utf8) ?? ""
+            } catch {
+                output = "Couldn't run the setup script: \(error.localizedDescription)"
+            }
+            // Strip the ANSI colouring the script uses for a terminal.
+            let cleaned = output.replacingOccurrences(
+                of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+            DispatchQueue.main.async { [weak self] in
+                self?.presentAgentHookResult(title: "Agent notifications", body: cleaned)
+            }
+        }
+    }
+
+    private func presentAgentHookResult(title: String, body: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        alert.addButton(withTitle: "Done")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     @objc private func openSettings() {

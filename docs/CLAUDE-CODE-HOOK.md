@@ -93,6 +93,16 @@ Claude Code only reloads `settings.json` at session start (or when you open
 `/hooks`). After adding the hooks, **open `/hooks` once or restart Claude Code**
 so the new hooks take effect in the current session.
 
+## The easy way
+
+```bash
+/Applications/NotchPill.app/Contents/Resources/Scripts/install-agent-hooks.sh claude
+```
+
+or the menu bar icon → **Set Up Agent Notifications…**. That writes everything
+below for you, backs up `settings.json` first, and is safe to re-run. The rest of
+this page is what it does, for when you want to do it by hand or check its work.
+
 ## Verify
 
 1. Make sure **NotchPill is running** and **Dev Ready Pings** is on in Settings.
