@@ -135,12 +135,84 @@ config.write_text(text)
 PY
 
   if [[ "$MODE" == "uninstall" ]]; then
-    # Trust entries reference our hooks by path; drop those lines too.
-    /usr/bin/python3 - "$config" "$SCRIPTS" <<'PY'
-import pathlib, sys
-p = pathlib.Path(sys.argv[1]); scripts = sys.argv[2]
-lines = [l for l in p.read_text().splitlines(True) if scripts not in l]
-p.write_text("".join(lines))
+    # Remove whole hook tables, not just lines that name us: deleting a
+    # `command = …` line alone leaves an orphaned `[[hooks.Stop]]` behind, which
+    # is worse than not touching it. Also catches hooks added by hand or by an
+    # older version, which never carried our marker comments.
+    /usr/bin/python3 - "$config" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+lines = p.read_text().splitlines()
+sections, current, pending = [], None, []
+for line in lines:
+    if line.lstrip().startswith("["):
+        if current is not None: sections.append(current)
+        current = {"header": line, "lead": pending, "body": []}; pending = []
+    elif current is None:
+        pending.append(line)
+    elif line.strip().startswith("#") or not line.strip():
+        pending.append(line)
+    else:
+        current["body"].extend(pending); pending = []
+        current["body"].append(line)
+if current is not None:
+    current["trailing"] = pending; sections.append(current)
+else:
+    sections.append({"header": None, "lead": [], "body": pending})
+
+def ours(sec):
+    return any("notchpill" in l.lower() or "codex-notify" in l for l in sec["body"])
+
+def has_command(sec):
+    return any(re.match(r"\s*command\s*=", l) for l in sec["body"])
+
+drop = set()
+for i, sec in enumerate(sections):
+    h = (sec["header"] or "").strip()
+    # A handler that names us, or one left with no command at all: a command
+    # hook without a command can never run, and is what a half-finished removal
+    # leaves behind. Either way its matcher group goes with it.
+    if h.startswith("[[hooks.") and h.endswith(".hooks]]") and (ours(sec) or not has_command(sec)):
+        drop.add(i)
+        if i and (sections[i-1]["header"] or "").strip().startswith("[[hooks."):
+            drop.add(i - 1)
+for i, sec in enumerate(sections):
+    h = (sec["header"] or "").strip()
+    if h.startswith("[[hooks.") and not h.endswith(".hooks]]") and i not in drop:
+        nxt = (sections[i+1]["header"] or "").strip() if i + 1 < len(sections) else ""
+        if not nxt.startswith(h[:-2] + "."):
+            drop.add(i)
+
+# Which events still have a hook? Trust entries for the rest are dead weight —
+# their keys name the event in snake_case, and never mention us by name.
+surviving = set()
+for i, sec in enumerate(sections):
+    h = (sec["header"] or "").strip()
+    if i not in drop and h.startswith("[[hooks.") and not h.endswith(".hooks]]"):
+        ev = h[len("[[hooks."):-2]
+        surviving.add(re.sub(r"(?<!^)(?=[A-Z])", "_", ev).lower())
+
+def keep_state(line):
+    if "notchpill" in line.lower() or "codex-notify" in line:
+        return False
+    m = re.match(r'\s*"([^"]+)"\s*=', line)
+    if not m:
+        return True
+    parts = m.group(1).split(":")
+    return len(parts) < 2 or parts[-3] in surviving if len(parts) >= 3 else True
+
+out = []
+for i, sec in enumerate(sections):
+    if i in drop: continue
+    if (sec["header"] or "").strip() == "[hooks.state]":
+        body = [l for l in sec["body"] if keep_state(l)]
+        if not [l for l in body if l.strip()]: continue
+        sec = dict(sec, body=body)
+    if sec["header"] is not None:
+        out.extend(sec["lead"]); out.append(sec["header"])
+    out.extend(sec["body"]); out.extend(sec.get("trailing", []))
+text = "\n".join(out).rstrip("\n") + "\n"
+p.write_text(re.sub(r"\n{3,}", "\n\n", text))
 PY
     ok "Codex — hooks removed from $config"
     return
