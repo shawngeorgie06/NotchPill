@@ -58,6 +58,10 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// older hook scripts have none, and a missing value means "unknown age",
     /// never "stale".
     var createdAt: TimeInterval?
+    /// The agent's own session identifier (Claude Code's `session_id`), when the
+    /// hook passes one. This is the only field that distinguishes two agent
+    /// sessions running in the *same project* from the *same terminal app*.
+    var sessionId: String?
 
     static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
 
@@ -70,11 +74,26 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         return message
     }
 
-    /// Whether two alerts came from the same agent session, keyed on the terminal
-    /// app plus the project. `bundleId` alone is the terminal *app*, so two Claude
-    /// Code sessions in two iTerm windows would collide on it.
+    /// Whether two alerts came from the same agent session.
+    ///
+    /// `sessionId` wins whenever both alerts carry one — it is the only key that
+    /// can tell apart two agent sessions in the *same project* and the *same*
+    /// terminal app, which is the ordinary case when you run several Claude Code
+    /// windows on one repo. Without it, one session's question replaces the
+    /// other's and either session finishing retires both.
+    ///
+    /// The `bundleId` + `title` (project) fallback covers signals that carry no
+    /// session id: an older hook script, or anything else invoking
+    /// `notify-notchpill.sh` directly. Those keep the previous behaviour rather
+    /// than being treated as distinct sessions — a waiting peek that nothing can
+    /// ever supersede would sit there offering to answer a question that is long
+    /// gone.
     func isSameSession(as other: DevReadyAlert) -> Bool {
-        bundleId == other.bundleId && title == other.title
+        if let mine = sessionId, !mine.isEmpty,
+           let theirs = other.sessionId, !theirs.isEmpty {
+            return mine == theirs
+        }
+        return bundleId == other.bundleId && title == other.title
     }
 
     init(
@@ -86,7 +105,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         bundleId: String? = nil,
         kind: AlertKind = .finished,
         message: String? = nil,
-        createdAt: TimeInterval? = nil
+        createdAt: TimeInterval? = nil,
+        sessionId: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -97,10 +117,19 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         self.kind = kind
         self.message = message
         self.createdAt = createdAt
+        self.sessionId = Self.normalized(sessionId)
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, subtitle, source, agent, bundleId, kind, message, createdAt
+        case id, title, subtitle, source, agent, bundleId, kind, message, createdAt, sessionId
+    }
+
+    /// Blank/whitespace-only ids are the same as absent — the shell writers omit
+    /// the key entirely, but a caller passing "" must not read as a session.
+    private static func normalized(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
     }
 
     init(from decoder: Decoder) throws {
@@ -119,6 +148,7 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
             (try? c.decode(Double.self, forKey: .createdAt))
                 ?? (try? c.decode(String.self, forKey: .createdAt))
         )
+        sessionId = Self.normalized(try? c.decode(String.self, forKey: .sessionId))
     }
 
     /// Normalises a JSON `createdAt` (number or numeric string) to epoch seconds.
@@ -178,7 +208,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
             bundleId: userInfo["bundleId"] as? String,
             kind: AlertKind(rawValue: kindRaw ?? "") ?? .finished,
             message: userInfo["message"] as? String,
-            createdAt: epochSeconds(userInfo["createdAt"])
+            createdAt: epochSeconds(userInfo["createdAt"]),
+            sessionId: userInfo["sessionId"] as? String
         )
     }
 }

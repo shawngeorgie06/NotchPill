@@ -80,10 +80,8 @@ final class NotchState: ObservableObject {
     /// A re-notification for the same *session* replaces its prior waiting peek;
     /// other sessions coexist.
     ///
-    /// The replace key is `bundleId` **plus** `title` (the project), not
-    /// `bundleId` alone: `bundleId` identifies the terminal *app*, so two Claude
-    /// Code sessions in two iTerm windows share `com.googlecode.iterm2` and one
-    /// project's question would otherwise clobber the other's.
+    /// The replace key is `DevReadyAlert.isSameSession`: the agent's own
+    /// `sessionId` when the hook supplies one, else `bundleId` + project title.
     func enqueueWaiting(_ alert: DevReadyAlert) {
         devReadyAlerts.removeAll { $0.kind == .waiting && $0.isSameSession(as: alert) }
         devReadyAlerts.append(alert)

@@ -488,6 +488,50 @@ struct WaitingLayoutTests {
         let alerts = [DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal")]
         #expect(NotchContentLayout.waitingExtraHeight(alerts: alerts, answerEnabled: true) == 0)
     }
+
+    private func waiting(_ msg: String, session: String) -> DevReadyAlert {
+        DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal",
+                      kind: .waiting, message: msg, sessionId: session)
+    }
+
+    @Test("each waiting row gets its own allowance")
+    @MainActor func perRowAllowance() {
+        // The flat allowance left every row after the first with no room for its
+        // question, so its buttons rendered under the previous row's text.
+        let two = [waiting("Allow Bash?", session: "a"), waiting("Allow Write?", session: "b")]
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: two, answerEnabled: true) == 144)
+    }
+
+    @Test("a finished row alongside a waiting one adds no allowance")
+    @MainActor func mixedKinds() {
+        let mixed = [waiting("Allow Bash?", session: "a"),
+                     DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal")]
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: mixed, answerEnabled: true) == 72)
+    }
+
+    @Test("only the visible rows are budgeted, taking the tallest")
+    @MainActor func capsAtVisibleRows() {
+        // devReadyLayout shows at most devReadyMaxVisibleRows, so budgeting every
+        // row would grow the window past what it can display. The tallest are
+        // chosen because any row can be scrolled to and must not clip.
+        let four = (1...4).map { waiting("Allow Bash \($0)?", session: "s\($0)") }
+        let capped = NotchContentLayout.devReadyMaxVisibleRows
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: four, answerEnabled: true)
+                == CGFloat(capped) * 72)
+    }
+
+    @Test("a peek with two waiting rows is taller than one with a single row")
+    @MainActor func twoRowsAreTaller() {
+        let one = NotchContentLayout.waitingLayout(
+            metrics: metrics, alerts: [waiting("Allow Bash?", session: "a")],
+            answerEnabled: true).size.height
+        let two = NotchContentLayout.waitingLayout(
+            metrics: metrics,
+            alerts: [waiting("Allow Bash?", session: "a"), waiting("Allow Write?", session: "b")],
+            answerEnabled: true).size.height
+        // Both the base row and its own waiting allowance must be added.
+        #expect(two >= one + NotchContentLayout.devReadyRowHeight + 72)
+    }
 }
 
 @Suite("NowPlayingDisplayResolver")
@@ -805,6 +849,99 @@ struct NotchStateWaitingTests {
     }
 }
 
+/// The case `bundleId` + project title cannot see: two agent sessions on the
+/// same repo in the same terminal app. Before the hook passed `session_id`, one
+/// session's question replaced the other's and either one finishing retired both.
+@MainActor @Suite("waiting peeks keyed on session id")
+struct WaitingSessionIdentityTests {
+    private func waiting(_ msg: String, session: String? = nil,
+                         bundle: String = "com.cmuxterm.app",
+                         project: String = "NotchPill") -> DevReadyAlert {
+        DevReadyAlert(title: project, bundleId: bundle, kind: .waiting,
+                      message: msg, sessionId: session)
+    }
+
+    @Test("two sessions in one project and one terminal app coexist")
+    func distinctSessionsCoexist() {
+        let s = NotchState()
+        s.enqueueWaiting(waiting("Allow Bash?", session: "sess-a"))
+        s.enqueueWaiting(waiting("Allow Write?", session: "sess-b"))
+        let waits = s.devReadyAlerts.filter { $0.kind == .waiting }
+        #expect(waits.map(\.message) == ["Allow Bash?", "Allow Write?"])
+    }
+
+    @Test("a second question from the same session still replaces the first")
+    func sameSessionReplaces() {
+        let s = NotchState()
+        s.enqueueWaiting(waiting("Allow Bash?", session: "sess-a"))
+        s.enqueueWaiting(waiting("Allow Write?", session: "sess-a"))
+        let waits = s.devReadyAlerts.filter { $0.kind == .waiting }
+        #expect(waits.count == 1)
+        #expect(waits.first?.message == "Allow Write?")
+    }
+
+    @Test("session id outranks the project title")
+    func sessionIdBeatsTitle() {
+        // A session that changes directory reports a different project title but
+        // is still the same blocked session — one peek, not two.
+        let s = NotchState()
+        s.enqueueWaiting(waiting("q1", session: "sess-a", project: "NotchPill"))
+        s.enqueueWaiting(waiting("q2", session: "sess-a", project: "fleetmap"))
+        #expect(s.devReadyAlerts.filter { $0.kind == .waiting }.count == 1)
+    }
+
+    @Test("a finished ping retires only its own session's waiting peek")
+    func finishedRetiresOwnSessionOnly() {
+        let s = NotchState()
+        s.enqueueWaiting(waiting("Allow Bash?", session: "sess-a"))
+        s.enqueueWaiting(waiting("Allow Write?", session: "sess-b"))
+        s.enqueueDevReady([DevReadyAlert(title: "NotchPill", bundleId: "com.cmuxterm.app",
+                                         sessionId: "sess-a")])
+        let waits = s.devReadyAlerts.filter { $0.kind == .waiting }
+        #expect(waits.map(\.message) == ["Allow Write?"])
+    }
+
+    @Test("signals with no session id keep the bundleId + title behaviour")
+    func legacyFallback() {
+        // An older hook script, or anything calling notify-notchpill.sh directly.
+        let s = NotchState()
+        s.enqueueWaiting(waiting("q1"))
+        s.enqueueWaiting(waiting("q2"))
+        #expect(s.devReadyAlerts.filter { $0.kind == .waiting }.count == 1)
+    }
+
+    @Test("a session-less signal falls back rather than orphaning a peek")
+    func mixedFallsBack() {
+        // Deliberate: treating these as different sessions would leave a waiting
+        // peek nothing can ever supersede, still offering to answer a dead question.
+        let s = NotchState()
+        s.enqueueWaiting(waiting("Allow Bash?", session: "sess-a"))
+        s.enqueueDevReady([DevReadyAlert(title: "NotchPill", bundleId: "com.cmuxterm.app")])
+        #expect(s.devReadyAlerts.filter { $0.kind == .waiting }.isEmpty)
+    }
+
+    @Test("session id round-trips through both signal transports")
+    func decoding() throws {
+        let data = Data("""
+        {"id":"a1","title":"NotchPill","kind":"waiting","message":"Allow Bash?","sessionId":"sess-a"}
+        """.utf8)
+        #expect(try #require(DevReadyAlert.parse(from: data)).sessionId == "sess-a")
+
+        let posted = DevReadyAlert.parse(userInfo: ["title": "NotchPill", "sessionId": "sess-a"])
+        #expect(posted?.sessionId == "sess-a")
+    }
+
+    @Test("absent or blank session ids read as no session")
+    func blankIsAbsent() {
+        // The shell writers omit the key, but a caller passing "" must not make
+        // every session-less signal match every other one on an empty string.
+        let data = Data(#"{"id":"a1","title":"NotchPill","sessionId":"   "}"#.utf8)
+        #expect(DevReadyAlert.parse(from: data)?.sessionId == nil)
+        #expect(DevReadyAlert(title: "NotchPill", sessionId: "").sessionId == nil)
+        #expect(DevReadyAlert(title: "NotchPill").sessionId == nil)
+    }
+}
+
 @Suite("DevReadyDedup routing")
 struct DevReadyDedupTests {
     @Test("a repeated finished ping inside the window is suppressed")
@@ -842,6 +979,26 @@ struct DevReadyDedupTests {
         let finished = DevReadyAlert(title: "proj", subtitle: "s")
         #expect(dedup.shouldSuppress(waiting) == false)
         #expect(dedup.shouldSuppress(finished) == false)
+    }
+    @Test("two sessions on the same branch both get through")
+    func distinctSessionsNotSuppressed() {
+        // project|branch is byte-identical for both. Suppressing the second is
+        // not just a missing peek: the ping never reaches enqueueDevReady, so
+        // that session's waiting peek keeps its live answer buttons.
+        var dedup = DevReadyDedup()
+        let a = DevReadyAlert(title: "proj", subtitle: "finished · main", sessionId: "sess-a")
+        let b = DevReadyAlert(title: "proj", subtitle: "finished · main", sessionId: "sess-b")
+        #expect(dedup.shouldSuppress(a) == false)
+        #expect(dedup.shouldSuppress(b) == false)
+        #expect(dedup.shouldSuppress(a) == true)   // still a true double-fire
+    }
+    @Test("session-less pings keep the title|subtitle window")
+    func legacySuppressionUnchanged() {
+        var dedup = DevReadyDedup()
+        let a = DevReadyAlert(title: "proj", subtitle: "finished · main")
+        let b = DevReadyAlert(title: "proj", subtitle: "finished · main")
+        #expect(dedup.shouldSuppress(a) == false)
+        #expect(dedup.shouldSuppress(b) == true)
     }
 }
 

@@ -129,13 +129,13 @@ enum NotchContentLayout {
         )
     }
 
-    /// Extra height a `.waiting` row needs on top of `devReadyRowHeight`, budgeted
-    /// against what `DevReadyPeekRow` actually renders (Tiles.swift):
+    /// Extra height `.waiting` rows need on top of `devReadyRowHeight`, budgeted
+    /// against what `DevReadyPeekRow` actually renders (Tiles.swift). Per row:
     ///
     /// - `6`  — the row's outer `VStack(spacing: 6)` between the tap row and the
     ///          waiting section (the section is always present for `.waiting`).
     /// - `30` — the two-line `.lineLimit(2)` message at 11pt (2 × ~14pt leading
-    ///          plus a little slack), when any waiting alert carries one.
+    ///          plus a little slack), when that alert carries one.
     /// - `36` — the answer button row: the inner `VStack(spacing: 6)` gap, the
     ///          ~24pt capsule (12pt text + 5pt vertical padding × 2), and the row's
     ///          `.padding(.bottom, 6)`.
@@ -145,10 +145,18 @@ enum NotchContentLayout {
     /// anything past it draws outside the NSWindow — clipped *and* not
     /// hit-testable, i.e. the answer capsules stop taking clicks.
     ///
-    /// NOTE: a single flat allowance covers all waiting rows. Two simultaneous
-    /// `.waiting` alerts (different sessions — `enqueueWaiting` replaces only
-    /// within a session) share one allowance and scroll inside the peek's
-    /// ScrollView; accepted v1 limitation.
+    /// The allowance is **per row**, summed over the rows the peek actually shows.
+    /// A single flat allowance was enough only while two waiting peeks could not
+    /// coexist; once alerts are keyed on `sessionId`, several sessions on one
+    /// project stay on screen together, and one allowance stretched across them
+    /// left every row after the first without room for its own question line —
+    /// its answer buttons rendered under the previous row's text with the
+    /// question scrolled out of view, so you could not tell what you were
+    /// answering.
+    ///
+    /// `devReadyLayout` shows at most `devReadyMaxVisibleRows`, so only that many
+    /// allowances are budgeted — the **largest** ones, since any row can be
+    /// scrolled to and none of them may clip when it is.
     /// - Parameter answerEnabled: overrides `AppSettings.shared.agentReplyEnabled`.
     ///   Tests pass it explicitly so they never read (or write) the developer's
     ///   real UserDefaults. (It is `Bool?` rather than a defaulted `Bool` because
@@ -159,17 +167,31 @@ enum NotchContentLayout {
         alerts: [DevReadyAlert],
         answerEnabled: Bool? = nil
     ) -> CGFloat {
-        guard alerts.contains(where: { $0.kind == .waiting }) else { return 0 }
-        let hasMessage = alerts.contains { $0.questionText != nil }
+        let enabled = answerEnabled ?? AppSettings.shared.agentReplyEnabled
+        return alerts
+            .map { waitingRowExtra(for: $0, answerEnabled: enabled) }
+            .sorted(by: >)
+            .prefix(devReadyMaxVisibleRows)
+            .reduce(0, +)
+    }
+
+    /// One `.waiting` row's extra height over `devReadyRowHeight`, budgeted
+    /// against what that row renders — evaluated per alert, because two waiting
+    /// rows can differ (one carries a question, one is stale and so draws no
+    /// buttons).
+    @MainActor
+    private static func waitingRowExtra(
+        for alert: DevReadyAlert,
+        answerEnabled: Bool
+    ) -> CGFloat {
+        guard alert.kind == .waiting else { return 0 }
         // Must mirror `DevReadyPeekRow.canAnswer` exactly, staleness included, or
         // the budget reserves space for buttons the row won't draw.
-        let canAnswer = (answerEnabled ?? AppSettings.shared.agentReplyEnabled)
-            && alerts.contains {
-                $0.kind == .waiting && TerminalReplyInjector.canTarget($0)
-                    && DevReadyProvider.demotingStaleWaiting($0).kind == $0.kind
-            }
+        let canAnswer = answerEnabled
+            && TerminalReplyInjector.canTarget(alert)
+            && DevReadyProvider.demotingStaleWaiting(alert).kind == alert.kind
         let sectionSpacing: CGFloat = 6
-        let messageExtra: CGFloat = hasMessage ? 30 : 0
+        let messageExtra: CGFloat = alert.questionText != nil ? 30 : 0
         let buttonExtra: CGFloat = canAnswer ? 6 + 24 + 6 : 0
         return sectionSpacing + messageExtra + buttonExtra
     }
