@@ -186,6 +186,36 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         return NSWorkspace.shared.icon(forFile: url.path)
     }
 
+    /// Which agent this alert came from, when it is one we can brand.
+    enum KnownAgent { case claudeCode, codex }
+    var knownAgent: KnownAgent? {
+        switch (agent ?? source ?? "").lowercased() {
+        case "claude-code", "claude", "claude code": return .claudeCode
+        case "codex", "openai-codex": return .codex
+        default: return nil
+        }
+    }
+
+    /// Icon of the *agent's own* app, preferred over the host terminal's: the
+    /// row already carries a badge naming the terminal, so showing its icon too
+    /// spends the only graphical slot on the least distinguishing fact. Nil when
+    /// the agent has no app installed — Claude Code is usually a CLI with no
+    /// bundle to look up, which is what `ClaudeMark` draws instead.
+    var agentAppIcon: NSImage? {
+        let candidates: [String]
+        switch knownAgent {
+        case .claudeCode: candidates = ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
+        case .codex: candidates = ["com.openai.codex", "com.openai.chat"]
+        case nil: return nil
+        }
+        for id in candidates {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+                return NSWorkspace.shared.icon(forFile: url.path)
+            }
+        }
+        return nil
+    }
+
     static func parse(from data: Data) -> DevReadyAlert? {
         guard var alert = try? JSONDecoder().decode(DevReadyAlert.self, from: data) else { return nil }
         if alert.id.isEmpty { alert.id = UUID().uuidString }

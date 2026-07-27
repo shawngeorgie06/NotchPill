@@ -559,9 +559,52 @@ struct DevReadyPeekRow: View {
         }
     }
 
+    /// Claude's mark, drawn rather than bundled: Claude Code is a CLI, so on a
+    /// machine without the desktop app there is no bundle whose icon we could
+    /// look up — and falling through to the terminal's icon is exactly the
+    /// ambiguity this is meant to remove. Twelve tapered spokes around a centre,
+    /// alternating long and short.
+    private struct ClaudeMark: View {
+        var body: some View {
+            Canvas { context, size in
+                let mid = CGPoint(x: size.width / 2, y: size.height / 2)
+                let radius = min(size.width, size.height) / 2
+                for spoke in 0..<12 {
+                    let long = spoke.isMultiple(of: 2)
+                    let outer = radius * (long ? 0.96 : 0.62)
+                    let inner = radius * 0.14
+                    let width = radius * (long ? 0.17 : 0.14)
+                    var path = Path()
+                    path.addRoundedRect(
+                        in: CGRect(x: -width / 2, y: -outer, width: width, height: outer - inner),
+                        cornerSize: CGSize(width: width / 2, height: width / 2)
+                    )
+                    let placed = path.applying(
+                        CGAffineTransform(translationX: mid.x, y: mid.y)
+                            .rotated(by: Double(spoke) / 12 * 2 * .pi)
+                    )
+                    context.fill(placed, with: .color(NotchDesign.claudeOrange))
+                }
+            }
+        }
+    }
+
+    /// Prefers the agent's own identity over the terminal it happens to run in:
+    /// the row already badges the terminal by name, so the icon is better spent
+    /// saying *which agent* is asking. Falls back to the host app's icon for
+    /// anything unrecognised (Cursor, a CI hook, a bare script).
     @ViewBuilder
     private var sourceIcon: some View {
-        if let icon = alert.appIcon {
+        if let icon = alert.agentAppIcon ?? (alert.knownAgent == nil ? alert.appIcon : nil) {
+            Image(nsImage: icon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 22, height: 22)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        } else if alert.knownAgent == .claudeCode {
+            ClaudeMark()
+                .frame(width: 22, height: 22)
+        } else if let icon = alert.appIcon {
             Image(nsImage: icon)
                 .resizable()
                 .aspectRatio(contentMode: .fit)

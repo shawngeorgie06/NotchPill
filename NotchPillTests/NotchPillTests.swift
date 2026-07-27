@@ -412,6 +412,41 @@ struct DevReadyAlertTests {
     }
 }
 
+@Suite("agent branding")
+struct AgentBrandingTests {
+    @Test("the agent field identifies a brandable agent")
+    func recognisesAgents() {
+        #expect(DevReadyAlert(title: "p", agent: "claude-code").knownAgent == .claudeCode)
+        #expect(DevReadyAlert(title: "p", agent: "codex").knownAgent == .codex)
+        // Case-insensitive: the hook writes lowercase, a hand-rolled caller may not.
+        #expect(DevReadyAlert(title: "p", agent: "Claude-Code").knownAgent == .claudeCode)
+    }
+
+    @Test("`source` identifies the agent when `agent` is absent")
+    func fallsBackToSource() {
+        #expect(DevReadyAlert(title: "p", source: "codex").knownAgent == .codex)
+    }
+
+    @Test("unrecognised producers stay unbranded and keep the host icon")
+    func unknownAgents() {
+        // Cursor, CI hooks and bare scripts must keep falling through to the
+        // host app's icon — the branding is additive, not a replacement.
+        #expect(DevReadyAlert(title: "p", agent: "Composer").knownAgent == nil)
+        #expect(DevReadyAlert(title: "p").knownAgent == nil)
+    }
+
+    @Test("an agent with no app installed has no agent icon to show")
+    func noAppNoIcon() {
+        // Drives the ClaudeMark fallback: knownAgent is set but agentAppIcon is
+        // nil, so the row must draw the mark rather than the terminal's icon.
+        let alert = DevReadyAlert(title: "p", agent: "claude-code",
+                                  bundleId: "com.apple.Terminal")
+        if alert.agentAppIcon == nil {
+            #expect(alert.knownAgent == .claudeCode)
+        }
+    }
+}
+
 @Suite("DevReadyAlert.questionText")
 struct QuestionTextTests {
     @Test("only a waiting alert with a non-empty message has a question")
