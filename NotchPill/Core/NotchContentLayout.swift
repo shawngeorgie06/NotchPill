@@ -189,6 +189,7 @@ enum NotchContentLayout {
         // the budget reserves space for buttons the row won't draw.
         let canAnswer = answerEnabled
             && TerminalReplyInjector.canTarget(alert)
+            && alert.supportsTypedAnswers
             && DevReadyProvider.demotingStaleWaiting(alert).kind == alert.kind
         let sectionSpacing: CGFloat = 6
         let messageExtra: CGFloat = alert.questionText != nil ? 30 : 0

@@ -413,6 +413,7 @@ struct DevReadyPeekRow: View {
     private var canAnswer: Bool {
         AppSettings.shared.agentReplyEnabled
             && TerminalReplyInjector.canTarget(alert)
+            && alert.supportsTypedAnswers
             && DevReadyProvider.demotingStaleWaiting(alert).kind == alert.kind
     }
 

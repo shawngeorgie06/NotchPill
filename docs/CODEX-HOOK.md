@@ -129,9 +129,16 @@ approval has to reach *you*, not the reviewer.
   It is written once and never overwritten, so its presence means "still
   unidentified". Until then the peek still names the blocked session and still
   focuses it on tap; only the question text is generic.
-- **Tap-to-answer does not work for Codex.** NotchPill's answer buttons are
-  hardcoded to Claude Code's prompt shape (`Yes`/`No`/`1`/`2`/`3` in
-  `AgentAnswer.standardSet`). Codex has its own approval keymap
-  (`approval.approve_for_session`, `approval.deny`, …), so those keystrokes would
-  be wrong. Tapping the peek to *focus* the session works fine. Making the
-  answer set travel in the signal instead of being a constant is the fix.
+- **Tap-to-answer does not work for Codex, and the buttons are hidden there.**
+  NotchPill's answer set is hardcoded to Claude Code's prompt shape
+  (`Yes`/`No`/`1`/`2`/`3` in `AgentAnswer.standardSet`) and delivered as
+  synthetic keystrokes to the host's frontmost window. Codex has its own approval
+  keymap (`approval.approve_for_session`, `approval.deny`, …), so those keys are
+  wrong — and in the desktop app there is no TUI to type into at all. Rather than
+  show buttons that quietly do the wrong thing, `DevReadyAlert.supportsTypedAnswers`
+  hides them for Codex (and Cursor, a GUI app for the same reason). The peek
+  still names the blocked session, shows the question, and focuses it on tap.
+
+  Making the answer set *and* the delivery method travel in the signal — the
+  sender saying "this prompt takes 1/2/3" or "send this over stdin" — is what
+  would let any agent be answered from the notch.

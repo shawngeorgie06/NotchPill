@@ -186,13 +186,41 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         return NSWorkspace.shared.icon(forFile: url.path)
     }
 
-    /// Which agent this alert came from, when it is one we can brand.
-    enum KnownAgent { case claudeCode, codex }
+    /// Which agent this alert came from, when it is one we recognise.
+    enum KnownAgent { case claudeCode, codex, cursor }
     var knownAgent: KnownAgent? {
         switch (agent ?? source ?? "").lowercased() {
         case "claude-code", "claude", "claude code": return .claudeCode
         case "codex", "openai-codex": return .codex
+        case "cursor", "composer": return .cursor
         default: return nil
+        }
+    }
+
+    /// Whether an answer typed at this alert would actually reach the agent.
+    ///
+    /// Delivery is synthetic key events posted to the target app's frontmost
+    /// window (`TerminalReplyInjector`), which only means anything when that
+    /// window is a terminal running a TUI that reads keypresses — and when the
+    /// keys we send are the ones that agent's prompt expects.
+    ///
+    /// - Claude Code: yes. The Yes/No/1/2/3 set is its permission prompt, and it
+    ///   runs in a terminal.
+    /// - Codex: no. It has its own approval keymap (`approval.approve_for_session`,
+    ///   `approval.deny`, …), so those keys are wrong, and in the desktop app
+    ///   there is no TUI to type into at all.
+    /// - Cursor: no. A GUI app — keystrokes land in whatever holds focus, which
+    ///   may be the editor rather than the chat box.
+    ///
+    /// Unrecognised producers keep the previous behaviour: someone wiring their
+    /// own terminal agent to `notify-notchpill.sh` opted in by sending
+    /// `kind=waiting`, and silently dropping their buttons would be a regression.
+    /// The real fix is for the answer set and delivery to travel in the signal
+    /// rather than being hardcoded to Claude Code's shape.
+    var supportsTypedAnswers: Bool {
+        switch knownAgent {
+        case .claudeCode, nil: return true
+        case .codex, .cursor: return false
         }
     }
 
@@ -206,7 +234,9 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         switch knownAgent {
         case .claudeCode: candidates = ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
         case .codex: candidates = ["com.openai.codex", "com.openai.chat"]
-        case nil: return nil
+        // Cursor pings already carry Cursor's own bundle id, so `appIcon` covers
+        // it — no need to look the app up a second time here.
+        case .cursor, nil: return nil
         }
         for id in candidates {
             if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {

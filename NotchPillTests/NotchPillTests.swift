@@ -427,12 +427,43 @@ struct AgentBrandingTests {
         #expect(DevReadyAlert(title: "p", source: "codex").knownAgent == .codex)
     }
 
+    @Test("Cursor is recognised under either name it reports")
+    func recognisesCursor() {
+        #expect(DevReadyAlert(title: "p", agent: "Cursor").knownAgent == .cursor)
+        #expect(DevReadyAlert(title: "p", agent: "Composer").knownAgent == .cursor)
+    }
+
     @Test("unrecognised producers stay unbranded and keep the host icon")
     func unknownAgents() {
-        // Cursor, CI hooks and bare scripts must keep falling through to the
-        // host app's icon — the branding is additive, not a replacement.
-        #expect(DevReadyAlert(title: "p", agent: "Composer").knownAgent == nil)
+        // CI hooks and bare scripts must keep falling through to the host app's
+        // icon — the branding is additive, not a replacement.
+        #expect(DevReadyAlert(title: "p", agent: "buildbot").knownAgent == nil)
         #expect(DevReadyAlert(title: "p").knownAgent == nil)
+    }
+
+    @Test("answers are offered only where they would actually land")
+    func typedAnswerSupport() {
+        // Delivery is synthetic keystrokes into the host's frontmost window.
+        // Cursor and the Codex app are GUIs, and Codex's approval prompt uses
+        // its own keymap — offering Yes/No/1/2/3 there is a button that lies.
+        #expect(DevReadyAlert(title: "p", agent: "claude-code").supportsTypedAnswers)
+        #expect(!DevReadyAlert(title: "p", agent: "codex").supportsTypedAnswers)
+        #expect(!DevReadyAlert(title: "p", agent: "Composer").supportsTypedAnswers)
+        // Unrecognised producers keep the previous behaviour — someone wiring
+        // their own terminal agent opted in by sending kind=waiting.
+        #expect(DevReadyAlert(title: "p", agent: "my-tui-agent").supportsTypedAnswers)
+    }
+
+    @Test("an unanswerable waiting row budgets no button height")
+    @MainActor func unanswerableRowIsShorter() {
+        // The height budget must mirror `canAnswer`, or a Codex peek reserves
+        // space for buttons the row will not draw.
+        let codex = DevReadyAlert(title: "p", agent: "codex", bundleId: "com.openai.codex",
+                                  kind: .waiting, message: "Approve?")
+        let claude = DevReadyAlert(title: "p", agent: "claude-code", bundleId: "com.apple.Terminal",
+                                   kind: .waiting, message: "Approve?")
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: [codex], answerEnabled: true) == 36)
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: [claude], answerEnabled: true) == 72)
     }
 
     @Test("an agent with no app installed has no agent icon to show")
