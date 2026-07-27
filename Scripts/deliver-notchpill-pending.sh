@@ -116,6 +116,18 @@ if [[ "$SCOPE" == "subagent" ]]; then
     send_notify "$title" "$subtitle" "Cursor" "com.todesktop.230313mzl4w4u92" "$subagent_type"
   fi
 elif [[ "$SCOPE" == "main" ]]; then
+  # A question hook already peeked for this turn — the specific question beats a
+  # generic "reply ready", and two peeks for one turn reads as two agents.
+  recent="${pending_dir}/.recent-question"
+  if [[ -f "$recent" ]]; then
+    marked="$(cat "$recent" 2>/dev/null || echo 0)"
+    rm -f "$recent"
+    if [[ "$marked" != "0" ]] && (( $(date +%s) - marked < 30 )); then
+      printf '%s\n' '{}'
+      exit 0
+    fi
+  fi
+
   # Main LLM fallback when the model forgot to queue — still ping on every completed turn.
   model="$(printf '%s' "$input" | jq -r '.model // "Composer"')"
   workspace="$(printf '%s' "$input" | jq -r '.workspace_roots[0] // empty')"
@@ -123,7 +135,11 @@ elif [[ "$SCOPE" == "main" ]]; then
   if [[ -n "$workspace" ]]; then
     project="$(basename "$workspace")"
   fi
-  send_notify "$model" "Reply ready in $project" "Cursor" "com.todesktop.230313mzl4w4u92" "$model"
+  # Title is the project and the agent is `cursor`, matching the Claude Code and
+  # Codex hooks. Using the model for both made a Cursor turn on a Claude model
+  # announce itself as a Claude session that was never running.
+  send_notify "$project" "finished${model:+ · $model}" "Cursor" \
+              "com.todesktop.230313mzl4w4u92" "cursor"
 fi
 
 printf '%s\n' '{}'
