@@ -413,6 +413,7 @@ struct DevReadyPeekRow: View {
     private var canAnswer: Bool {
         AppSettings.shared.agentReplyEnabled
             && TerminalReplyInjector.canTarget(alert)
+            && alert.supportsTypedAnswers
             && DevReadyProvider.demotingStaleWaiting(alert).kind == alert.kind
     }
 
@@ -508,10 +509,14 @@ struct DevReadyPeekRow: View {
                 Button {
                     actions.dismissPeek(alert.id)
                 } label: {
+                    // 28pt to match the reply button beside it. At 24 this was
+                    // under the usual 28pt minimum *and* the smallest target on
+                    // the row, while sitting closest to the pill's edge — the
+                    // combination is why dismissing felt unreliable.
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white.opacity(0.45))
-                        .frame(width: 24, height: 24)
+                        .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -559,9 +564,34 @@ struct DevReadyPeekRow: View {
         }
     }
 
+    /// Claude's mark, shipped as a vector asset: Claude Code is a CLI, so on a
+    /// machine without the desktop app there is no bundle whose icon we could
+    /// look up — and falling through to the terminal's icon is exactly the
+    /// ambiguity this is meant to remove.
+    private struct ClaudeMark: View {
+        var body: some View {
+            Image("ClaudeMark")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        }
+    }
+
+    /// Prefers the agent's own identity over the terminal it happens to run in:
+    /// the row already badges the terminal by name, so the icon is better spent
+    /// saying *which agent* is asking. Falls back to the host app's icon for
+    /// anything unrecognised (Cursor, a CI hook, a bare script).
     @ViewBuilder
     private var sourceIcon: some View {
-        if let icon = alert.appIcon {
+        if let icon = alert.agentAppIcon ?? (alert.knownAgent == nil ? alert.appIcon : nil) {
+            Image(nsImage: icon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 22, height: 22)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        } else if alert.knownAgent == .claudeCode {
+            ClaudeMark()
+                .frame(width: 22, height: 22)
+        } else if let icon = alert.appIcon {
             Image(nsImage: icon)
                 .resizable()
                 .aspectRatio(contentMode: .fit)

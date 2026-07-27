@@ -948,20 +948,27 @@ final class NotchController {
 }
 
 /// Short suppression window for repeated "finished" pings, keyed on
-/// `title|subtitle`. Extracted from `NotchController` so the routing rule is
-/// unit-testable without an NSWindow.
+/// `title|subtitle|sessionId`. Extracted from `NotchController` so the routing
+/// rule is unit-testable without an NSWindow.
 ///
-/// `.waiting` alerts are deliberately exempt. Their fingerprint is
-/// project|branch, which is identical for *every* question a session asks — a
-/// second permission prompt 5s after the first would be dropped and the agent
-/// would hang with nothing on screen.
+/// The session id is part of the key because `title|subtitle` is project|branch:
+/// two agent sessions working the same branch produce byte-identical
+/// fingerprints, so one finishing would suppress the other's ping — and a
+/// suppressed ping never reaches `enqueueDevReady` to retire that session's
+/// waiting peek, leaving live answer buttons on a question that is already
+/// answered.
+///
+/// `.waiting` alerts are deliberately exempt entirely. Their fingerprint is
+/// identical for *every* question a session asks — a second permission prompt 5s
+/// after the first would be dropped and the agent would hang with nothing on
+/// screen.
 struct DevReadyDedup {
     var interval: TimeInterval = 12
     private var recent: [(String, Date)] = []
 
     mutating func shouldSuppress(_ alert: DevReadyAlert, now: Date = Date()) -> Bool {
         guard alert.kind == .finished else { return false }
-        let fingerprint = "\(alert.title)|\(alert.subtitle ?? "")"
+        let fingerprint = "\(alert.title)|\(alert.subtitle ?? "")|\(alert.sessionId ?? "")"
         recent.removeAll { now.timeIntervalSince($0.1) > interval }
         if recent.contains(where: { $0.0 == fingerprint }) { return true }
         recent.append((fingerprint, now))

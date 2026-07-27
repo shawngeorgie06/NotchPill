@@ -5,6 +5,8 @@ enum NotchDesign {
     static let accent = Color(red: 0.52, green: 0.62, blue: 1.0)
     static let accentMuted = Color(red: 0.52, green: 0.62, blue: 1.0).opacity(0.35)
     static let devReadyGreen = Color(red: 0.35, green: 0.88, blue: 0.55)
+    /// Claude's terracotta, for the drawn Claude mark.
+    static let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
     static let pillStroke = Color.white.opacity(0.07)
 
     static let settingsHeader = LinearGradient(

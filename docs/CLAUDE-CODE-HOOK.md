@@ -79,9 +79,12 @@ A `kind=waiting` peek has its own lifecycle, separate from "finished" pings:
   blocked, so the peek stays up. It clears when you answer it, when a newer
   question for the same session replaces it, or when you dismiss it. A
   "finished" ping arriving meanwhile fades only itself.
-- One waiting peek per session: a re-notification for the same terminal *and*
-  project replaces the old one. Two sessions in the same terminal app but
-  different projects coexist.
+- One waiting peek per session: a re-notification from the same session replaces
+  its old one, and other sessions are untouched. "Same session" means Claude
+  Code's own `session_id`, which the hook forwards, so several sessions on the
+  *same repo in the same terminal app* each keep their own peek. Signals with no
+  session id — an older hook script, or a direct `notify-notchpill.sh` call —
+  fall back to matching on terminal app + project.
 - A waiting signal that was queued to disk while NotchPill wasn't running and is
   more than 5 minutes old is shown without answer buttons — that terminal is
   probably back at a shell prompt, and an answer keystroke would land there.

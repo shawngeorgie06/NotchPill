@@ -2,11 +2,14 @@
 # Notify NotchPill that a dev task finished (terminal, Cursor, CI hook, etc.).
 #
 # Usage:
-#   notify-notchpill.sh "Title" ["Subtitle"] ["Source"] ["bundle.id"] ["Agent"] ["kind"] ["Message"]
+#   notify-notchpill.sh "Title" ["Subtitle"] ["Source"] ["bundle.id"] ["Agent"] ["kind"] ["Message"] ["session-id"]
 #
-#   kind    - "finished" (default) or "waiting". "waiting" bypasses the
-#             finished-dedup window so a prompt is never swallowed.
-#   Message - free-text body (e.g. the question an agent is asking).
+#   kind       - "finished" (default) or "waiting". "waiting" bypasses the
+#                finished-dedup window so a prompt is never swallowed.
+#   Message    - free-text body (e.g. the question an agent is asking).
+#   session-id - the agent's own session identifier. NotchPill keeps one waiting
+#                peek per session; without this it falls back to bundle id +
+#                title, which cannot separate two sessions in one project.
 
 set -euo pipefail
 
@@ -21,8 +24,9 @@ BUNDLE_ID="${4:-}"
 AGENT="${5:-}"
 KIND="${6:-finished}"
 MESSAGE="${7:-}"
+SESSION_ID="${8:-}"
 
-if [ "$KIND" != "waiting" ] && notchpill_should_skip_notify "$TITLE" "$SUBTITLE"; then
+if [ "$KIND" != "waiting" ] && notchpill_should_skip_notify "$TITLE" "$SUBTITLE" "$SESSION_ID"; then
   exit 0
 fi
 
@@ -43,7 +47,7 @@ CREATED_AT="$(date +%s)"
 
 if pgrep -x NotchPill >/dev/null 2>&1; then
   # App is running — distributed notification only (avoids double delivery via file poll).
-  /usr/bin/swift - "${TITLE}" "${SUBTITLE}" "${SOURCE}" "${BUNDLE_ID}" "${AGENT}" "${ALERT_ID}" "${KIND}" "${MESSAGE}" "${CREATED_AT}" <<'SWIFT'
+  /usr/bin/swift - "${TITLE}" "${SUBTITLE}" "${SOURCE}" "${BUNDLE_ID}" "${AGENT}" "${ALERT_ID}" "${KIND}" "${MESSAGE}" "${CREATED_AT}" "${SESSION_ID}" <<'SWIFT'
 import Foundation
 
 let args = CommandLine.arguments
@@ -56,6 +60,7 @@ let id = args.count > 6 ? args[6] : UUID().uuidString
 let kind = args.count > 7 ? args[7] : ""
 let message = args.count > 8 ? args[8] : ""
 let createdAt = args.count > 9 ? args[9] : ""
+let sessionId = args.count > 10 ? args[10] : ""
 
 var info: [String: Any] = ["id": id, "title": title]
 if !subtitle.isEmpty { info["subtitle"] = subtitle }
@@ -65,6 +70,7 @@ if !agent.isEmpty { info["agent"] = agent }
 if !kind.isEmpty && kind != "finished" { info["kind"] = kind }
 if !message.isEmpty { info["message"] = message }
 if let created = Double(createdAt), created > 0 { info["createdAt"] = created }
+if !sessionId.isEmpty { info["sessionId"] = sessionId }
 
 DistributedNotificationCenter.default().post(
     name: Notification.Name("com.shawngeorgie06.NotchPill.devReady"),
@@ -75,10 +81,10 @@ RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
 SWIFT
 else
   FILE="${SIGNAL_DIR}/dev-ready-$(date +%s%N).json"
-  python3 - "${TITLE}" "${SUBTITLE}" "${SOURCE}" "${BUNDLE_ID}" "${AGENT}" "${ALERT_ID}" "${FILE}" "${KIND}" "${MESSAGE}" "${CREATED_AT}" <<'PY'
+  python3 - "${TITLE}" "${SUBTITLE}" "${SOURCE}" "${BUNDLE_ID}" "${AGENT}" "${ALERT_ID}" "${FILE}" "${KIND}" "${MESSAGE}" "${CREATED_AT}" "${SESSION_ID}" <<'PY'
 import json, pathlib, sys
 
-title, subtitle, source, bundle_id, agent, alert_id, path, kind, message, created_at = sys.argv[1:11]
+title, subtitle, source, bundle_id, agent, alert_id, path, kind, message, created_at, session_id = sys.argv[1:12]
 payload = {"id": alert_id, "title": title}
 if subtitle:
     payload["subtitle"] = subtitle
@@ -98,10 +104,12 @@ try:
         payload["createdAt"] = created
 except (TypeError, ValueError):
     pass
+if session_id:
+    payload["sessionId"] = session_id
 pathlib.Path(path).write_text(json.dumps(payload), encoding="utf-8")
 PY
 fi
 
 if [ "$KIND" != "waiting" ]; then
-  notchpill_record_notify "$TITLE" "$SUBTITLE"
+  notchpill_record_notify "$TITLE" "$SUBTITLE" "$SESSION_ID"
 fi

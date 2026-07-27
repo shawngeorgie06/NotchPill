@@ -40,6 +40,12 @@ PROJECT="$(basename "$CWD" 2>/dev/null || true)"
 # Git branch (distinguishes two terminals in the same repo / worktrees).
 BRANCH="$(git -C "$CWD" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 
+# Claude Code's own session id — the only thing that separates two sessions in
+# the same project and the same terminal app. NotchPill keeps one waiting peek
+# per session, so without it a second session's question replaces the first's
+# and either one finishing retires both.
+SESSION_ID="$(json_field session_id)"
+
 # Terminal app → friendly name + bundle id (so tapping the peek focuses it).
 case "${TERM_PROGRAM:-}" in
   iTerm.app)       TERM_NAME="iTerm";     TERM_BUNDLE="com.googlecode.iterm2" ;;
@@ -75,7 +81,7 @@ if [[ "$EVENT" == "Notification" ]]; then
   [[ -n "$MESSAGE" ]] || MESSAGE="Waiting for your input"
   # Subtitle mirrors the "finished · <branch>" shape so the row says *why* it's
   # peeking even when agentReplyEnabled is off and there are no answer buttons.
-  exec "$ROOT/Scripts/notify-notchpill.sh" "$PROJECT" "waiting${BRANCH:+ · $BRANCH}" "$TERM_NAME" "$TERM_BUNDLE" "claude-code" "waiting" "$MESSAGE"
+  exec "$ROOT/Scripts/notify-notchpill.sh" "$PROJECT" "waiting${BRANCH:+ · $BRANCH}" "$TERM_NAME" "$TERM_BUNDLE" "claude-code" "waiting" "$MESSAGE" "$SESSION_ID"
 fi
 
 # Title = project name (the scannable distinguisher). The agent badge already
@@ -92,4 +98,7 @@ fi
 # title+subtitle dedup; keep a short window only to swallow a true double-fire.
 export NOTCHPILL_DEDUP_SECONDS="${NOTCHPILL_DEDUP_SECONDS:-3}"
 
-exec "$ROOT/Scripts/notify-notchpill.sh" "$TITLE" "$SUBTITLE" "$TERM_NAME" "$TERM_BUNDLE" "claude-code"
+# The session id matters on this path too: a finished ping retires its own
+# session's waiting peek, and only that one. The explicit kind and empty message
+# are placeholders that keep the positional arguments lined up.
+exec "$ROOT/Scripts/notify-notchpill.sh" "$TITLE" "$SUBTITLE" "$TERM_NAME" "$TERM_BUNDLE" "claude-code" "finished" "" "$SESSION_ID"

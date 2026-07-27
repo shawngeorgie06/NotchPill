@@ -58,6 +58,10 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// older hook scripts have none, and a missing value means "unknown age",
     /// never "stale".
     var createdAt: TimeInterval?
+    /// The agent's own session identifier (Claude Code's `session_id`), when the
+    /// hook passes one. This is the only field that distinguishes two agent
+    /// sessions running in the *same project* from the *same terminal app*.
+    var sessionId: String?
 
     static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
 
@@ -70,11 +74,26 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         return message
     }
 
-    /// Whether two alerts came from the same agent session, keyed on the terminal
-    /// app plus the project. `bundleId` alone is the terminal *app*, so two Claude
-    /// Code sessions in two iTerm windows would collide on it.
+    /// Whether two alerts came from the same agent session.
+    ///
+    /// `sessionId` wins whenever both alerts carry one — it is the only key that
+    /// can tell apart two agent sessions in the *same project* and the *same*
+    /// terminal app, which is the ordinary case when you run several Claude Code
+    /// windows on one repo. Without it, one session's question replaces the
+    /// other's and either session finishing retires both.
+    ///
+    /// The `bundleId` + `title` (project) fallback covers signals that carry no
+    /// session id: an older hook script, or anything else invoking
+    /// `notify-notchpill.sh` directly. Those keep the previous behaviour rather
+    /// than being treated as distinct sessions — a waiting peek that nothing can
+    /// ever supersede would sit there offering to answer a question that is long
+    /// gone.
     func isSameSession(as other: DevReadyAlert) -> Bool {
-        bundleId == other.bundleId && title == other.title
+        if let mine = sessionId, !mine.isEmpty,
+           let theirs = other.sessionId, !theirs.isEmpty {
+            return mine == theirs
+        }
+        return bundleId == other.bundleId && title == other.title
     }
 
     init(
@@ -86,7 +105,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         bundleId: String? = nil,
         kind: AlertKind = .finished,
         message: String? = nil,
-        createdAt: TimeInterval? = nil
+        createdAt: TimeInterval? = nil,
+        sessionId: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -97,10 +117,19 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         self.kind = kind
         self.message = message
         self.createdAt = createdAt
+        self.sessionId = Self.normalized(sessionId)
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, subtitle, source, agent, bundleId, kind, message, createdAt
+        case id, title, subtitle, source, agent, bundleId, kind, message, createdAt, sessionId
+    }
+
+    /// Blank/whitespace-only ids are the same as absent — the shell writers omit
+    /// the key entirely, but a caller passing "" must not read as a session.
+    private static func normalized(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
     }
 
     init(from decoder: Decoder) throws {
@@ -119,6 +148,7 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
             (try? c.decode(Double.self, forKey: .createdAt))
                 ?? (try? c.decode(String.self, forKey: .createdAt))
         )
+        sessionId = Self.normalized(try? c.decode(String.self, forKey: .sessionId))
     }
 
     /// Normalises a JSON `createdAt` (number or numeric string) to epoch seconds.
@@ -156,6 +186,66 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         return NSWorkspace.shared.icon(forFile: url.path)
     }
 
+    /// Which agent this alert came from, when it is one we recognise.
+    enum KnownAgent { case claudeCode, codex, cursor }
+    var knownAgent: KnownAgent? {
+        switch (agent ?? source ?? "").lowercased() {
+        case "claude-code", "claude", "claude code": return .claudeCode
+        case "codex", "openai-codex": return .codex
+        case "cursor", "composer": return .cursor
+        default: return nil
+        }
+    }
+
+    /// Whether an answer typed at this alert would actually reach the agent.
+    ///
+    /// Delivery is synthetic key events posted to the target app's frontmost
+    /// window (`TerminalReplyInjector`), which only means anything when that
+    /// window is a terminal running a TUI that reads keypresses — and when the
+    /// keys we send are the ones that agent's prompt expects.
+    ///
+    /// - Claude Code: yes. The Yes/No/1/2/3 set is its permission prompt, and it
+    ///   runs in a terminal.
+    /// - Codex: no. It has its own approval keymap (`approval.approve_for_session`,
+    ///   `approval.deny`, …), so those keys are wrong, and in the desktop app
+    ///   there is no TUI to type into at all.
+    /// - Cursor: no. A GUI app — keystrokes land in whatever holds focus, which
+    ///   may be the editor rather than the chat box.
+    ///
+    /// Unrecognised producers keep the previous behaviour: someone wiring their
+    /// own terminal agent to `notify-notchpill.sh` opted in by sending
+    /// `kind=waiting`, and silently dropping their buttons would be a regression.
+    /// The real fix is for the answer set and delivery to travel in the signal
+    /// rather than being hardcoded to Claude Code's shape.
+    var supportsTypedAnswers: Bool {
+        switch knownAgent {
+        case .claudeCode, nil: return true
+        case .codex, .cursor: return false
+        }
+    }
+
+    /// Icon of the *agent's own* app, preferred over the host terminal's: the
+    /// row already carries a badge naming the terminal, so showing its icon too
+    /// spends the only graphical slot on the least distinguishing fact. Nil when
+    /// the agent has no app installed — Claude Code is usually a CLI with no
+    /// bundle to look up, which is what `ClaudeMark` draws instead.
+    var agentAppIcon: NSImage? {
+        let candidates: [String]
+        switch knownAgent {
+        case .claudeCode: candidates = ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
+        case .codex: candidates = ["com.openai.codex", "com.openai.chat"]
+        // Cursor pings already carry Cursor's own bundle id, so `appIcon` covers
+        // it — no need to look the app up a second time here.
+        case .cursor, nil: return nil
+        }
+        for id in candidates {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+                return NSWorkspace.shared.icon(forFile: url.path)
+            }
+        }
+        return nil
+    }
+
     static func parse(from data: Data) -> DevReadyAlert? {
         guard var alert = try? JSONDecoder().decode(DevReadyAlert.self, from: data) else { return nil }
         if alert.id.isEmpty { alert.id = UUID().uuidString }
@@ -178,7 +268,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
             bundleId: userInfo["bundleId"] as? String,
             kind: AlertKind(rawValue: kindRaw ?? "") ?? .finished,
             message: userInfo["message"] as? String,
-            createdAt: epochSeconds(userInfo["createdAt"])
+            createdAt: epochSeconds(userInfo["createdAt"]),
+            sessionId: userInfo["sessionId"] as? String
         )
     }
 }
