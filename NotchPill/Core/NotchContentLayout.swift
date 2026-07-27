@@ -99,15 +99,33 @@ enum NotchContentLayout {
 
     // MARK: - Dev ready peek
 
-    static let devReadyRowHeight: CGFloat = 42
+    /// What one peek row actually renders (`DevReadyPeekRow.tapRow`): a ~16pt
+    /// title line, 3pt of `VStack` spacing, a ~16pt badge capsule (10pt text plus
+    /// 2pt padding each side), and 7pt of vertical padding top and bottom.
+    ///
+    /// Was 42, which under-budgeted by roughly the padding — invisible while
+    /// peeks were one row of a short title, then clipping the bottom row once
+    /// several stacked up. A single-alert peek isn't in a ScrollView, so an
+    /// under-budgeted row is cut off by the window rather than scrolled to.
+    static let devReadyRowHeight: CGFloat = 52
     /// Answer capsule size. Also the minimum *width*, so a one-character label
     /// ("1") is still a square target rather than a sliver. 32 rather than the
     /// old ~24: these are the primary action on a waiting peek and were the
     /// smallest thing on it.
     static let answerButtonHeight: CGFloat = 32
     static let answerButtonSpacing: CGFloat = 8
+    /// Width the per-row ✕ occupies: a 28pt target plus its 8pt trailing padding.
+    static let dismissControlWidth: CGFloat = 36
     static let devReadyMaxVisibleRows = 3
-    /// Wider than collapsed/hover chips so agent names and subtitles fit comfortably.
+    /// Wider than collapsed/hover chips so agent names and subtitles fit
+    /// comfortably.
+    ///
+    /// Do not raise this to buy room for new controls: the peek is capped at
+    /// `maxExpandedRenderedWidth` (`designExpandedWidth * scale`, ~416pt on real
+    /// hardware), so a larger minimum is silently clamped away and only breaks
+    /// the invariant that a peek is at least this wide. Controls have to be paid
+    /// for out of the title, which truncates — never out of the badges, which
+    /// would wrap and push the row past its budgeted height.
     static let devReadyMinWidth: CGFloat = 380
 
     static func devReadyListHeight(rowCount: Int) -> CGFloat {
@@ -122,7 +140,10 @@ enum NotchContentLayout {
         let listHeight = devReadyListHeight(rowCount: count)
         let labelLen = CGFloat(alerts.map { ($0.agent ?? $0.source ?? $0.title).count }.max() ?? 16)
         let titleLen = CGFloat(alerts.map(\.title.count).max() ?? 16)
-        let contentWidth = 300 + max(labelLen, titleLen) * 2.5
+        // Every row carries a ✕ (28pt + 8pt trailing). Without this allowance the
+        // control eats title width instead of being given its own, and titles
+        // that used to fit start truncating.
+        let contentWidth = 300 + dismissControlWidth + max(labelLen, titleLen) * 2.5
         let width = min(
             metrics.maxExpandedRenderedWidth,
             max(metrics.notchWidth + 168, devReadyMinWidth, contentWidth)

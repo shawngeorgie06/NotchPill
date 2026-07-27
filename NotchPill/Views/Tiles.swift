@@ -499,31 +499,29 @@ struct DevReadyPeekRow: View {
                 .padding(.trailing, 8)
             }
 
-            // Explicit dismiss, `.waiting` only. Tapping the row also clears a
-            // peek, but it focuses the terminal on the way out — and a waiting
-            // peek never fades, so it needs a way to be sent away without
-            // stealing focus. Finished rows deliberately don't get one: they
-            // fade on their own, and adding a control here would eat ~32pt of
-            // their title width, changing the v1.3.0 peek.
-            if alert.kind == .waiting {
-                Button {
-                    actions.dismissPeek(alert.id)
-                } label: {
-                    // 28pt to match the reply button beside it. At 24 this was
-                    // under the usual 28pt minimum *and* the smallest target on
-                    // the row, while sitting closest to the pill's edge — the
-                    // combination is why dismissing felt unreliable.
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.45))
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Dismiss · Esc dismisses all")
-                .accessibilityLabel("Dismiss")
-                .padding(.trailing, 8)
+            // Explicit dismiss on every row. Tapping the row also clears a peek,
+            // but it focuses the source app on the way out — so without this the
+            // only way to get rid of a peek is to be taken somewhere you didn't
+            // ask to go. Waiting peeks need it most (they never fade), but a
+            // finished one you've already read shouldn't have to be waited out
+            // either. `devReadyLayout` budgets the width it costs.
+            Button {
+                actions.dismissPeek(alert.id)
+            } label: {
+                // 28pt to match the reply button beside it. At 24 this was under
+                // the usual 28pt minimum *and* the smallest target on the row,
+                // while sitting closest to the pill's edge — the combination is
+                // why dismissing felt unreliable.
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .help("Dismiss · Esc dismisses all")
+            .accessibilityLabel("Dismiss")
+            .padding(.trailing, 8)
         }
     }
 
@@ -620,6 +618,11 @@ struct DevReadyPeekRow: View {
         Text(text)
             .font(.system(size: 10, weight: .bold))
             .foregroundStyle(prominent ? NotchDesign.devReadyGreen : .white.opacity(0.55))
+            // A badge must never wrap. "claude-code" split across two lines makes
+            // the row taller than the height budgeted for it, and a single-alert
+            // peek isn't in a ScrollView — the overflow clips against the window.
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(
