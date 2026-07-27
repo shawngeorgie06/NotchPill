@@ -64,6 +64,16 @@ SESSION_ID="$(json_field session_id)"
 # Host app → friendly name + bundle id, so tapping the peek focuses it. macOS
 # sets __CFBundleIdentifier to the app that launched the process: the Codex
 # desktop app when you're in the app, the terminal when you're in the CLI.
+# Codex runs hidden sessions of its own. An escalation under guardian approval
+# spawns a reviewer session (model `codex-auto-review`) that judges the request
+# and decides allow/deny for you — a full turn, so it fires Stop like any other
+# and peeks the notch for work you never started. Only the models you drive
+# should reach the notch.
+MODEL="$(json_field model)"
+case "$MODEL" in
+  *auto-review*|*auto_review*) exit 0 ;;
+esac
+
 HOST_BUNDLE="${__CFBundleIdentifier:-}"
 HOST_NAME="Codex"
 if [[ -n "$HOST_BUNDLE" ]]; then

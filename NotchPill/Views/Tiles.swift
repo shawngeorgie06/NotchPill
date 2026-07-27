@@ -508,10 +508,14 @@ struct DevReadyPeekRow: View {
                 Button {
                     actions.dismissPeek(alert.id)
                 } label: {
+                    // 28pt to match the reply button beside it. At 24 this was
+                    // under the usual 28pt minimum *and* the smallest target on
+                    // the row, while sitting closest to the pill's edge — the
+                    // combination is why dismissing felt unreliable.
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white.opacity(0.45))
-                        .frame(width: 24, height: 24)
+                        .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -559,33 +563,15 @@ struct DevReadyPeekRow: View {
         }
     }
 
-    /// Claude's mark, drawn rather than bundled: Claude Code is a CLI, so on a
+    /// Claude's mark, shipped as a vector asset: Claude Code is a CLI, so on a
     /// machine without the desktop app there is no bundle whose icon we could
     /// look up — and falling through to the terminal's icon is exactly the
-    /// ambiguity this is meant to remove. Twelve tapered spokes around a centre,
-    /// alternating long and short.
+    /// ambiguity this is meant to remove.
     private struct ClaudeMark: View {
         var body: some View {
-            Canvas { context, size in
-                let mid = CGPoint(x: size.width / 2, y: size.height / 2)
-                let radius = min(size.width, size.height) / 2
-                for spoke in 0..<12 {
-                    let long = spoke.isMultiple(of: 2)
-                    let outer = radius * (long ? 0.96 : 0.62)
-                    let inner = radius * 0.14
-                    let width = radius * (long ? 0.17 : 0.14)
-                    var path = Path()
-                    path.addRoundedRect(
-                        in: CGRect(x: -width / 2, y: -outer, width: width, height: outer - inner),
-                        cornerSize: CGSize(width: width / 2, height: width / 2)
-                    )
-                    let placed = path.applying(
-                        CGAffineTransform(translationX: mid.x, y: mid.y)
-                            .rotated(by: Double(spoke) / 12 * 2 * .pi)
-                    )
-                    context.fill(placed, with: .color(NotchDesign.claudeOrange))
-                }
-            }
+            Image("ClaudeMark")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
         }
     }
 

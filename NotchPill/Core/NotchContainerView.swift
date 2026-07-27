@@ -21,6 +21,7 @@ final class NotchContainerView: NSView {
 
     private var trackingArea: NSTrackingArea?
     private var isHoveringHot = false
+    private var lastHitVerdict: Bool?
 
     init(metrics: NotchMetrics) {
         self.metrics = metrics
@@ -85,18 +86,58 @@ final class NotchContainerView: NSView {
         return leftEar.contains(local) || rightEar.contains(local)
     }
 
+    /// Slack applied to the interactive rects, so a control flush against the
+    /// pill's edge is still clickable a hair outside it. Applied by *both*
+    /// `isPointOnInteractivePill` and `hitTest` — see `acceptsLocalPoint`.
+    private static let hitSlack: CGFloat = 2
+
+    /// The single hit rule. `updateMousePassthrough` (via
+    /// `isPointOnInteractivePill`) decides whether the window accepts the event
+    /// at all, and `hitTest` decides which view receives it — so they have to
+    /// answer identically. They previously did not: the passthrough check grew
+    /// the rects by 2pt and `hitTest` used them exact, leaving a 2pt band around
+    /// every edge where the window swallowed a click and then routed it nowhere.
+    /// The peek's trailing controls sit ~8pt from that edge, which is how the ✕
+    /// ended up feeling unreliable.
+    private func acceptsLocalPoint(_ local: NSPoint) -> Bool {
+        let verdict: Bool
+        if isInTabEar(at: local) {
+            verdict = false
+        } else {
+            // The pill's own pixels win over the browser flank. The flank rects run
+            // 52pt below the menu bar (for unified tab bars), and an expanded peek is
+            // wider than the notch — so a blanket flank rejection here made the peek's
+            // trailing controls (reply ↰, ✕) unclickable and dropped the click onto
+            // the browser behind, pausing whatever was playing. `isInTabEar` already
+            // protects the strip beside the notch, which is what tabs actually need.
+            let slack = Self.hitSlack
+            verdict = interactiveRectsLocal()
+                .contains { $0.insetBy(dx: -slack, dy: -slack).contains(local) }
+        }
+        logHitVerdict(local, verdict)
+        return verdict
+    }
+
+    /// Traces the hit rule (NOTCHPILL_LOG_HIT=1). "The button sometimes doesn't
+    /// take the click" is invisible from outside — the window silently declining
+    /// the event and a control simply being missed look identical. Logs only when
+    /// the verdict flips, so hovering a control at 60Hz doesn't flood.
+    private static let logHit = ProcessInfo.processInfo.environment["NOTCHPILL_LOG_HIT"] == "1"
+    private func logHitVerdict(_ local: NSPoint, _ verdict: Bool) {
+        guard Self.logHit, verdict != lastHitVerdict else { return }
+        lastHitVerdict = verdict
+        let rects = interactiveRectsLocal()
+            .map { "(\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))×\(Int($0.height)))" }
+            .joined(separator: " ")
+        print("HIT \(verdict ? "ACCEPT" : "reject") at (\(Int(local.x)),\(Int(local.y))) "
+            + "bounds=\(Int(bounds.width))×\(Int(bounds.height)) "
+            + "tabEar=\(isInTabEar(at: local)) rects=\(rects)")
+    }
+
     func isPointOnInteractivePill(_ screenPoint: NSPoint) -> Bool {
         guard let window else { return false }
         let windowPoint = window.convertPoint(fromScreen: screenPoint)
-        let local = convert(windowPoint, from: nil)
-        if isInTabEar(at: local) { return false }
-        // The pill's own pixels win over the browser flank. The flank rects run
-        // 52pt below the menu bar (for unified tab bars), and an expanded peek is
-        // wider than the notch — so a blanket flank rejection here made the peek's
-        // trailing controls (reply ↰, ✕) unclickable and dropped the click onto
-        // the browser behind, pausing whatever was playing. `isInTabEar` already
-        // protects the strip beside the notch, which is what tabs actually need.
-        return interactiveRectsLocal().contains { $0.insetBy(dx: -2, dy: -2).contains(local) }
+        return acceptsLocalPoint(convert(windowPoint, from: nil))
     }
 
     func isMouseInHotZone() -> Bool {
@@ -108,14 +149,7 @@ final class NotchContainerView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         // Pass clicks through to browser tabs / menu bar unless expanded over the pill.
         guard isExpandedProvider() else { return nil }
-        let local = convert(point, from: superview)
-        if isInTabEar(at: local) { return nil }
-        // Same rule as `isPointOnInteractivePill`: inside the pill body the pill
-        // owns the click, even where a browser flank rect overlaps it. These two
-        // must agree — `updateMousePassthrough` decides whether the window accepts
-        // the event at all, and `hitTest` decides which view gets it. Disagreement
-        // means a window that accepts a click and then routes it nowhere.
-        guard interactiveRectsLocal().contains(where: { $0.contains(local) }) else { return nil }
+        guard acceptsLocalPoint(convert(point, from: superview)) else { return nil }
         return super.hitTest(point)
     }
 

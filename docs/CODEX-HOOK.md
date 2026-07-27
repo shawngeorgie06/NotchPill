@@ -95,6 +95,21 @@ Then, with NotchPill running and **Dev Ready Pings** on, ask Codex to do
 something small. On finish the notch peeks with the project folder name, a
 `codex` badge, the host app, and `finished · <branch>`.
 
+## Codex's hidden sessions
+
+Codex runs sessions you did not start. When an action needs escalated
+permissions and **guardian approval** is enabled, Codex spawns a *reviewer*
+session — model `codex-auto-review` — which judges the request and decides
+allow/deny on your behalf. That reviewer runs a full turn, so it fires `Stop`
+like anything else and would peek the notch for work you never asked for.
+
+`codex-notify.sh` drops any event whose `model` looks like an auto-review model.
+
+This has a second consequence worth knowing: **when guardian approval decides
+for you, `PermissionRequest` never fires** and no waiting peek appears — because
+you were never actually asked. If you want the notch to surface approvals, the
+approval has to reach *you*, not the reviewer.
+
 ## Known gaps
 
 - **The `PermissionRequest` payload shape is not yet confirmed.** It does not
