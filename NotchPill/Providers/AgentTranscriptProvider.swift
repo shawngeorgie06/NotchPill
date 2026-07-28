@@ -128,7 +128,11 @@ final class AgentTranscriptProvider {
     /// each other rather than double-peeking.
     private func alert(for url: URL) -> DevReadyAlert? {
         let isCodex = url.path.contains("/.codex/")
-        let sessionId = url.deletingPathExtension().lastPathComponent
+        // Codex's filename is `rollout-<timestamp>-<id>`; the hooks send the bare
+        // id, and these two must match or the peeks won't dedup against each
+        // other. Claude Code's filename *is* the session id.
+        let sessionId = (isCodex ? firstValue(in: url, key: "id") : nil)
+            ?? url.deletingPathExtension().lastPathComponent
         guard let project = projectName(for: url, isCodex: isCodex) else { return nil }
         let branch = gitBranch(for: url, isCodex: isCodex)
         return DevReadyAlert(
@@ -185,6 +189,11 @@ final class AgentTranscriptProvider {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
             else { continue }
             if let value = obj[key] as? String, !value.isEmpty { return value }
+            // Codex wraps each record: {"timestamp":…,"type":…,"payload":{"cwd":…}}
+            if let payload = obj["payload"] as? [String: Any],
+               let value = payload[key] as? String, !value.isEmpty {
+                return value
+            }
         }
         return nil
     }
