@@ -26,6 +26,7 @@ final class NotchController {
     private let systemStats = SystemStatsProvider()
     private let battery = BatteryProvider()
     private let devReady = DevReadyProvider()
+    private let transcripts = AgentTranscriptProvider()
     private let replyHotKey = GlobalHotKey()
     /// Most-recent finished-agent alert, kept so the reply hotkey can target it
     /// even after its peek has auto-dismissed.
@@ -273,6 +274,10 @@ final class NotchController {
         if let level = volume.currentVolume() { state.refreshSystemVolume(level) }
         volume.onVolumeChanged = { [weak self] level in self?.state.showVolume(level) }
         devReady.onDevReady = { [weak self] alert in self?.presentDevReady(alert) }
+        // Hookless finished peeks. Emits the same title/subtitle/sessionId as the
+        // hooks, so DevReadyDedup collapses the pair when both are active.
+        transcripts.onDevReady = { [weak self] alert in self?.presentDevReady(alert) }
+        transcripts.start()
         devReady.start()
 
         // Secondary providers can warm up after the notch is on screen.

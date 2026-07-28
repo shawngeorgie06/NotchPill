@@ -80,6 +80,13 @@ final class AppSettings: ObservableObject {
     @Published var autoCheckUpdates: Bool {
         didSet { defaults.set(autoCheckUpdates, forKey: Keys.autoCheckUpdates) }
     }
+    /// Watch Claude Code / Codex transcripts so finished peeks work with no
+    /// hooks installed. On by default: NotchPill should do something useful the
+    /// moment it is installed, not after a setup step.
+    @Published var watchAgentTranscripts: Bool {
+        didSet { defaults.set(watchAgentTranscripts, forKey: Keys.watchAgentTranscripts) }
+    }
+
     @Published var agentReplyEnabled: Bool {
         didSet { defaults.set(agentReplyEnabled, forKey: Keys.agentReplyEnabled) }
     }
@@ -110,6 +117,7 @@ final class AppSettings: ObservableObject {
         static let devReadyPlaySound = "devReadyPlaySound"
         static let autoCheckUpdates = "autoCheckUpdates"
         static let agentReplyEnabled = "agentReplyEnabled"
+        static let watchAgentTranscripts = "watchAgentTranscripts"
     }
 
     private init() {
@@ -165,6 +173,7 @@ final class AppSettings: ObservableObject {
         devReadyPlaySound = defaults.object(forKey: Keys.devReadyPlaySound) as? Bool ?? true
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
         agentReplyEnabled = defaults.object(forKey: Keys.agentReplyEnabled) as? Bool ?? true
+        watchAgentTranscripts = defaults.object(forKey: Keys.watchAgentTranscripts) as? Bool ?? true
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -231,5 +240,6 @@ final class AppSettings: ObservableObject {
         devReadyPlaySound = true
         autoCheckUpdates = true
         agentReplyEnabled = true
+        watchAgentTranscripts = true
     }
 }
