@@ -95,7 +95,12 @@ final class AgentTranscriptProvider {
             }
             state.pinged = true
             states[key] = state
-            if primed, let alert = alert(for: url) {
+            // Quiet is not the same as finished. A transcript also stops growing
+            // while the agent waits on *you*, and every line you type appends to
+            // it — so without this the notch peeks "finished" at the person who
+            // just pressed Return.
+            guard primed, endsWithAgentTurn(url) else { continue }
+            if let alert = alert(for: url) {
                 onDevReady?(alert)
             }
         }
@@ -118,6 +123,41 @@ final class AgentTranscriptProvider {
             }
         }
         return found
+    }
+
+    /// Whether the transcript's last substantive record is the agent speaking.
+    ///
+    /// Claude Code tags records `{"type":"assistant"|"user"}`; Codex nests a
+    /// `payload` and marks assistant output with a role or an `agent_message`
+    /// type. Bookkeeping records (attachments, file-history snapshots, token
+    /// counts) are skipped — they trail a turn and would otherwise mask it.
+    private func endsWithAgentTurn(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let window: UInt64 = 262_144
+        try? handle.seek(toOffset: size > window ? size - window : 0)
+        guard let data = try? handle.readToEnd(),
+              let text = String(data: data, encoding: .utf8) else { return false }
+
+        let ignored: Set<String> = ["attachment", "file-history-snapshot", "summary",
+                                    "system", "token_count", "event", "turn_context"]
+        for line in text.split(separator: "\n").reversed() {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
+            else { continue }
+            let payload = obj["payload"] as? [String: Any]
+            let kind = ((payload?["type"] ?? obj["type"]) as? String)?.lowercased() ?? ""
+            if kind.isEmpty || ignored.contains(kind) { continue }
+            let role = ((payload?["role"] ?? (obj["message"] as? [String: Any])?["role"]) as? String)?
+                .lowercased()
+            if kind.contains("user") || role == "user" { return false }
+            if kind.contains("assistant") || kind.contains("agent") || role == "assistant" {
+                return true
+            }
+            // An unrecognised record type is not evidence of a finished turn.
+            return false
+        }
+        return false
     }
 
     private func fileSize(_ url: URL) -> Int64? {

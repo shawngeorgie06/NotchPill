@@ -27,6 +27,7 @@ final class NotchController {
     private let battery = BatteryProvider()
     private let devReady = DevReadyProvider()
     private let transcripts = AgentTranscriptProvider()
+    private let cursorActivity = CursorActivityProvider()
     private let replyHotKey = GlobalHotKey()
     /// Most-recent finished-agent alert, kept so the reply hotkey can target it
     /// even after its peek has auto-dismissed.
@@ -278,6 +279,8 @@ final class NotchController {
         // hooks, so DevReadyDedup collapses the pair when both are active.
         transcripts.onDevReady = { [weak self] alert in self?.presentDevReady(alert) }
         transcripts.start()
+        cursorActivity.onDevReady = { [weak self] alert in self?.presentDevReady(alert) }
+        cursorActivity.start()
         devReady.start()
 
         // Secondary providers can warm up after the notch is on screen.
