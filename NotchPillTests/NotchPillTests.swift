@@ -1236,3 +1236,82 @@ struct AgentAnswerTests {
         #expect(AgentAnswer.standardSet == [.yes, .no, .digit(1), .digit(2), .digit(3)])
     }
 }
+
+/// The hookless watchers. Both bugs that reached the user in 1.8.x lived in this
+/// logic and neither had a test, so every case below is either a regression or
+/// a shape taken from a real transcript on disk.
+@Suite("transcript turn detection")
+struct TranscriptTurnTests {
+    private func tail(_ lines: [String]) -> String { lines.joined(separator: "\n") }
+
+    @Test("an assistant message ends the turn")
+    func assistantEnds() {
+        #expect(AgentTranscriptProvider.turnEnded(inTail: tail([
+            #"{"type":"user","message":{"role":"user"}}"#,
+            #"{"type":"assistant","message":{"role":"assistant"}}"#
+        ])))
+    }
+
+    @Test("REGRESSION: a message you just sent is not a finished turn")
+    func userDoesNotEnd() {
+        // 1.8.x peeked "finished" the moment the user pressed Return, because it
+        // fired on any write that went quiet without looking at what was written.
+        #expect(!AgentTranscriptProvider.turnEnded(inTail: tail([
+            #"{"type":"assistant","message":{"role":"assistant"}}"#,
+            #"{"type":"user","message":{"role":"user"}}"#
+        ])))
+    }
+
+    @Test("bookkeeping records trailing a turn don't mask it")
+    func bookkeepingSkipped() {
+        // Claude Code writes these after the assistant message; treating them as
+        // the last word would silently suppress every peek.
+        #expect(AgentTranscriptProvider.turnEnded(inTail: tail([
+            #"{"type":"assistant","message":{"role":"assistant"}}"#,
+            #"{"type":"attachment"}"#,
+            #"{"type":"file-history-snapshot"}"#
+        ])))
+    }
+
+    @Test("bookkeeping after a user message still isn't a finished turn")
+    func bookkeepingAfterUser() {
+        #expect(!AgentTranscriptProvider.turnEnded(inTail: tail([
+            #"{"type":"user","message":{"role":"user"}}"#,
+            #"{"type":"file-history-snapshot"}"#
+        ])))
+    }
+
+    @Test("REGRESSION: Codex nests its record under `payload`")
+    func codexPayloadShape() {
+        // 1.8.0 only read top-level keys, so every Codex session was silently
+        // dropped — no peek, nothing logged.
+        #expect(AgentTranscriptProvider.turnEnded(inTail:
+            #"{"timestamp":"t","type":"response_item","payload":{"type":"agent_message"}}"#))
+        #expect(!AgentTranscriptProvider.turnEnded(inTail:
+            #"{"timestamp":"t","type":"response_item","payload":{"type":"user_message"}}"#))
+    }
+
+    @Test("an unrecognised record is not evidence of a finished turn")
+    func unknownRecord() {
+        // Better a missed peek than one fired at nothing.
+        #expect(!AgentTranscriptProvider.turnEnded(inTail: #"{"type":"something-new"}"#))
+    }
+
+    @Test("garbage and empty tails are safe")
+    func malformed() {
+        #expect(!AgentTranscriptProvider.turnEnded(inTail: ""))
+        #expect(!AgentTranscriptProvider.turnEnded(inTail: "not json at all"))
+        // A tail sliced mid-line must not throw away the whole decision.
+        #expect(AgentTranscriptProvider.turnEnded(inTail: tail([
+            #"ssage":{"role":"user"}}"#,
+            #"{"type":"assistant","message":{"role":"assistant"}}"#
+        ])))
+    }
+
+    @Test("project name comes from the encoded working directory")
+    func projectNaming() {
+        #expect(AgentTranscriptProvider
+            .claudeProjectName(fromDirectory: "-Users-shawngeorgie-Projects-NotchPill") == "NotchPill")
+        #expect(AgentTranscriptProvider.claudeProjectName(fromDirectory: "") == nil)
+    }
+}

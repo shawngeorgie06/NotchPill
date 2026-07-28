@@ -139,7 +139,12 @@ final class AgentTranscriptProvider {
         try? handle.seek(toOffset: size > window ? size - window : 0)
         guard let data = try? handle.readToEnd(),
               let text = String(data: data, encoding: .utf8) else { return false }
+        return Self.turnEnded(inTail: text)
+    }
 
+    /// The decision itself, separated from reading the file so it can be tested
+    /// against real transcript shapes. Both bugs shipped in 1.8.x lived here.
+    nonisolated static func turnEnded(inTail text: String) -> Bool {
         let ignored: Set<String> = ["attachment", "file-history-snapshot", "summary",
                                     "system", "token_count", "event", "turn_context"]
         for line in text.split(separator: "\n").reversed() {
@@ -158,6 +163,13 @@ final class AgentTranscriptProvider {
             return false
         }
         return false
+    }
+
+    /// Claude Code encodes the working directory in the directory name with
+    /// slashes turned into dashes. Extracted for the same reason as above.
+    nonisolated static func claudeProjectName(fromDirectory dir: String) -> String? {
+        guard let last = dir.split(separator: "-").last, !last.isEmpty else { return nil }
+        return String(last)
     }
 
     private func fileSize(_ url: URL) -> Int64? {
@@ -194,9 +206,7 @@ final class AgentTranscriptProvider {
     /// the cwd inside the transcript instead.
     private func projectName(for url: URL, isCodex: Bool) -> String? {
         if !isCodex {
-            let dir = url.deletingLastPathComponent().lastPathComponent
-            guard let last = dir.split(separator: "-").last, !last.isEmpty else { return nil }
-            return String(last)
+            return Self.claudeProjectName(fromDirectory: url.deletingLastPathComponent().lastPathComponent)
         }
         guard let cwd = firstValue(in: url, key: "cwd") else { return nil }
         return URL(fileURLWithPath: cwd).lastPathComponent
