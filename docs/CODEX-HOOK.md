@@ -177,3 +177,22 @@ notify-notchpill.sh "myproject" "waiting · main" MyTool com.example.term mytool
 Omit both and you get Claude Code's set over keystrokes, which is what every
 hook written before this sent implicitly. A declared set also overrides
 NotchPill's per-agent guesswork — the signal knows better than the heuristic.
+
+
+## Approval prompts
+
+`PermissionRequest` cannot be captured non-interactively: `codex exec` forces
+`approval: never`, so the hook never fires there. It only runs from the desktop
+app or the TUI, where a human is present to answer.
+
+Rather than wait on that payload, the hook stopped depending on knowing its
+shape. It looks for `message`, `reason`, `tool_name`, `command`, `description`,
+`explanation` or `call` **at any depth** — Codex nests its records under
+`payload`, so a top-level-only lookup would have read an approval prompt as
+"no message". A `command` array is joined into a readable line, since
+`["bash","-lc","rm -rf build"]` is the most useful thing such a prompt can say.
+
+If none of that matches, the peek still fires with "Codex is waiting for your
+approval" — correct and actionable, just less specific — and the raw payload is
+written once to `~/.notchpill/codex-permission-payload.json`. That file existing
+means the shape is still unidentified and is worth sending upstream.

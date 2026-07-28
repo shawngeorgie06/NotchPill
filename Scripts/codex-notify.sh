@@ -101,6 +101,32 @@ case "$EVENT" in
       MESSAGE="$(json_field "$k")"
       [[ -n "$MESSAGE" ]] && break
     done
+    # Top-level lookup is not enough: Codex nests its records (a rollout line
+    # wraps everything under `payload`), so an approval prompt sitting one level
+    # down would read as "no message found". Sweep the whole document for the
+    # same key names at any depth before giving up.
+    if [[ -z "$MESSAGE" ]] && command -v jq >/dev/null 2>&1; then
+      MESSAGE="$(printf '%s' "$INPUT" | jq -r '
+        [ .. | objects
+          | to_entries[]
+          | select(.key | IN("message","permission_request","reason","tool_name",
+                             "command","description","explanation","call"))
+          | .value | select(type == "string") | select(length > 0) ]
+        | first // empty' 2>/dev/null || true)"
+    fi
+    # A command array (`["bash","-lc","rm -rf x"]`) is the most useful thing a
+    # permission prompt can say, and it never survives a string-only sweep.
+    if [[ -z "$MESSAGE" ]] && command -v jq >/dev/null 2>&1; then
+      MESSAGE="$(printf '%s' "$INPUT" | jq -r '
+        [ .. | objects | to_entries[]
+          | select(.key | IN("command","argv"))
+          | .value | select(type == "array")
+          | map(select(type == "string")) | join(" ") ]
+        | first // empty' 2>/dev/null || true)"
+    fi
+    if [[ ${#MESSAGE} -gt 140 ]]; then
+      MESSAGE="${MESSAGE:0:137}..."
+    fi
     if [[ -z "$MESSAGE" ]]; then
       MESSAGE="Codex is waiting for your approval"
       # None of the guesses matched, so this payload is the one thing needed to
