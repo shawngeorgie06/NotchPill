@@ -142,7 +142,11 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: NotchPill ${{ steps.version.outputs.label }}
+          # Append, don't replace. `body_path` alone overwrote hand-written
+          # release notes with the install warning, so every release read as a
+          # Gatekeeper notice and the changelog was lost.
           body_path: .github/release-install-body.md
+          append_body: true
           files: |
             dist/NotchPill-*-macOS-arm64.zip
             dist/SHA256SUMS.txt
