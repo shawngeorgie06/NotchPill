@@ -42,6 +42,10 @@ final class AgentTranscriptProvider {
     private var states: [String: FileState] = [:]
     private var timer: Timer?
     private var primed = false
+    /// Cached result of walking the transcript trees; see `transcripts()`.
+    private var activeFiles: [URL]?
+    private var lastDiscovery = Date.distantPast
+    private let rediscoverInterval: TimeInterval = 15
 
     private var roots: [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -108,7 +112,17 @@ final class AgentTranscriptProvider {
         primed = true
     }
 
+    /// Live transcripts, cached.
+    ///
+    /// Walking both trees costs hundreds of `stat` calls — several hundred
+    /// transcripts accumulate quickly — and almost none of them are live. So the
+    /// walk runs every `rediscoverInterval`, and the polls in between only look
+    /// at the handful it found. A session that starts mid-interval is noticed
+    /// within a few seconds, which is well inside how long a turn takes.
     private func transcripts() -> [URL] {
+        if let cached = activeFiles, Date().timeIntervalSince(lastDiscovery) < rediscoverInterval {
+            return cached
+        }
         var found: [URL] = []
         let fm = FileManager.default
         for root in roots {
@@ -122,6 +136,11 @@ final class AgentTranscriptProvider {
                 }
             }
         }
+        activeFiles = found
+        lastDiscovery = Date()
+        // Forget files that dropped out, so `states` doesn't grow all session.
+        let live = Set(found.map(\.path))
+        states = states.filter { live.contains($0.key) }
         return found
     }
 
