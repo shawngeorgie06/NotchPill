@@ -14,18 +14,37 @@ temporary. It survives only until the workflow finishes, about 90 seconds later.
 # 1. bump MARKETING_VERSION in NotchPill.xcodeproj/project.pbxproj, commit
 # 2. push, then tag — the tag is what triggers the build
 git push origin main
-git tag v1.8.0 && git push origin v1.8.0
+git tag v1.9.3 && git push origin v1.9.3
 
 # 3. write the release notes (CI appends the install warning to whatever is here)
-gh release create v1.8.0 --title "NotchPill v1.8.0" --notes "…"
-
-# 4. once CI is done, point Homebrew at it
-./Scripts/bump-cask.sh 1.8.0
+gh release create v1.9.3 --title "NotchPill v1.9.3" --notes "…"
 ```
 
-`bump-cask.sh` waits for the Release workflow to finish before hashing, and
-refuses to push if the workflow failed or if the asset disagrees with the
-published `SHA256SUMS.txt`.
+That is the whole thing. CI builds, signs, uploads the ZIP and `SHA256SUMS.txt`,
+and then bumps the Homebrew cask itself — verified end to end on v1.9.2.
+
+`Scripts/bump-cask.sh <version>` remains as a fallback for when CI's cask step
+fails. It is safe to run either way: it waits for the Release workflow to
+finish before hashing, refuses to push if the workflow failed or if the asset
+disagrees with the published `SHA256SUMS.txt`, and does nothing if the cask is
+already correct.
+
+## Check the cask actually matches
+
+Worth doing after any release where CI was rerun or the assets were touched by
+hand, because a cask pinning a hash that no longer exists breaks `brew install`
+for everyone:
+
+```bash
+gh release download v1.9.3 -R shawngeorgie06/NotchPill --dir /tmp/rel --pattern '*.zip'
+shasum -a 256 /tmp/rel/*.zip
+curl -fsSL https://raw.githubusercontent.com/shawngeorgie06/homebrew-tap/main/Casks/notchpill.rb | grep sha256
+```
+
+Note that **rerunning a release workflow produces a different ZIP** even from
+identical source — the `Info.plist` records the build machine — so the asset
+hash changes. CI updates the cask in the same run, so the two stay consistent;
+a hand-attached asset would not.
 
 ## Do not attach a locally built ZIP
 
@@ -55,6 +74,8 @@ a different Xcode. That is the quickest way to tell which build you are holding.
 | `NOTCHPILL_SIGN_IDENTITY` | selects that identity | as above |
 | `TAP_PUSH_TOKEN` | lets CI update the Homebrew cask itself | the cask step **reports success and silently does nothing** — you must run `bump-cask.sh` by hand |
 
-`TAP_PUSH_TOKEN` is currently unset. Setting it (a PAT with push access to
-`shawngeorgie06/homebrew-tap`) would let CI bump the cask right after uploading,
-removing the manual step and the race with it.
+All three are set. `TAP_PUSH_TOKEN` is a fine-grained PAT scoped to
+`shawngeorgie06/homebrew-tap` with **Contents: read/write** — it grants nothing
+on this repo, only on the tap. If it expires the cask step goes quiet again
+rather than failing loudly, so the symptom to watch for is `brew upgrade`
+serving a stale version while the GitHub release looks fine.

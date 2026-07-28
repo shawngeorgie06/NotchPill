@@ -34,9 +34,8 @@ with the cert and skips notarization. Local signed build:
 NOTCHPILL_SIGN_IDENTITY="NotchPill Self-Signed" ./Scripts/build-release.sh
 ```
 
-To also keep the Homebrew cask current on each release, add a repo-scoped PAT for
-`shawngeorgie06/homebrew-tap` as secret `TAP_PUSH_TOKEN` (or run
-`./Scripts/bump-cask.sh <version>` by hand).
+The Homebrew cask is kept current by CI via the `TAP_PUSH_TOKEN` secret; see
+[RELEASING.md](RELEASING.md).
 
 ---
 
