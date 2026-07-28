@@ -274,12 +274,12 @@ final class NotchController {
         volume.start()
         if let level = volume.currentVolume() { state.refreshSystemVolume(level) }
         volume.onVolumeChanged = { [weak self] level in self?.state.showVolume(level) }
-        devReady.onDevReady = { [weak self] alert in self?.presentDevReady(alert) }
+        devReady.onDevReady = { [weak self] alert in self?.presentDevReady(alert, origin: "signal") }
         // Hookless finished peeks. Emits the same title/subtitle/sessionId as the
         // hooks, so DevReadyDedup collapses the pair when both are active.
-        transcripts.onDevReady = { [weak self] alert in self?.presentDevReady(alert) }
+        transcripts.onDevReady = { [weak self] alert in self?.presentDevReady(alert, origin: "transcript") }
         transcripts.start()
-        cursorActivity.onDevReady = { [weak self] alert in self?.presentDevReady(alert) }
+        cursorActivity.onDevReady = { [weak self] alert in self?.presentDevReady(alert, origin: "cursordb") }
         cursorActivity.start()
         devReady.start()
 
@@ -672,8 +672,9 @@ final class NotchController {
 
     // MARK: - Dev ready pings
 
-    private func presentDevReady(_ alert: DevReadyAlert) {
+    private func presentDevReady(_ alert: DevReadyAlert, origin: String = "?") {
         guard AppSettings.shared.showDevReadyPings else { return }
+        Self.logPeek(alert, origin: origin)
 
         // Waiting alerts have their own lifecycle and must not touch the finished
         // path: the finished fingerprint is `title|subtitle`, which for waiting
@@ -954,6 +955,50 @@ final class NotchController {
         }
         dismissDevReady(id: alert.id)   // dismiss the answered waiting peek
     }
+
+    /// Appends one line per peek to `~/.notchpill/peeks.log`.
+    ///
+    /// Mislabelled peeks ("Cursor finished" arriving as Claude Code) are the
+    /// hardest thing to chase here, because by the time you notice one the
+    /// evidence is a rectangle that already faded. Reading the hook scripts is
+    /// not enough — the label can come from a queued payload written minutes
+    /// earlier, or from a hook the app never installed. So every peek records
+    /// the fields that decide its branding, and the log is capped so it can be
+    /// left on permanently.
+    private static let peekLogging = ProcessInfo.processInfo.environment["NOTCHPILL_LOG_PEEKS"] == "1"
+
+    private static func logPeek(_ alert: DevReadyAlert, origin: String) {
+        // Off by default: these lines carry project names and the text of
+        // whatever an agent asked, which is not something to write to disk on
+        // every machine. Turn it on only while chasing a peek.
+        guard peekLogging else { return }
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".notchpill")
+        let url = dir.appendingPathComponent("peeks.log")
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let line = "\(stamp) from=\(origin) kind=\(alert.kind) agent=\(alert.agent ?? "-") "
+            + "source=\(alert.source ?? "-") bundle=\(alert.bundleId ?? "-") "
+            + "shows=\(alert.knownAgent.map(String.init(describing:)) ?? "unknown") "
+            + "title=\(alert.title.prefix(60).replacingOccurrences(of: "\n", with: " ")) "
+            + "subtitle=\((alert.subtitle ?? "-").prefix(60).replacingOccurrences(of: "\n", with: " ")) "
+            + "session=\(alert.sessionId ?? "-")\n"
+        guard let data = line.data(using: .utf8) else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            // Keep the tail, not the head — a runaway log would otherwise fill
+            // the disk of anyone who installs this and forgets about it.
+            if (try? handle.seekToEnd()) ?? 0 > 512_000 {
+                try? handle.close()
+                try? FileManager.default.removeItem(at: url)
+                try? data.write(to: url)
+                return
+            }
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: url)
+        }
+    }
 }
 
 /// Short suppression window for repeated "finished" pings, keyed on
@@ -975,12 +1020,40 @@ struct DevReadyDedup {
     var interval: TimeInterval = 12
     private var recent: [(String, Date)] = []
 
+    /// How close together two peeks from the *same host app* must be to count as
+    /// one turn. Short: this only has to span a hook and the process it wrapped,
+    /// which is well under a second in practice.
+    var hostWindow: TimeInterval = 5
+    private var recentHosts: [((host: String, agent: String), Date)] = []
+
     mutating func shouldSuppress(_ alert: DevReadyAlert, now: Date = Date()) -> Bool {
         guard alert.kind == .finished else { return false }
         let fingerprint = "\(alert.title)|\(alert.subtitle ?? "")|\(alert.sessionId ?? "")"
         recent.removeAll { now.timeIntervalSince($0.1) > interval }
         if recent.contains(where: { $0.0 == fingerprint }) { return true }
         recent.append((fingerprint, now))
+
+        // One turn in one app is one peek, even when two agents report it.
+        //
+        // Cursor can run Claude Code as its backend, reusing its own composer id
+        // as the Claude session id. Both report honestly and neither is wrong:
+        // Cursor's hook peeks as Cursor, and the `claude` process it spawned
+        // fires its own Stop hook, which correctly names Cursor as the host app.
+        // The result was two peeks a second apart for one turn, reading as a
+        // Claude session the user never started. Their titles differ ("Question
+        // for you" vs the project), so only the host app relates them.
+        //
+        // The first peek wins because it is the more specific one — the actual
+        // question beats a generic "finished".
+        //
+        // Only a *different* agent collapses. Two Claude Code sessions in one
+        // terminal finishing together are two real turns, and suppressing one
+        // would undo the whole point of keying peeks on the session id.
+        guard let host = alert.bundleId, !host.isEmpty else { return false }
+        let agent = (alert.agent ?? alert.source ?? "").lowercased()
+        recentHosts.removeAll { now.timeIntervalSince($0.1) > hostWindow }
+        if recentHosts.contains(where: { $0.0.host == host && $0.0.agent != agent }) { return true }
+        recentHosts.append(((host, agent), now))
         return false
     }
 }

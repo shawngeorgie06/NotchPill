@@ -1147,6 +1147,63 @@ struct DevReadyDedupTests {
         #expect(dedup.shouldSuppress(waiting) == false)
         #expect(dedup.shouldSuppress(finished) == false)
     }
+    // REGRESSION: Cursor can run Claude Code as its backend, so one turn fired
+    // Cursor's hook *and* the spawned `claude` process's Stop hook a second
+    // later. Both reported honestly — the Claude hook correctly named Cursor as
+    // the host app — and the pair read as a Claude session never started.
+    @Test("one turn in one app is one peek, even from two agents")
+    func crossAgentSameHostCollapses() {
+        var dedup = DevReadyDedup()
+        let cursor = DevReadyAlert(title: "Question for you", subtitle: "regenerate the memo?",
+                                   source: "Cursor", agent: "cursor",
+                                   bundleId: "com.todesktop.230313mzl4w4u92")
+        let claude = DevReadyAlert(title: "bid-no-bid", subtitle: "finished · main",
+                                   source: "Cursor", agent: "claude-code",
+                                   bundleId: "com.todesktop.230313mzl4w4u92",
+                                   sessionId: "1573ad8b")
+        #expect(dedup.shouldSuppress(cursor) == false)   // the specific one wins
+        #expect(dedup.shouldSuppress(claude) == true)
+    }
+
+    // The collapse must not swallow real concurrent work: two Claude Code
+    // sessions in one terminal are two turns, which is the entire reason peeks
+    // are keyed on the session id.
+    @Test("two sessions of the same agent in one terminal both get through")
+    func sameAgentSameHostBothPeek() {
+        var dedup = DevReadyDedup()
+        let one = DevReadyAlert(title: "NotchPill", subtitle: "finished · main",
+                                source: "cmux", agent: "claude-code",
+                                bundleId: "com.cmuxterm.app", sessionId: "aaa")
+        let two = DevReadyAlert(title: "murmur-app", subtitle: "finished · main",
+                                source: "cmux", agent: "claude-code",
+                                bundleId: "com.cmuxterm.app", sessionId: "bbb")
+        #expect(dedup.shouldSuppress(one) == false)
+        #expect(dedup.shouldSuppress(two) == false)
+    }
+
+    @Test("a later turn in the same app is not collapsed")
+    func hostWindowExpires() {
+        var dedup = DevReadyDedup()
+        let now = Date()
+        let cursor = DevReadyAlert(title: "Question for you", subtitle: "a",
+                                   source: "Cursor", agent: "cursor", bundleId: "com.cursor")
+        let claude = DevReadyAlert(title: "proj", subtitle: "finished · main",
+                                   source: "Cursor", agent: "claude-code", bundleId: "com.cursor")
+        #expect(dedup.shouldSuppress(cursor, now: now) == false)
+        #expect(dedup.shouldSuppress(claude, now: now.addingTimeInterval(6)) == false)
+    }
+
+    // A peek with no host app (the transcript watcher emits none) has nothing to
+    // relate it to anything else, so it must never be collapsed.
+    @Test("peeks without a host app are unaffected")
+    func noBundleUnaffected() {
+        var dedup = DevReadyDedup()
+        let a = DevReadyAlert(title: "proj-a", subtitle: "finished", agent: "claude-code")
+        let b = DevReadyAlert(title: "proj-b", subtitle: "finished", agent: "codex")
+        #expect(dedup.shouldSuppress(a) == false)
+        #expect(dedup.shouldSuppress(b) == false)
+    }
+
     @Test("two sessions on the same branch both get through")
     func distinctSessionsNotSuppressed() {
         // project|branch is byte-identical for both. Suppressing the second is
