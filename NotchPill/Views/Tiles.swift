@@ -472,10 +472,12 @@ struct DevReadyPeekRow: View {
                     }
 
                     Spacer(minLength: 0)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.28))
+                    // No chevron. It promised a destination on every row, but a
+                    // peek from the transcript watcher carries no bundle id and
+                    // opens nothing when tapped — and the rows that *do* open
+                    // something already say "Tap to open". Dropping it also
+                    // hands its width back to the title, which is tight at the
+                    // 380pt the peek is clamped to.
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
@@ -665,6 +667,7 @@ enum ExpandedActivityBuilder {
         battery: BatteryStatus?,
         shelfCount: Int,
         shelfNames: [String],
+        agentSessions: [AgentSession] = [],
         showMedia: Bool,
         showActiveApp: Bool,
         showVolume: Bool,
@@ -673,9 +676,13 @@ enum ExpandedActivityBuilder {
         showTimer: Bool,
         showSystemStats: Bool,
         showBattery: Bool,
-        showShelf: Bool
+        showShelf: Bool,
+        showAgents: Bool = false
     ) -> [ExpandedActivity] {
         var items: [ExpandedActivity] = []
+        // Live agents lead: they are the only card that answers "what is
+        // running right now", and they are the reason to look at all.
+        if showAgents, !agentSessions.isEmpty { items.append(.agents(agentSessions)) }
         if showMedia, let np = nowPlaying, !np.isEmpty { items.append(.media(np)) }
         if showActiveApp {
             if let hint = appSwitchHint {
@@ -732,14 +739,88 @@ struct ExpandedActivityCard: View {
                 batteryCard(status)
             case .shelf(let count, let names):
                 shelfCard(count: count, names: names)
+            case .agents(let sessions):
+                agentsCard(sessions)
             }
         }
         .frame(
-            minWidth: expandToFill ? nil : s(88),
+            minWidth: expandToFill ? nil : s(76),
             maxWidth: expandToFill ? .infinity : nil,
             alignment: .leading
         )
         .layoutPriority(expandToFill ? 1 : 0)
+    }
+
+    /// The live-agents card: one row per running conversation, scrolling.
+    private func agentsCard(_ sessions: [AgentSession]) -> some View {
+        VStack(alignment: .leading, spacing: s(3)) {
+            HStack(spacing: s(4)) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.system(size: s(9)))
+                Text(sessions.count == 1 ? "1 agent" : "\(sessions.count) agents")
+                    .font(font(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.45))
+
+            // Scrolls rather than truncating. The header counts every session,
+            // so silently showing three of four made the card contradict
+            // itself — and there was no way to reach the rest.
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: s(3)) {
+                    ForEach(sessions) { session in
+                        agentRow(session)
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func agentRow(_ session: AgentSession) -> some View {
+        Button {
+            actions.focusAgentSession(session)
+        } label: {
+            VStack(alignment: .leading, spacing: s(1)) {
+                HStack(spacing: s(5)) {
+                    Circle()
+                        .fill(color(for: session.state))
+                        .frame(width: s(5), height: s(5))
+                    Text(session.displayName)
+                        .font(font(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .fixedSize(horizontal: true, vertical: false)
+                    Text(session.project)
+                        .font(font(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                    Spacer(minLength: s(4))
+                    Text(session.statusLabel)
+                        .font(font(size: 10, weight: .medium))
+                        .foregroundStyle(color(for: session.state).opacity(0.85))
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                if let task = session.task {
+                    Text(task)
+                        .font(font(size: 10))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .lineLimit(1)
+                        .padding(.leading, s(10))
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Waiting is the only state worth interrupting for, so it is the only one
+    /// that gets a warm colour; working is calm and idle recedes.
+    private func color(for state: AgentSession.State) -> Color {
+        switch state {
+        case .waiting: return .orange
+        case .working: return .green
+        case .idle: return .white.opacity(0.35)
+        }
     }
 
     private func mediaCard(_ np: NowPlaying) -> some View {
@@ -790,22 +871,22 @@ struct ExpandedActivityCard: View {
     }
 
     private func appCard(title: String, name: String) -> some View {
-        VStack(alignment: .leading, spacing: s(6)) {
+        VStack(alignment: .leading, spacing: s(4)) {
             Text(title)
-                .font(font(size: 11, weight: .medium))
+                .font(font(size: 10, weight: .medium))
                 .foregroundStyle(.white.opacity(0.45))
             HStack(spacing: s(6)) {
                 if let appIcon {
                     Image(nsImage: appIcon)
                         .resizable()
-                        .frame(width: s(22), height: s(22))
+                        .frame(width: s(19), height: s(19))
                 } else {
                     Image(systemName: "app.fill")
                         .font(.system(size: s(18)))
                         .foregroundStyle(.white.opacity(0.6))
                 }
                 Text(name)
-                    .font(font(size: 14, weight: .semibold))
+                    .font(font(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(expandToFill ? 3 : 2)
                     .minimumScaleFactor(0.8)

@@ -47,8 +47,34 @@ struct PreferencesView: View {
         }
     }
 
+    private var sizeSlider: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Size")
+                Spacer()
+                Text("\(Int((settings.notchScale * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                // Getting back to the default by dragging is fiddly, and this is
+                // the one setting where overshooting is very visible.
+                Button("Reset") { settings.notchScale = 1.0 }
+                    .buttonStyle(.link)
+                    .disabled(settings.notchScale == 1.0)
+            }
+            Slider(value: $settings.notchScale,
+                   in: AppSettings.notchScaleRange,
+                   step: 0.05)
+            Text("Scales the whole expanded pill. The hover area follows the physical notch and does not change.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var expandedSection: some View {
         SettingsPanel(title: "Expanded Pill", subtitle: "Cards when you hover the notch") {
+            sizeSlider
+            Divider().padding(.vertical, 2)
+            Toggle("Live agents", isOn: $settings.showExpandedAgents)
             Toggle("Now playing", isOn: $settings.showExpandedMedia)
             Toggle("Timer", isOn: $settings.showExpandedTimer)
             Toggle("Active app", isOn: $settings.showExpandedActiveApp)

@@ -350,6 +350,7 @@ enum ExpandedActivity: Equatable, Identifiable {
     case systemStats(SystemStats)
     case battery(BatteryStatus)
     case shelf(count: Int, names: [String])
+    case agents([AgentSession])
 
     var id: String {
         switch self {
@@ -363,6 +364,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .systemStats(let s): return "stats-\(s.cpuPercent)-\(s.memoryPercent)"
         case .battery(let b): return "battery-\(b.level)-\(b.isCharging)"
         case .shelf(let count, _): return "shelf-\(count)"
+        case .agents(let list): return "agents-" + list.map(\.id).joined(separator: ",")
         }
     }
 }

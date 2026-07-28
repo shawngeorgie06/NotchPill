@@ -35,7 +35,7 @@ enum NotchContentSnapshot {
         timer: TimerStore,
         settings: AppSettings
     ) -> [ExpandedActivity] {
-        ExpandedActivityBuilder.activities(
+        let all = ExpandedActivityBuilder.activities(
             nowPlaying: state.nowPlaying,
             nextEvent: state.nextEvent,
             appSwitchHint: state.appSwitchHint,
@@ -46,6 +46,7 @@ enum NotchContentSnapshot {
             battery: state.battery,
             shelfCount: shelf.items.count,
             shelfNames: shelf.items.prefix(3).map(\.name),
+            agentSessions: state.agentSessions,
             showMedia: settings.showExpandedMedia,
             showActiveApp: settings.showExpandedActiveApp,
             showVolume: settings.showExpandedVolume,
@@ -54,7 +55,14 @@ enum NotchContentSnapshot {
             showTimer: settings.showExpandedTimer,
             showSystemStats: settings.showExpandedSystemStats,
             showBattery: settings.showExpandedBattery,
-            showShelf: settings.showExpandedShelf
+            showShelf: settings.showExpandedShelf,
+            showAgents: settings.showExpandedAgents
         )
+        // Smaller pill, fewer cards. The builder already returns them in
+        // priority order, so this drops the least important tail rather than
+        // shrinking everything past the point of being readable.
+        let limit = NotchContentLayout.visibleCardLimit(
+            forUserScale: CGFloat(settings.notchScale))
+        return Array(all.prefix(limit))
     }
 }

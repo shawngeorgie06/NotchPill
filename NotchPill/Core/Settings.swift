@@ -67,6 +67,26 @@ final class AppSettings: ObservableObject {
     @Published var showExpandedShelf: Bool {
         didSet { defaults.set(showExpandedShelf, forKey: Keys.showExpandedShelf) }
     }
+    @Published var showExpandedAgents: Bool {
+        didSet { defaults.set(showExpandedAgents, forKey: Keys.showExpandedAgents) }
+    }
+    /// User size for the expanded pill, as a multiplier on the design scale.
+    /// Clamped on write so a hand-edited plist cannot produce a pill that is
+    /// invisible or wider than the screen.
+    @Published var notchScale: Double {
+        didSet {
+            let clamped = AppSettings.clampNotchScale(notchScale)
+            if clamped != notchScale { notchScale = clamped; return }
+            defaults.set(notchScale, forKey: Keys.notchScale)
+        }
+    }
+
+    nonisolated static let notchScaleRange: ClosedRange<Double> = 0.7...1.3
+    /// `nonisolated` so the clamp can be tested without hopping to the main actor.
+    nonisolated static func clampNotchScale(_ value: Double) -> Double {
+        guard value.isFinite else { return 1.0 }
+        return min(max(value, notchScaleRange.lowerBound), notchScaleRange.upperBound)
+    }
 
     @Published var showDevReadyPings: Bool {
         didSet { defaults.set(showDevReadyPings, forKey: Keys.showDevReadyPings) }
@@ -112,6 +132,8 @@ final class AppSettings: ObservableObject {
         static let showExpandedSystemStats = "showExpandedSystemStats"
         static let showExpandedBattery = "showExpandedBattery"
         static let showExpandedShelf = "showExpandedShelf"
+        static let showExpandedAgents = "showExpandedAgents"
+        static let notchScale = "notchScale"
         static let showDevReadyPings = "showDevReadyPings"
         static let devReadyDuration = "devReadyDuration"
         static let devReadyPlaySound = "devReadyPlaySound"
@@ -142,6 +164,8 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedSystemStats: false,
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: false,
+            Keys.showExpandedAgents: true,
+            Keys.notchScale: 1.0,
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 13.0,
             Keys.devReadyPlaySound: true,
@@ -167,6 +191,8 @@ final class AppSettings: ObservableObject {
         showExpandedSystemStats = defaults.bool(forKey: Keys.showExpandedSystemStats)
         showExpandedBattery = defaults.bool(forKey: Keys.showExpandedBattery)
         showExpandedShelf = defaults.bool(forKey: Keys.showExpandedShelf)
+        showExpandedAgents = defaults.bool(forKey: Keys.showExpandedAgents)
+        notchScale = AppSettings.clampNotchScale(defaults.double(forKey: Keys.notchScale))
         showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
         let storedDuration = defaults.double(forKey: Keys.devReadyDuration)
         devReadyDuration = storedDuration > 0 ? storedDuration : 13.0
@@ -210,6 +236,8 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedSystemStats: false,
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: false,
+            Keys.showExpandedAgents: true,
+            Keys.notchScale: 1.0,
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 13.0,
             Keys.devReadyPlaySound: true,
@@ -235,6 +263,8 @@ final class AppSettings: ObservableObject {
         showExpandedSystemStats = false
         showExpandedBattery = false
         showExpandedShelf = false
+        showExpandedAgents = true
+        notchScale = 1.0
         showDevReadyPings = true
         devReadyDuration = 13.0
         devReadyPlaySound = true

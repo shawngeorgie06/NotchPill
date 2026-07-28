@@ -1408,3 +1408,379 @@ struct TranscriptTurnTests {
         #expect(name("-Users-me-gone-away") == "gone-away")
     }
 }
+
+@Suite("Live agent sessions")
+struct AgentSessionTests {
+    private func session(_ id: String, _ state: AgentSession.State,
+                         at: Date, agent: String = "claude-code") -> AgentSession {
+        AgentSession(id: id, agent: agent, project: id, state: state, lastActivity: at)
+    }
+
+    @Test("a transcript written seconds ago is working, not idle")
+    func recentIsWorking() {
+        let now = Date()
+        #expect(AgentSession.state(lastWrite: now.addingTimeInterval(-2),
+                                   blocked: false, now: now) == .working)
+    }
+
+    // An agent thinking between two tool calls writes nothing for a few
+    // seconds. Flickering working→idle→working reads as a bug.
+    @Test("a short pause mid-turn stays working")
+    func shortPauseStaysWorking() {
+        let now = Date()
+        #expect(AgentSession.state(lastWrite: now.addingTimeInterval(-7),
+                                   blocked: false, now: now) == .working)
+    }
+
+    @Test("a long pause becomes idle, dated from the last write")
+    func longPauseIsIdle() {
+        let now = Date()
+        let last = now.addingTimeInterval(-120)
+        #expect(AgentSession.state(lastWrite: last, blocked: false, now: now) == .idle(since: last))
+    }
+
+    // Blocked beats everything: a session waiting on you has by definition not
+    // written anything recently, so time alone would call it idle.
+    @Test("blocked wins over quiet")
+    func blockedWins() {
+        let now = Date()
+        #expect(AgentSession.state(lastWrite: now.addingTimeInterval(-600),
+                                   blocked: true, now: now) == .waiting)
+    }
+
+    @Test("waiting sessions float above newer working ones")
+    func waitingSortsFirst() {
+        let now = Date()
+        let ordered = AgentSession.ordered([
+            session("fresh", .working, at: now),
+            session("blocked", .waiting, at: now.addingTimeInterval(-300)),
+            session("old", .idle(since: now.addingTimeInterval(-600)),
+                    at: now.addingTimeInterval(-600))
+        ])
+        #expect(ordered.map(\.id) == ["blocked", "fresh", "old"])
+    }
+
+    @Test("durations stay short enough for a notch row")
+    func durationsAreCompact() {
+        let now = Date()
+        #expect(AgentSession.shortDuration(since: now.addingTimeInterval(-45), now: now) == "45s")
+        #expect(AgentSession.shortDuration(since: now.addingTimeInterval(-240), now: now) == "4m")
+        #expect(AgentSession.shortDuration(since: now.addingTimeInterval(-7200), now: now) == "2h")
+        // A clock skew must not render "-3s".
+        #expect(AgentSession.shortDuration(since: now.addingTimeInterval(3), now: now) == "0s")
+    }
+
+    @Test("the card is only offered when something is running")
+    func emptyListShowsNoCard() {
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            shelfCount: 0, shelfNames: [], agentSessions: [],
+            showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: true)
+        #expect(items.isEmpty)
+    }
+
+    @Test("live agents lead the card row")
+    func agentsComeFirst() {
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: "Xcode",
+            systemVolume: 40, timer: nil, systemStats: nil, battery: nil,
+            shelfCount: 0, shelfNames: [],
+            agentSessions: [session("a", .working, at: Date())],
+            showMedia: false, showActiveApp: true, showVolume: true, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: true)
+        #expect(items.first?.id.hasPrefix("agents-") == true)
+    }
+
+    @Test("the toggle actually suppresses the card")
+    func toggleOffHidesCard() {
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            shelfCount: 0, shelfNames: [],
+            agentSessions: [session("a", .working, at: Date())],
+            showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: false)
+        #expect(items.isEmpty)
+    }
+}
+
+@Suite("Notch size preference")
+struct NotchScaleTests {
+    @Test("out-of-range values are clamped, not honoured")
+    func clamps() {
+        // A hand-edited plist must not be able to produce a pill that is
+        // invisible or wider than the display.
+        #expect(AppSettings.clampNotchScale(0.1) == AppSettings.notchScaleRange.lowerBound)
+        #expect(AppSettings.clampNotchScale(9.0) == AppSettings.notchScaleRange.upperBound)
+        #expect(AppSettings.clampNotchScale(1.0) == 1.0)
+    }
+
+    @Test("a corrupt value falls back to the default")
+    func nonFiniteIsSafe() {
+        // `defaults.double(forKey:)` returns 0 for a missing or non-numeric key,
+        // and NaN survives a plist round trip — both would otherwise collapse
+        // the pill to nothing.
+        #expect(AppSettings.clampNotchScale(.nan) == 1.0)
+        #expect(AppSettings.clampNotchScale(0) == AppSettings.notchScaleRange.lowerBound)
+    }
+}
+
+@Suite("Shrinking adapts content, not just size")
+struct NotchScaleAdaptationTests {
+    // Shrinking the pill shrinks type with it, which makes text the first thing
+    // to stop being readable. Compensation gives most of it back.
+    @Test("smaller pill keeps type readable")
+    func typeResistsShrinking() {
+        let small = NotchContentLayout.textCompensation(forUserScale: 0.7)
+        let mid = NotchContentLayout.textCompensation(forUserScale: 0.85)
+        #expect(small > mid)          // the smaller it gets, the more it gives back
+        #expect(small > 1.15)         // 70% pill renders type at ~86%, not 70%
+        #expect(0.7 * small < 1.0)    // but never larger than at full size
+    }
+
+    @Test("enlarging is left alone")
+    func growingIsUncompensated() {
+        #expect(NotchContentLayout.textCompensation(forUserScale: 1.0) == 1)
+        #expect(NotchContentLayout.textCompensation(forUserScale: 1.3) == 1)
+    }
+
+    @Test("a corrupt scale cannot produce a divide-by-zero")
+    func zeroScaleIsSafe() {
+        #expect(NotchContentLayout.textCompensation(forUserScale: 0) == 1)
+        #expect(NotchContentLayout.textCompensation(forUserScale: -1) == 1)
+    }
+
+    @Test("the smaller it gets, the fewer cards it shows")
+    func fewerCardsWhenSmall() {
+        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 0.7) == 2)
+        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 0.85) == 3)
+        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 1.0) == 4)
+        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 1.3) == 5)
+    }
+
+    @Test("the limit never drops below something worth showing")
+    func limitStaysUseful() {
+        for scale in stride(from: 0.7, through: 1.3, by: 0.05) {
+            #expect(NotchContentLayout.visibleCardLimit(forUserScale: CGFloat(scale)) >= 2)
+        }
+    }
+}
+
+@Suite("Agent names and task text")
+struct AgentTaskTests {
+    private func s(_ agent: String) -> AgentSession {
+        AgentSession(id: "x", agent: agent, project: "p", state: .working, lastActivity: Date())
+    }
+
+    // "claude-code" is a wire identifier, not a label.
+    @Test("wire ids become readable names")
+    func names() {
+        #expect(s("claude-code").agentName == "Claude")
+        #expect(s("codex").agentName == "Codex")
+        #expect(s("cursor").agentName == "Cursor")
+        #expect(s("some-new-tool").agentName == "some-new-tool")
+        #expect(s("").agentName == "Agent")
+    }
+
+    @Test("a short prompt is shown whole")
+    func shortPromptKept() {
+        #expect(AgentSession.summarize("fix the login bug") == "fix the login bug")
+    }
+
+    // Claude Code brackets pasted text and command output; without stripping,
+    // rows would read "<command-name> …" instead of the actual request.
+    @Test("wrapper tags are stripped")
+    func tagsStripped() {
+        #expect(AgentSession.summarize("<command-name>/compact</command-name> tidy up") == "tidy up")
+        #expect(AgentSession.summarize("line one\nline two") == "line one line two")
+    }
+
+    @Test("long prompts truncate on a word boundary")
+    func truncatesCleanly() {
+        let long = "please refactor the authentication module and split it into smaller files"
+        let out = AgentSession.summarize(long)!
+        #expect(out.count <= 53)
+        #expect(out.hasSuffix("…"))
+        #expect(!out.contains("  "))
+        // Never ends mid-word before the ellipsis.
+        #expect(!out.dropLast().hasSuffix("refacto"))
+    }
+
+    @Test("nothing to show stays nil rather than becoming an empty row")
+    func emptyIsNil() {
+        #expect(AgentSession.summarize(nil) == nil)
+        #expect(AgentSession.summarize("") == nil)
+        #expect(AgentSession.summarize("   \n  ") == nil)
+        #expect(AgentSession.summarize("<only><tags/></only>") == nil)
+    }
+}
+
+@Suite("Sub-agent naming and session location")
+struct AgentIdentityTests {
+    private func session(subagent: String?) -> AgentSession {
+        AgentSession(id: "x", agent: "claude-code", project: "p",
+                     state: .working, lastActivity: Date(), subagent: subagent)
+    }
+
+    @Test("a running sub-agent names the row")
+    func subagentWins() {
+        #expect(session(subagent: "code-reviewer").displayName == "Code Reviewer")
+        #expect(session(subagent: "gsd-doc-writer").displayName == "Gsd Doc Writer")
+        #expect(session(subagent: nil).displayName == "Claude")
+        #expect(session(subagent: "").displayName == "Claude")
+    }
+
+    private func line(_ json: String) -> String { json }
+
+    // A sub-agent is only "running" until its result comes back. Without the
+    // pairing, a row would name a reviewer that finished twenty minutes ago.
+    @Test("a finished sub-agent is not reported as running")
+    func finishedSubagentIgnored() {
+        let tail = [
+            #"{"message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"subagent_type":"code-reviewer"}}]}}"#,
+            #"{"message":{"content":[{"type":"tool_result","tool_use_id":"t1"}]}}"#
+        ].joined(separator: "\n")
+        #expect(AgentSessionsProvider.runningSubagent(inTail: tail) == nil)
+    }
+
+    // Two runs of the same kind of agent are indistinguishable without the
+    // description — the card showed "Explore" twice with no task line.
+    @Test("the parent's description separates same-type sub-agents")
+    func descriptionDistinguishesRuns() {
+        let parent = [
+            #"{"message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"subagent_type":"Explore","description":"Explore notch view layer"}}]}}"#,
+            #"{"message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"agentId: aaa111"}]}}"#,
+            #"{"message":{"content":[{"type":"tool_use","id":"t2","name":"Agent","input":{"subagent_type":"Explore","description":"Explore hover and window code"}}]}}"#,
+            #"{"message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"agentId: bbb222"}]}}"#
+        ].joined(separator: "\n")
+        let first = AgentSessionsProvider.subagentInfo(inParent: parent, agentId: "aaa111")
+        let second = AgentSessionsProvider.subagentInfo(inParent: parent, agentId: "bbb222")
+        #expect(first?.type == "Explore")
+        #expect(second?.type == "Explore")
+        #expect(first?.task == "Explore notch view layer")
+        #expect(second?.task == "Explore hover and window code")
+        #expect(first?.task != second?.task)
+    }
+
+    @Test("an unknown agent id yields nothing")
+    func unknownAgentId() {
+        #expect(AgentSessionsProvider.subagentInfo(inParent: "", agentId: "zzz") == nil)
+        #expect(AgentSessionsProvider.subagentInfo(inParent: "garbage", agentId: "zzz") == nil)
+    }
+
+    @Test("an unfinished sub-agent is reported")
+    func runningSubagentFound() {
+        let tail = #"{"message":{"content":[{"type":"tool_use","id":"t9","name":"Agent","input":{"subagent_type":"debugger"}}]}}"#
+        #expect(AgentSessionsProvider.runningSubagent(inTail: tail) == "debugger")
+    }
+
+    @Test("noise never yields a name")
+    func noiseIsSafe() {
+        #expect(AgentSessionsProvider.runningSubagent(inTail: "") == nil)
+        #expect(AgentSessionsProvider.runningSubagent(inTail: "not json") == nil)
+        #expect(AgentSessionsProvider.runningSubagent(inTail: #"{"message":{"content":[]}}"#) == nil)
+    }
+
+    // MARK: - Locating the hosting app
+
+    private static let table = """
+    2186   685 /Users/me/.local/bin/claude --session-id ABC123 --settings {}
+     685   681 /bin/zsh -lic something
+     681   680 -/bin/zsh /var/folders/x/cmux-surface-resume/claude-F331
+     680   504 /usr/bin/login -flp me /bin/bash
+     504     1 /Applications/cmux.app/Contents/MacOS/cmux
+    """
+
+    @Test("the hosting app is found by walking parents")
+    func walksToApp() {
+        let entries = AgentSessionLocator.parse(Self.table)
+        #expect(entries.count == 5)
+        #expect(AgentSessionLocator.appBundlePath(in: entries.last!.args) == "/Applications/cmux.app")
+    }
+
+    @Test("a cycle or a rootless chain terminates")
+    func malformedTreeTerminates() {
+        // Two processes claiming each other as parent must not spin: this runs
+        // on a tap, in front of the user.
+        let cyclic = AgentSessionLocator.parse("""
+        10 11 /bin/a
+        11 10 /bin/b
+        """)
+        #expect(AgentSessionLocator.bundleId(walkingUpFrom: 10, in: cyclic) == nil)
+        #expect(AgentSessionLocator.bundleId(walkingUpFrom: 999, in: cyclic) == nil)
+    }
+
+    @Test("a non-app process yields nothing rather than a guess")
+    func noAppNoAnswer() {
+        #expect(AgentSessionLocator.appBundlePath(in: "/usr/bin/login -flp me") == nil)
+        #expect(AgentSessionLocator.appBundlePath(in: "") == nil)
+    }
+}
+
+@Suite("Choosing the right process to focus")
+struct LocatorChoiceTests {
+    private let sid = "SESSION-42"
+
+    // A grep, an editor with the transcript open, or a diagnostic all mention
+    // the session id. Focusing whatever those descend from sends you somewhere
+    // random, so the real agent binary has to win.
+    @Test("the agent process beats a bystander that merely mentions the id")
+    func prefersAgentProcess() {
+        let table = AgentSessionLocator.parse("""
+        900 901 /usr/bin/grep SESSION-42 /tmp/log
+        901 902 /Applications/Notes.app/Contents/MacOS/Notes
+        800 801 /Users/me/.local/bin/claude --session-id SESSION-42
+        801 504 /bin/zsh -lic x
+        504   1 /Applications/cmux.app/Contents/MacOS/cmux
+        """)
+        #expect(AgentSessionLocator.hostingBundleId(forSessionId: sid, in: table)
+                == Bundle(path: "/Applications/cmux.app")?.bundleIdentifier)
+    }
+
+    @Test("a bystander is still used when it is the only match")
+    func fallsBackToAnyMatch() {
+        let table = AgentSessionLocator.parse("""
+        900 504 /usr/bin/tail -f SESSION-42.jsonl
+        504   1 /Applications/cmux.app/Contents/MacOS/cmux
+        """)
+        #expect(AgentSessionLocator.hostingBundleId(forSessionId: sid, in: table) != nil)
+    }
+
+    @Test("no match yields nothing rather than an arbitrary app")
+    func noMatchNoGuess() {
+        let table = AgentSessionLocator.parse("504 1 /Applications/cmux.app/Contents/MacOS/cmux")
+        #expect(AgentSessionLocator.hostingBundleId(forSessionId: sid, in: table) == nil)
+        #expect(AgentSessionLocator.hostingBundleId(forSessionId: "", in: table) == nil)
+    }
+}
+
+@Suite("Sub-agent path parsing")
+struct SubagentPathTests {
+    private let side = "/Users/me/.claude/projects/-Users-me-proj/SESSION/subagents/agent-abc123.jsonl"
+
+    @Test("a sidechain reveals its agent and its parent session")
+    func parsesSidechain() {
+        #expect(AgentSessionsProvider.subagentId(from: URL(fileURLWithPath: side)) == "abc123")
+        #expect(AgentSessionsProvider.parentSessionId(ofPath: side) == "SESSION")
+    }
+
+    // A normal session must not be mistaken for a sub-agent, or it would be
+    // located via a parent that does not exist.
+    @Test("a normal session is not a sidechain")
+    func normalSessionIsNot() {
+        let normal = "/Users/me/.claude/projects/-Users-me-proj/SESSION.jsonl"
+        #expect(AgentSessionsProvider.subagentId(from: URL(fileURLWithPath: normal)) == nil)
+        #expect(AgentSessionsProvider.parentSessionId(ofPath: normal) == nil)
+    }
+
+    @Test("a file in the right folder but the wrong shape is rejected")
+    func wrongPrefixRejected() {
+        let odd = "/Users/me/.claude/projects/p/S/subagents/notes.jsonl"
+        #expect(AgentSessionsProvider.subagentId(from: URL(fileURLWithPath: odd)) == nil)
+    }
+}

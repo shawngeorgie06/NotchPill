@@ -10,6 +10,15 @@ now-playing controls, live status cards, and optional collapsed activity chips.
 
 - **Precise notch placement** — positioned over the physical notch using
   `NSScreen.auxiliaryTopLeftArea` / `safeAreaInsets`.
+- **Live agents** — a card listing every agent conversation running right now,
+  across Claude Code, Codex and Cursor: which agent (including the named
+  sub-agent — `Code Reviewer`, `Explore`), which project, what it was asked to
+  do, and whether it is working, waiting on you, or idle. Tap a row to bring
+  forward the app it is running in. Reads the transcripts each tool already
+  writes — no hooks needed. See [Live agents](#live-agents).
+- **Resizable** — Settings → Expanded Pill → **Size** (70–130%). Shrinking is
+  not a uniform scale: type is compensated so it stays readable, and the pill
+  shows fewer cards rather than cramming them.
 - **Hover to expand** — expands into a pill when you hover the physical notch;
   browser tabs beside the notch stay clickable and won't trigger expansion.
 - **Now playing** — title, artist, artwork, playback progress, and
@@ -145,6 +154,22 @@ The app appears in the **menu bar** and runs in the background; open **Settings*
 cards. Expect one-time permission prompts for Calendar and for controlling
 Music/Spotify.
 
+## Dev build
+
+`NotchPill Dev.app`, side by side with the copy you use:
+
+```sh
+./Scripts/build-dev.sh              # build, install, launch
+./Scripts/build-dev.sh --no-install # build only
+./Scripts/build-dev.sh --uninstall  # remove it
+```
+
+It uses bundle id `com.local.notchpill.dev`. That is the point: macOS keys the
+Accessibility grant to the bundle id, so the dev build asks for its own
+permission and cannot disturb the grant on your installed NotchPill. Both can
+run at once — quit the release one first unless you want two pills over the
+same notch.
+
 ## Dev ready pings
 
 When you're on another screen and Cursor, a terminal, or another tool finishes,
@@ -205,6 +230,37 @@ Signals are also picked up from `~/.notchpill/signals/*.json`:
 ```
 
 Toggle duration and enable/disable in **Settings → Dev Ready Pings**.
+
+## Live agents
+
+The card answers "what am I actually in right now?", which no notification can:
+a peek tells you a turn *ended*, this tells you what is still running.
+
+| | shown |
+| --- | --- |
+| agent | the running sub-agent if there is one, else Claude / Codex / Cursor |
+| project | the working directory, `Home` for a session started in `~` |
+| task | the prompt in flight; for a sub-agent, the description it was given |
+| state | ● working · ◐ waiting on you · ○ idle, with age |
+
+Waiting rows sort to the top — those are the ones you can act on. The list
+scrolls, so the count in the header is always the whole truth.
+
+**Where the data comes from.** Claude Code's `last-prompt` record, Codex's first
+`user_message`, and Cursor's own conversation name. Sub-agents write their own
+transcript under `<session>/subagents/`, which never records what *kind* of
+agent it is — only the parent knows, since the type was an argument to the call
+that started it, so the two are paired up.
+
+**Tapping a row.** Nothing on disk says which app a terminal agent runs in. The
+process tree does: the agent descends from whatever opened the terminal, so the
+parent chain is walked until an `.app` appears. That runs only on tap, never on
+a timer. A sub-agent has no process of its own, so its row locates via its
+parent session.
+
+**Limits worth knowing.** `waiting` needs hooks for Claude Code and Codex — a
+pending prompt is not written to a transcript until it is answered. Cursor
+reports it directly, so it works hookless.
 
 ## Architecture
 

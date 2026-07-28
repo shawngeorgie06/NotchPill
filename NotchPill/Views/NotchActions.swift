@@ -12,12 +12,15 @@ struct NotchActions {
     var beginReply: (DevReadyAlert) -> Void
     var sendReply: (DevReadyAlert, String) -> Void
     var answer: (DevReadyAlert, AgentAnswer) -> Void
+    /// Bring forward the app this agent session is running in.
+    var focusAgentSession: (AgentSession) -> Void = { _ in }
 
     static let noop = NotchActions(
         togglePlayPause: {}, next: {}, previous: {},
         focusApp: { _ in }, dismissDevReady: { _ in },
         dismissPeek: { _ in },
         beginReply: { _ in }, sendReply: { _, _ in },
-        answer: { _, _ in }
+        answer: { _, _ in },
+        focusAgentSession: { _ in }
     )
 }

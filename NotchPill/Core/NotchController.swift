@@ -28,6 +28,7 @@ final class NotchController {
     private let devReady = DevReadyProvider()
     private let transcripts = AgentTranscriptProvider()
     private let cursorActivity = CursorActivityProvider()
+    private let agentSessions = AgentSessionsProvider()
     private let replyHotKey = GlobalHotKey()
     /// Most-recent finished-agent alert, kept so the reply hotkey can target it
     /// even after its peek has auto-dismissed.
@@ -131,6 +132,7 @@ final class NotchController {
             shelf.$items.map { _ in () }.eraseToAnyPublisher(),
             TimerStore.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher(),
             state.$devReadyAlerts.map { _ in () }.eraseToAnyPublisher(),
+            state.$agentSessions.map { _ in () }.eraseToAnyPublisher(),
             state.$updateProgress.map { _ in () }.eraseToAnyPublisher(),
             state.$replyCompose.map { _ in () }.eraseToAnyPublisher()
         )
@@ -144,6 +146,16 @@ final class NotchController {
             }
         }
         .store(in: &cancellables)
+
+        // The pill's size is baked into `metrics`, which is only built when the
+        // display layout changes — so a size change has to force that rebuild or
+        // it would not take effect until you unplugged a monitor.
+        AppSettings.shared.$notchScale
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.rebuildForCurrentDisplays() }
+            .store(in: &cancellables)
 
         // Mirror live update progress into state so the overlay shows a bar.
         UpdateProgressStore.shared.$progress
@@ -224,7 +236,8 @@ final class NotchController {
             dismissPeek: { [weak self] id in self?.dismissPeek(id: id) },
             beginReply: { [weak self] alert in self?.state.beginReply(to: alert) },
             sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) },
-            answer: { [weak self] alert, ans in self?.performAnswer(alert: alert, answer: ans) }
+            answer: { [weak self] alert, ans in self?.performAnswer(alert: alert, answer: ans) },
+            focusAgentSession: { [weak self] session in self?.focusAgentSession(session) }
         )
         return NotchRootView(state: state, shelf: shelf, timer: TimerStore.shared, metrics: metrics, actions: actions)
     }
@@ -281,6 +294,8 @@ final class NotchController {
         transcripts.start()
         cursorActivity.onDevReady = { [weak self] alert in self?.presentDevReady(alert, origin: "cursordb") }
         cursorActivity.start()
+        agentSessions.onUpdate = { [weak self] sessions in self?.state.agentSessions = sessions }
+        agentSessions.start()
         devReady.start()
 
         // Secondary providers can warm up after the notch is on screen.
@@ -330,8 +345,10 @@ final class NotchController {
                                notchHeight: geometry.notchRect.height,
                                designExpandedWidth: NotchGeometry.expandedWidth,
                                designExpandedHeight: NotchGeometry.expandedHeight,
-                               scale: NotchGeometry.expandedScale,
-                               topGap: NotchGeometry.contentTopGap)
+                               scale: NotchGeometry.expandedScale
+                                   * CGFloat(AppSettings.shared.notchScale),
+                               topGap: NotchGeometry.contentTopGap,
+                               userScale: CGFloat(AppSettings.shared.notchScale))
 
         let root = makeRootView()
 
@@ -672,9 +689,27 @@ final class NotchController {
 
     // MARK: - Dev ready pings
 
+    /// Bring forward whatever app a session is running in.
+    ///
+    /// Cursor carries its own bundle id; a terminal agent has none on disk, so
+    /// the process tree is walked instead — see `AgentSessionLocator`. Collapse
+    /// the pill either way: leaving it hovering over the window you just asked
+    /// to see defeats the purpose.
+    private func focusAgentSession(_ session: AgentSession) {
+        let fallback = session.knownAgent == .cursor ? "com.todesktop.230313mzl4w4u92" : nil
+        AgentSessionLocator.focus(sessionId: session.locatorId ?? session.id,
+                                  fallbackBundleId: fallback)
+        pillEngaged = false
+        state.setExpanded(false)
+    }
+
     private func presentDevReady(_ alert: DevReadyAlert, origin: String = "?") {
         guard AppSettings.shared.showDevReadyPings else { return }
         Self.logPeek(alert, origin: origin)
+        // A pending prompt is never written to a transcript, so the sessions
+        // list cannot see "waiting" on its own for the terminal agents. The
+        // peek is the only carrier of that fact.
+        agentSessions.noteWaiting(sessionId: alert.sessionId, waiting: alert.kind == .waiting)
 
         // Waiting alerts have their own lifecycle and must not touch the finished
         // path: the finished fingerprint is `title|subtitle`, which for waiting

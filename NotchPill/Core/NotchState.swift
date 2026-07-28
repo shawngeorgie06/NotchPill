@@ -32,6 +32,9 @@ final class NotchState: ObservableObject {
     @Published private(set) var volumeLevel: Int? = nil
     /// Active dev-ready peeks (multiple agents can finish at once).
     @Published private(set) var devReadyAlerts: [DevReadyAlert] = []
+    /// Agent conversations alive right now. Distinct from `devReadyAlerts`:
+    /// those are events that fire once, this is a standing list.
+    @Published var agentSessions: [AgentSession] = []
     /// Active reply composer, non-nil while the user is typing a reply to a
     /// finished agent. nil = not composing.
     @Published private(set) var replyCompose: ReplyComposeState?

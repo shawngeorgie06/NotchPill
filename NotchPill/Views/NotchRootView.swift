@@ -364,8 +364,8 @@ struct ExpandedView: View {
                 cardRow
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 10)
+        .padding(.horizontal, 9)
+        .padding(.top, 6)
         .padding(.bottom, 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.easeOut(duration: 0.16), value: state.nowPlaying)
@@ -376,7 +376,7 @@ struct ExpandedView: View {
     }
 
     private var cardRow: some View {
-        HStack(spacing: 10 * readability) {
+        HStack(spacing: 7 * readability) {
             ForEach(Array(activities.enumerated()), id: \.element.id) { index, activity in
                 ExpandedActivityCard(
                     activity: activity,

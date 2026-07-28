@@ -13,6 +13,11 @@ struct NotchMetrics: Equatable {
     var scale: CGFloat
     /// Extra gap (render points) between the notch and the content.
     var topGap: CGFloat = 0
+    /// The user's size preference alone (1.0 = default), separate from `scale`,
+    /// which already has it multiplied in. Layout needs the two apart: shrinking
+    /// the pill should *not* shrink the type by the same amount, and it should
+    /// drop cards rather than cram them.
+    var userScale: CGFloat = 1
 
     /// Rendered (post-shrink) pill dimensions below the notch.
     var expandedWidth: CGFloat { designExpandedWidth * scale }

@@ -44,6 +44,7 @@ enum NotchContentLayout {
             size: CGSize(width: width, height: metrics.notchHeight + rowHeight),
             readability: readability,
             textScale: textScale(forLayoutScale: readability)
+                * textCompensation(forUserScale: metrics.userScale)
         )
     }
 
@@ -90,6 +91,7 @@ enum NotchContentLayout {
             size: CGSize(width: width, height: metrics.notchHeight + metrics.topGap + contentHeight),
             readability: readability,
             textScale: textScale(forLayoutScale: readability)
+                * textCompensation(forUserScale: metrics.userScale)
         )
     }
 
@@ -292,6 +294,34 @@ enum NotchContentLayout {
         return scale + (scale - 1) * 0.9
     }
 
+    /// Type compensation for the user's size preference.
+    ///
+    /// The whole pill is shrunk uniformly, type included — so at 70% the text
+    /// would render at 70% and become the first thing that stops being
+    /// readable. This gives most of that back: shrinking to 70% still yields
+    /// ~86% type, so the pill gets meaningfully smaller while the words stay
+    /// legible. Growing is left alone; nobody enlarges the pill and then
+    /// complains the text is too big.
+    static func textCompensation(forUserScale userScale: CGFloat) -> CGFloat {
+        guard userScale > 0, userScale < 1 else { return 1 }
+        return 1 / pow(userScale, 0.55)
+    }
+
+    /// How many cards a pill this size can show without becoming unreadable.
+    ///
+    /// Shrinking has to *remove* things, not squeeze them — five cards crammed
+    /// into a 70% pill is worse than two you can actually read. Cards are
+    /// already in priority order (live agents first), so trimming the tail
+    /// keeps what matters.
+    static func visibleCardLimit(forUserScale userScale: CGFloat) -> Int {
+        switch userScale {
+        case ..<0.8: return 2
+        case ..<0.95: return 3
+        case ..<1.1: return 4
+        default: return 5
+        }
+    }
+
     /// Design canvas size (pre-scale) for the expanded card row.
     static func expandedDesignContentSize(metrics: NotchMetrics, activities: [ExpandedActivity]) -> CGSize {
         let layout = expandedLayout(metrics: metrics, activities: activities)
@@ -344,6 +374,9 @@ enum NotchContentLayout {
         case .timer: return 96
         case .systemStats: return 96
         case .shelf: return 108
+        // Widest card by design: three rows of "project … status" need the room,
+        // and a truncated project name defeats the point of the card.
+        case .agents: return 210
         case .activeApp, .appSwitch: return 92
         case .volume: return 76
         case .clock: return 76
