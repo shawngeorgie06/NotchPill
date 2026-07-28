@@ -1639,17 +1639,6 @@ struct AgentIdentityTests {
 
     // A sub-agent is only "running" until its result comes back. Without the
     // pairing, a row would name a reviewer that finished twenty minutes ago.
-    @Test("a finished sub-agent is not reported as running")
-    func finishedSubagentIgnored() {
-        let tail = [
-            #"{"message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"subagent_type":"code-reviewer"}}]}}"#,
-            #"{"message":{"content":[{"type":"tool_result","tool_use_id":"t1"}]}}"#
-        ].joined(separator: "\n")
-        #expect(AgentSessionsProvider.runningSubagent(inTail: tail) == nil)
-    }
-
-    // Two runs of the same kind of agent are indistinguishable without the
-    // description — the card showed "Explore" twice with no task line.
     @Test("the parent's description separates same-type sub-agents")
     func descriptionDistinguishesRuns() {
         let parent = [
@@ -1658,8 +1647,8 @@ struct AgentIdentityTests {
             #"{"message":{"content":[{"type":"tool_use","id":"t2","name":"Agent","input":{"subagent_type":"Explore","description":"Explore hover and window code"}}]}}"#,
             #"{"message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"agentId: bbb222"}]}}"#
         ].joined(separator: "\n")
-        let first = AgentSessionsProvider.subagentInfo(inParent: parent, agentId: "aaa111")
-        let second = AgentSessionsProvider.subagentInfo(inParent: parent, agentId: "bbb222")
+        let first = AgentSessionScanner.subagentInfo(inParent: parent, agentId: "aaa111")
+        let second = AgentSessionScanner.subagentInfo(inParent: parent, agentId: "bbb222")
         #expect(first?.type == "Explore")
         #expect(second?.type == "Explore")
         #expect(first?.task == "Explore notch view layer")
@@ -1667,23 +1656,12 @@ struct AgentIdentityTests {
         #expect(first?.task != second?.task)
     }
 
-    @Test("an unknown agent id yields nothing")
-    func unknownAgentId() {
-        #expect(AgentSessionsProvider.subagentInfo(inParent: "", agentId: "zzz") == nil)
-        #expect(AgentSessionsProvider.subagentInfo(inParent: "garbage", agentId: "zzz") == nil)
-    }
-
-    @Test("an unfinished sub-agent is reported")
-    func runningSubagentFound() {
-        let tail = #"{"message":{"content":[{"type":"tool_use","id":"t9","name":"Agent","input":{"subagent_type":"debugger"}}]}}"#
-        #expect(AgentSessionsProvider.runningSubagent(inTail: tail) == "debugger")
-    }
-
     @Test("noise never yields a name")
     func noiseIsSafe() {
-        #expect(AgentSessionsProvider.runningSubagent(inTail: "") == nil)
-        #expect(AgentSessionsProvider.runningSubagent(inTail: "not json") == nil)
-        #expect(AgentSessionsProvider.runningSubagent(inTail: #"{"message":{"content":[]}}"#) == nil)
+        #expect(AgentSessionScanner.subagentInfo(inParent: "", agentId: "a") == nil)
+        #expect(AgentSessionScanner.subagentInfo(inParent: "not json", agentId: "a") == nil)
+        #expect(AgentSessionScanner.subagentInfo(
+            inParent: #"{"message":{"content":[]}}"#, agentId: "a") == nil)
     }
 
     // MARK: - Locating the hosting app
@@ -1765,8 +1743,8 @@ struct SubagentPathTests {
 
     @Test("a sidechain reveals its agent and its parent session")
     func parsesSidechain() {
-        #expect(AgentSessionsProvider.subagentId(from: URL(fileURLWithPath: side)) == "abc123")
-        #expect(AgentSessionsProvider.parentSessionId(ofPath: side) == "SESSION")
+        #expect(AgentSessionScanner.subagentId(from: URL(fileURLWithPath: side)) == "abc123")
+        #expect(AgentSessionScanner.parentSessionId(ofPath: side) == "SESSION")
     }
 
     // A normal session must not be mistaken for a sub-agent, or it would be
@@ -1774,13 +1752,13 @@ struct SubagentPathTests {
     @Test("a normal session is not a sidechain")
     func normalSessionIsNot() {
         let normal = "/Users/me/.claude/projects/-Users-me-proj/SESSION.jsonl"
-        #expect(AgentSessionsProvider.subagentId(from: URL(fileURLWithPath: normal)) == nil)
-        #expect(AgentSessionsProvider.parentSessionId(ofPath: normal) == nil)
+        #expect(AgentSessionScanner.subagentId(from: URL(fileURLWithPath: normal)) == nil)
+        #expect(AgentSessionScanner.parentSessionId(ofPath: normal) == nil)
     }
 
     @Test("a file in the right folder but the wrong shape is rejected")
     func wrongPrefixRejected() {
         let odd = "/Users/me/.claude/projects/p/S/subagents/notes.jsonl"
-        #expect(AgentSessionsProvider.subagentId(from: URL(fileURLWithPath: odd)) == nil)
+        #expect(AgentSessionScanner.subagentId(from: URL(fileURLWithPath: odd)) == nil)
     }
 }
