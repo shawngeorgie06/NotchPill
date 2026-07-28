@@ -184,11 +184,50 @@ final class AgentTranscriptProvider {
         return false
     }
 
-    /// Claude Code encodes the working directory in the directory name with
-    /// slashes turned into dashes. Extracted for the same reason as above.
-    nonisolated static func claudeProjectName(fromDirectory dir: String) -> String? {
-        guard let last = dir.split(separator: "-").last, !last.isEmpty else { return nil }
-        return String(last)
+    /// Recovers the working directory from a Claude Code project folder name.
+    ///
+    /// Claude Code writes the cwd with every slash turned into a dash, which is
+    /// lossy: `-Users-me-bid-no-bid` could be `/Users/me/bid/no/bid` or
+    /// `/Users/me/bid-no-bid`. The only way to tell is to ask the filesystem, so
+    /// this walks down from `/` taking the longest run of segments that actually
+    /// exists at each level. `exists` is injected so the decision can be tested
+    /// against a fixed tree rather than this machine's.
+    nonisolated static func claudePath(
+        fromDirectory dir: String,
+        exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> String? {
+        let parts = dir.split(separator: "-").map(String.init)
+        guard !parts.isEmpty else { return nil }
+        var path = ""
+        var i = 0
+        while i < parts.count {
+            // Longest first: prefer the real `bid-no-bid` over a `bid` that
+            // happens to also exist.
+            var taken = 0
+            for end in stride(from: parts.count, to: i, by: -1) {
+                let candidate = path + "/" + parts[i..<end].joined(separator: "-")
+                if exists(candidate) { path = candidate; taken = end - i; break }
+            }
+            if taken == 0 {
+                // Nothing below here exists any more — the directory was renamed
+                // or deleted. Keep the rest verbatim rather than losing it.
+                return path + "/" + parts[i...].joined(separator: "-")
+            }
+            i += taken
+        }
+        return path.isEmpty ? nil : path
+    }
+
+    /// The label shown on the peek.
+    nonisolated static func claudeProjectName(
+        fromDirectory dir: String,
+        home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+        exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> String? {
+        guard let path = claudePath(fromDirectory: dir, exists: exists) else { return nil }
+        // A session started in the home directory would otherwise peek as your
+        // account name, which reads like a project that doesn't exist.
+        return displayName(forPath: path, home: home)
     }
 
     private func fileSize(_ url: URL) -> Int64? {
@@ -228,7 +267,18 @@ final class AgentTranscriptProvider {
             return Self.claudeProjectName(fromDirectory: url.deletingLastPathComponent().lastPathComponent)
         }
         guard let cwd = firstValue(in: url, key: "cwd") else { return nil }
-        return URL(fileURLWithPath: cwd).lastPathComponent
+        return Self.displayName(forPath: cwd)
+    }
+
+    /// Same home-directory rule as the Claude side; Codex records a real path so
+    /// it needs no un-mangling, only the label.
+    nonisolated static func displayName(
+        forPath path: String,
+        home: String = FileManager.default.homeDirectoryForCurrentUser.path
+    ) -> String? {
+        if path == home { return "Home" }
+        let name = (path as NSString).lastPathComponent
+        return name.isEmpty ? nil : name
     }
 
     private func gitBranch(for url: URL, isCodex: Bool) -> String? {
@@ -236,8 +286,7 @@ final class AgentTranscriptProvider {
         if isCodex {
             cwd = firstValue(in: url, key: "cwd")
         } else {
-            let dir = url.deletingLastPathComponent().lastPathComponent
-            cwd = dir.hasPrefix("-") ? dir.replacingOccurrences(of: "-", with: "/") : nil
+            cwd = Self.claudePath(fromDirectory: url.deletingLastPathComponent().lastPathComponent)
         }
         guard let cwd, FileManager.default.fileExists(atPath: cwd) else { return nil }
         let head = URL(fileURLWithPath: cwd).appendingPathComponent(".git/HEAD")

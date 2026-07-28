@@ -1308,10 +1308,46 @@ struct TranscriptTurnTests {
         ])))
     }
 
+    /// A stand-in filesystem, so naming is tested against a fixed tree instead
+    /// of whatever happens to exist on the machine running the tests.
+    private static let tree: Set<String> = [
+        "/Users", "/Users/me", "/Users/me/Projects", "/Users/me/Projects/NotchPill",
+        "/Users/me/bid-no-bid", "/Users/me/Projects/cv-prep"
+    ]
+    private func name(_ dir: String) -> String? {
+        AgentTranscriptProvider.claudeProjectName(
+            fromDirectory: dir, home: "/Users/me", exists: { Self.tree.contains($0) })
+    }
+
     @Test("project name comes from the encoded working directory")
     func projectNaming() {
-        #expect(AgentTranscriptProvider
-            .claudeProjectName(fromDirectory: "-Users-shawngeorgie-Projects-NotchPill") == "NotchPill")
+        #expect(name("-Users-me-Projects-NotchPill") == "NotchPill")
         #expect(AgentTranscriptProvider.claudeProjectName(fromDirectory: "") == nil)
+    }
+
+    // REGRESSION: a session started in the home directory peeked as the account
+    // name ("shawngeorgie"), which reads like a project nobody has.
+    @Test("the home directory is named Home, not the account")
+    func homeDirectoryNaming() {
+        #expect(name("-Users-me") == "Home")
+        #expect(AgentTranscriptProvider.displayName(forPath: "/Users/me", home: "/Users/me") == "Home")
+    }
+
+    // REGRESSION: splitting on "-" and taking the last segment turned
+    // `bid-no-bid` into `bid`. Only the filesystem can resolve the ambiguity.
+    @Test("dashes in a folder name survive the round trip")
+    func dashedProjectNaming() {
+        #expect(name("-Users-me-bid-no-bid") == "bid-no-bid")
+        #expect(name("-Users-me-Projects-cv-prep") == "cv-prep")
+        #expect(AgentTranscriptProvider.claudePath(
+            fromDirectory: "-Users-me-bid-no-bid",
+            exists: { Self.tree.contains($0) }) == "/Users/me/bid-no-bid")
+    }
+
+    @Test("a deleted directory still yields its best-effort name")
+    func vanishedProjectNaming() {
+        // Nothing below /Users/me matches, so the remainder is kept verbatim
+        // rather than the peek losing its label entirely.
+        #expect(name("-Users-me-gone-away") == "gone-away")
     }
 }
