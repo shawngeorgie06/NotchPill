@@ -612,14 +612,22 @@ final class NotchController {
     }
 
     /// Hover target — wider while expanded so clicks and shortcuts stay active.
+    ///
+    /// The padding is divided by the user's size setting. It used to be a flat
+    /// 14/10pt at every size, which meant shrinking the pill shrank the target
+    /// *and* left the same absolute slack — so the forgiveness you actually feel
+    /// got smaller twice over, and the pointer slipped out while reaching for a
+    /// control. Dividing keeps the margin constant relative to the pill.
     private func expandHoverScreenRect() -> CGRect {
         guard let geometry else { return .zero }
 
+        let pad = Self.hoverPadding(forUserScale: metrics.userScale)
+
         if state.isExpanded || pillEngaged {
-            return expandedInteractionRect().insetBy(dx: -14, dy: -10)
+            return expandedInteractionRect().insetBy(dx: -pad.x, dy: -pad.y)
         }
 
-        let notch = geometry.notchRect.insetBy(dx: -10, dy: -6)
+        let notch = geometry.notchRect.insetBy(dx: -pad.collapsedX, dy: -pad.collapsedY)
         let pillSize = collapsedContentSize()
         let belowHeight = max(0, pillSize.height - geometry.notchRect.height)
         guard belowHeight > 0 else { return notch }
@@ -631,6 +639,14 @@ final class NotchController {
             height: belowHeight
         )
         return notch.union(belowBody)
+    }
+
+    /// Hover slack for a given size. Never *less* than the original padding —
+    /// enlarging the pill should not make it fussier to hover than it was.
+    nonisolated static func hoverPadding(forUserScale scale: CGFloat)
+        -> (x: CGFloat, y: CGFloat, collapsedX: CGFloat, collapsedY: CGFloat) {
+        let s = min(1, max(0.5, scale))     // guard a corrupt or huge setting
+        return (14 / s, 10 / s, 10 / s, 6 / s)
     }
 
     private func collapsedInteractionRect() -> CGRect {

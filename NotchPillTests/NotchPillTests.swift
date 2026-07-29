@@ -1928,3 +1928,44 @@ struct VideoTitleTests {
         #expect(NowPlayingDisplayResolver.resolve(title: nil, artist: nil, album: nil) == nil)
     }
 }
+
+@Suite("Hover forgiveness follows the size setting")
+struct HoverPaddingTests {
+    // A smaller pill is a smaller target. Leaving the slack at a flat 14/10pt
+    // shrank the forgiveness twice over — smaller target, same absolute margin —
+    // and the pointer slipped out while reaching for a control.
+    @Test("shrinking the pill widens the slack")
+    func smallerGetsMoreSlack() {
+        let full = NotchController.hoverPadding(forUserScale: 1.0)
+        let small = NotchController.hoverPadding(forUserScale: 0.75)
+        #expect(small.x > full.x)
+        #expect(small.y > full.y)
+        #expect(small.collapsedX > full.collapsedX)
+    }
+
+    @Test("the default is unchanged")
+    func defaultUnchanged() {
+        let p = NotchController.hoverPadding(forUserScale: 1.0)
+        #expect(p.x == 14)
+        #expect(p.y == 10)
+        #expect(p.collapsedX == 10)
+        #expect(p.collapsedY == 6)
+    }
+
+    // Enlarging must not make hovering fussier than it is at 100%.
+    @Test("growing never reduces the slack")
+    func growingKeepsSlack() {
+        let big = NotchController.hoverPadding(forUserScale: 1.3)
+        #expect(big.x == 14)
+        #expect(big.y == 10)
+    }
+
+    @Test("a corrupt scale cannot produce a runaway or zero zone")
+    func corruptScaleClamped() {
+        let zero = NotchController.hoverPadding(forUserScale: 0)
+        #expect(zero.x == 28)          // clamped at 0.5, not divided by zero
+        #expect(zero.x.isFinite)
+        let negative = NotchController.hoverPadding(forUserScale: -5)
+        #expect(negative.x == 28)
+    }
+}
