@@ -16,7 +16,7 @@ now-playing controls, live status cards, and optional collapsed activity chips.
   do, and whether it is working, waiting on you, or idle. Tap a row to bring
   forward the app it is running in. Reads the transcripts each tool already
   writes — no hooks needed. See [Live agents](#live-agents).
-- **Resizable** — Settings → Expanded Pill → **Size** (70–130%). Shrinking is
+- **Resizable** — Settings → Expanded Pill → **Size** (70–130%, default 75%). Shrinking is
   not a uniform scale: type is compensated so it stays readable, and the pill
   shows fewer cards rather than cramming them.
 - **Hover to expand** — expands into a pill when you hover the physical notch;

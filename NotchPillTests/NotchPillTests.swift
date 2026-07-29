@@ -1557,16 +1557,19 @@ struct NotchScaleAdaptationTests {
 
     @Test("the smaller it gets, the fewer cards it shows")
     func fewerCardsWhenSmall() {
-        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 0.7) == 2)
-        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 0.85) == 3)
-        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 1.0) == 4)
+        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 0.7) == 3)
+        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 0.85) == 4)
+        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 1.0) == 5)
         #expect(NotchContentLayout.visibleCardLimit(forUserScale: 1.3) == 5)
+        // The default size must never be one of the stingy ones.
+        #expect(NotchContentLayout.visibleCardLimit(
+            forUserScale: CGFloat(AppSettings.defaultNotchScale)) >= 3)
     }
 
     @Test("the limit never drops below something worth showing")
     func limitStaysUseful() {
         for scale in stride(from: 0.7, through: 1.3, by: 0.05) {
-            #expect(NotchContentLayout.visibleCardLimit(forUserScale: CGFloat(scale)) >= 2)
+            #expect(NotchContentLayout.visibleCardLimit(forUserScale: CGFloat(scale)) >= 3)
         }
     }
 }

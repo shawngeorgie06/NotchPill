@@ -314,10 +314,13 @@ enum NotchContentLayout {
     /// already in priority order (live agents first), so trimming the tail
     /// keeps what matters.
     static func visibleCardLimit(forUserScale userScale: CGFloat) -> Int {
+        // Retuned after using it. The old cutoffs dropped the default size to
+        // two cards, which read as content going missing rather than as a
+        // deliberately compact pill — and the type compensation means three
+        // still fit legibly at 70%.
         switch userScale {
-        case ..<0.8: return 2
-        case ..<0.95: return 3
-        case ..<1.1: return 4
+        case ..<0.85: return 3
+        case ..<1.0: return 4
         default: return 5
         }
     }

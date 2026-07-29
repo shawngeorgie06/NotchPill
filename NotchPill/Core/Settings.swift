@@ -81,6 +81,10 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// Chosen by using it, not by picking a round number: 100% wasted space,
+    /// and the type compensation plus the wider hover slack mean 75% is no
+    /// harder to read or to hit.
+    nonisolated static let defaultNotchScale: Double = 0.75
     nonisolated static let notchScaleRange: ClosedRange<Double> = 0.7...1.3
     /// `nonisolated` so the clamp can be tested without hopping to the main actor.
     nonisolated static func clampNotchScale(_ value: Double) -> Double {
@@ -165,7 +169,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: false,
             Keys.showExpandedAgents: true,
-            Keys.notchScale: 1.0,
+            Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 13.0,
             Keys.devReadyPlaySound: true,
@@ -237,7 +241,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: false,
             Keys.showExpandedAgents: true,
-            Keys.notchScale: 1.0,
+            Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 13.0,
             Keys.devReadyPlaySound: true,
@@ -264,7 +268,7 @@ final class AppSettings: ObservableObject {
         showExpandedBattery = false
         showExpandedShelf = false
         showExpandedAgents = true
-        notchScale = 1.0
+        notchScale = AppSettings.defaultNotchScale
         showDevReadyPings = true
         devReadyDuration = 13.0
         devReadyPlaySound = true
