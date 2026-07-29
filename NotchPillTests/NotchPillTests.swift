@@ -2194,3 +2194,73 @@ struct AgentHookDetectionTests {
                 == "✓ Claude Code — wired up")
     }
 }
+
+// MARK: - Shortcut arming
+
+@Suite("Shortcut arming")
+struct ShortcutArmingTests {
+    // `#expect` captures its operand immutably, so each step is taken first.
+    private func step(_ arming: inout ShortcutArming, _ x: CGFloat, _ y: CGFloat,
+                      inZone: Bool) -> Bool {
+        arming.update(point: CGPoint(x: x, y: y), inZone: inZone)
+    }
+
+    // The bug: a peek arrives, the pill's hot zone grows over a parked cursor,
+    // and the next Space is eaten and sent to the browser as play/pause — in
+    // the middle of someone typing.
+    @Test("a zone that grows under a still pointer does not arm")
+    func zoneGrowsUnderStillPointer() {
+        var a = ShortcutArming()
+        #expect(step(&a, 700, 900, inZone: false) == false)
+        // The peek lands; same cursor, now inside the zone.
+        #expect(step(&a, 700, 900, inZone: true) == false)
+        #expect(step(&a, 700, 900, inZone: true) == false)
+    }
+
+    @Test("moving into the zone arms immediately")
+    func movingInArms() {
+        var a = ShortcutArming()
+        #expect(step(&a, 700, 400, inZone: false) == false)
+        #expect(step(&a, 700, 900, inZone: true) == true)
+    }
+
+    // Once armed, holding the mouse perfectly still must not disarm — that is
+    // exactly what watching a video with the pointer on the pill looks like.
+    @Test("staying still while armed keeps the shortcuts")
+    func staysArmed() {
+        var a = ShortcutArming()
+        _ = step(&a, 700, 400, inZone: false)
+        #expect(step(&a, 700, 900, inZone: true) == true)
+        #expect(step(&a, 700, 900, inZone: true) == true)
+        #expect(step(&a, 700, 900, inZone: true) == true)
+    }
+
+    @Test("leaving the zone disarms")
+    func leavingDisarms() {
+        var a = ShortcutArming()
+        _ = step(&a, 700, 400, inZone: false)
+        #expect(step(&a, 700, 900, inZone: true) == true)
+        #expect(step(&a, 700, 300, inZone: false) == false)
+        // And a re-entry under a still pointer stays disarmed.
+        #expect(step(&a, 700, 300, inZone: true) == false)
+    }
+
+    @Test("explicit disarm forgets the movement history")
+    func explicitDisarm() {
+        var a = ShortcutArming()
+        _ = step(&a, 700, 400, inZone: false)
+        #expect(step(&a, 700, 900, inZone: true) == true)
+        a.disarm()
+        #expect(a.isArmed == false)
+        // No prior point, so the first sample after a disarm cannot re-arm.
+        #expect(step(&a, 700, 900, inZone: true) == false)
+    }
+
+    @Test("wiggling inside the zone re-arms after a disarm")
+    func rearmsOnMovement() {
+        var a = ShortcutArming()
+        a.disarm()
+        #expect(step(&a, 700, 900, inZone: true) == false)
+        #expect(step(&a, 702, 900, inZone: true) == true)
+    }
+}

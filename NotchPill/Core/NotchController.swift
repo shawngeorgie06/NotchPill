@@ -40,6 +40,7 @@ final class NotchController {
     private var collapseWorkItem: DispatchWorkItem?
     private let collapseGrace: TimeInterval = 0.16
     private let hotZoneKeys = HotZoneKeyMonitor()
+    private var arming = ShortcutArming()
     private let hoverMonitor = HoverMonitor()
     var keyMonitor: HotZoneKeyMonitor { hotZoneKeys }
 
@@ -77,7 +78,7 @@ final class NotchController {
         hotZoneKeys.onVolumeUp = { [weak self] in self?.volume.volumeUp() }
         hotZoneKeys.onVolumeDown = { [weak self] in self?.volume.volumeDown() }
         hotZoneKeys.pointerInHotZone = { [weak self] in
-            self?.shouldArmShortcuts() ?? false
+            self?.refreshShortcutArming() ?? false
         }
         hotZoneKeys.start()
 
@@ -499,14 +500,18 @@ final class NotchController {
         if isPointerInBrowserFlank(mouse), !overPill, !state.isExpanded, !pillEngaged {
             expandWorkItem?.cancel()
             expandWorkItem = nil
+            arming.disarm()
             hotZoneKeys.updatePointerInHotZone(false)
             updateMousePassthrough(pointerInHotZone: false)
             return
         }
 
-        let armShortcuts = shouldArmShortcuts(at: mouse)
-        hotZoneKeys.updatePointerInHotZone(armShortcuts)
-        updateMousePassthrough(pointerInHotZone: armShortcuts)
+        // Clicks follow geometry — someone can click the pill without wiggling
+        // the mouse first. Keys follow the movement latch, so a peek that grew
+        // under a parked cursor can't eat the Space of whoever is typing.
+        let inZone = shouldArmShortcuts(at: mouse)
+        hotZoneKeys.updatePointerInHotZone(arming.update(point: mouse, inZone: inZone))
+        updateMousePassthrough(pointerInHotZone: inZone)
     }
 
     private func engagePill() {
@@ -529,6 +534,14 @@ final class NotchController {
         let pad: CGFloat = state.isExpanded ? 16 : 10
         let rect = state.isExpanded ? expandedInteractionRect() : collapsedInteractionRect()
         return rect.insetBy(dx: -pad, dy: -pad).contains(point)
+    }
+
+    /// Live answer for the key tap: geometry *and* the movement latch. Called
+    /// on the main thread, both from the hover tick and synchronously from the
+    /// event tap at key-press time.
+    @discardableResult
+    private func refreshShortcutArming(at point: NSPoint = NSEvent.mouseLocation) -> Bool {
+        arming.update(point: point, inZone: shouldArmShortcuts(at: point))
     }
 
     private func shouldArmShortcuts(at point: NSPoint = NSEvent.mouseLocation) -> Bool {
@@ -597,6 +610,9 @@ final class NotchController {
         expandWorkItem?.cancel()
         expandWorkItem = nil
         collapseWorkItem?.cancel()
+        // Genuinely left the pill: the next Space belongs to whatever the
+        // person is actually typing in.
+        arming.disarm()
         if Self.logHover { print("HOVER exit -> collapse in \(collapseGrace)s") }
         let grace = state.isExpanded ? 0.35 : collapseGrace
         let item = DispatchWorkItem { [weak self] in
