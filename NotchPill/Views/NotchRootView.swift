@@ -340,6 +340,7 @@ struct UpdateProgressView: View {
 
 /// Expanded pill: live status cards sized to how many are visible.
 struct ExpandedView: View {
+    @ObservedObject var settings = AppSettings.shared
     @ObservedObject var state: NotchState
     @ObservedObject var shelf: ShelfStore
     @ObservedObject var timer: TimerStore
@@ -375,25 +376,40 @@ struct ExpandedView: View {
         .animation(.easeOut(duration: 0.14), value: activities.map(\.id))
     }
 
+    /// The row, split by the per-card weights.
+    ///
+    /// `GeometryReader` rather than layout priorities: priorities express "who
+    /// wins when space is tight", but the setting is a *share* — 80/20 has to
+    /// mean 80/20 whether or not anything is tight. Dividers are subtracted
+    /// first so the shares apply to the space the cards actually get.
     private var cardRow: some View {
-        HStack(spacing: 7 * readability) {
-            ForEach(Array(activities.enumerated()), id: \.element.id) { index, activity in
-                ExpandedActivityCard(
-                    activity: activity,
-                    appIcon: state.frontmostAppIcon,
-                    actions: actions,
-                    onCancelTimer: { timer.cancel() },
-                    readability: readability,
-                    textScale: textScale,
-                    expandToFill: activities.count <= 2 || readability > 1.1
-                )
-                if index < activities.count - 1 {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.1))
-                        .frame(width: 1)
-                        .padding(.vertical, 2 * readability)
+        let spacing = 7 * readability
+        let shares = AppSettings.shares(for: activities.map(\.kind),
+                                        weights: settings.cardWeights)
+        return GeometryReader { geo in
+            let dividers = CGFloat(max(0, activities.count - 1))
+            let usable = max(0, geo.size.width - dividers * (1 + spacing * 2))
+            HStack(spacing: spacing) {
+                ForEach(Array(activities.enumerated()), id: \.element.id) { index, activity in
+                    ExpandedActivityCard(
+                        activity: activity,
+                        appIcon: state.frontmostAppIcon,
+                        actions: actions,
+                        onCancelTimer: { timer.cancel() },
+                        readability: readability,
+                        textScale: textScale,
+                        expandToFill: true
+                    )
+                    .frame(width: usable * CGFloat(shares[activity.kind] ?? 0))
+                    if index < activities.count - 1 {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.1))
+                            .frame(width: 1)
+                            .padding(.vertical, 2 * readability)
+                    }
                 }
             }
+            .frame(width: geo.size.width, alignment: .leading)
         }
     }
 }

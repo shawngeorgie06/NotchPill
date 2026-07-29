@@ -16,6 +16,13 @@ now-playing controls, live status cards, and optional collapsed activity chips.
   do, and whether it is working, waiting on you, or idle. Tap a row to bring
   forward the app it is running in. Reads the transcripts each tool already
   writes — no hooks needed. See [Live agents](#live-agents).
+- **CI status** — GitHub Actions for the repos your agents are working in:
+  running, passed or failed, tap to open the run. No list to configure — repos
+  come from the live sessions and are remembered for an hour after one ends, so
+  a build you tagged and walked away from is still there. Needs `gh`.
+- **Card widths** — Settings → **Card Widths** divides the expanded row however
+  you like: live agents at 60% and now playing at 20%, say. Weights are
+  relative, so the split re-normalises as cards come and go.
 - **Resizable** — Settings → Expanded Pill → **Size** (70–130%, default 75%). Shrinking is
   not a uniform scale: type is compensated so it stays readable, and the pill
   shows fewer cards rather than cramming them.

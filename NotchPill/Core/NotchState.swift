@@ -35,6 +35,8 @@ final class NotchState: ObservableObject {
     /// Agent conversations alive right now. Distinct from `devReadyAlerts`:
     /// those are events that fire once, this is a standing list.
     @Published var agentSessions: [AgentSession] = []
+    /// GitHub Actions runs for the repos those sessions are in.
+    @Published var ciRuns: [CIRun] = []
     /// Active reply composer, non-nil while the user is typing a reply to a
     /// finished agent. nil = not composing.
     @Published private(set) var replyCompose: ReplyComposeState?

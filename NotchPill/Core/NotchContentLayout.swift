@@ -380,6 +380,7 @@ enum NotchContentLayout {
         // Widest card by design: three rows of "project … status" need the room,
         // and a truncated project name defeats the point of the card.
         case .agents: return 210
+        case .ci: return 150
         case .activeApp, .appSwitch: return 92
         case .volume: return 76
         case .clock: return 76

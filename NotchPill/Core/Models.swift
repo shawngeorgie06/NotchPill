@@ -351,6 +351,42 @@ enum ExpandedActivity: Equatable, Identifiable {
     case battery(BatteryStatus)
     case shelf(count: Int, names: [String])
     case agents([AgentSession])
+    case ci([CIRun])
+
+    /// Stable identity for the *kind* of card, unlike `id`, which changes with
+    /// the content. Weights are stored against this.
+    var kind: String {
+        switch self {
+        case .media: return "media"
+        case .appSwitch, .activeApp: return "activeApp"
+        case .volume: return "volume"
+        case .clock: return "clock"
+        case .calendar: return "calendar"
+        case .timer: return "timer"
+        case .systemStats: return "systemStats"
+        case .battery: return "battery"
+        case .shelf: return "shelf"
+        case .agents: return "agents"
+        case .ci: return "ci"
+        }
+    }
+
+    /// Human label for the settings row.
+    var kindLabel: String {
+        switch self {
+        case .media: return "Now playing"
+        case .appSwitch, .activeApp: return "Active app"
+        case .volume: return "Volume"
+        case .clock: return "Clock"
+        case .calendar: return "Calendar"
+        case .timer: return "Timer"
+        case .systemStats: return "CPU & memory"
+        case .battery: return "Battery"
+        case .shelf: return "File shelf"
+        case .agents: return "Live agents"
+        case .ci: return "CI status"
+        }
+    }
 
     var id: String {
         switch self {
@@ -365,6 +401,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .battery(let b): return "battery-\(b.level)-\(b.isCharging)"
         case .shelf(let count, _): return "shelf-\(count)"
         case .agents(let list): return "agents-" + list.map(\.id).joined(separator: ",")
+        case .ci(let runs): return "ci-" + runs.map { $0.id + $0.statusLabel }.joined(separator: ",")
         }
     }
 }

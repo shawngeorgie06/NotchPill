@@ -70,6 +70,48 @@ final class AppSettings: ObservableObject {
     @Published var showExpandedAgents: Bool {
         didSet { defaults.set(showExpandedAgents, forKey: Keys.showExpandedAgents) }
     }
+    @Published var showExpandedCI: Bool {
+        didSet { defaults.set(showExpandedCI, forKey: Keys.showExpandedCI) }
+    }
+    /// How much of the row each card gets, relative to the others. 1.0 is an
+    /// equal share; a card at 2.0 takes twice the width of one at 1.0. Stored
+    /// per card kind so it survives cards coming and going.
+    @Published var cardWeights: [String: Double] {
+        didSet { defaults.set(cardWeights, forKey: Keys.cardWeights) }
+    }
+
+    nonisolated static let cardWeightRange: ClosedRange<Double> = 0.4...3.0
+
+    func cardWeight(_ kind: String) -> Double {
+        AppSettings.clampWeight(cardWeights[kind] ?? 1.0)
+    }
+
+    func setCardWeight(_ kind: String, _ value: Double) {
+        cardWeights[kind] = AppSettings.clampWeight(value)
+    }
+
+    /// A zero or negative weight would divide the row by nothing and collapse
+    /// every card, so the range is enforced on the way in.
+    nonisolated static func clampWeight(_ value: Double) -> Double {
+        guard value.isFinite else { return 1.0 }
+        return min(max(value, cardWeightRange.lowerBound), cardWeightRange.upperBound)
+    }
+
+    /// Shares of the row, normalised to sum to 1. Kept pure so the split can be
+    /// tested without a layout pass.
+    nonisolated static func shares(for kinds: [String],
+                                   weights: [String: Double]) -> [String: Double] {
+        guard !kinds.isEmpty else { return [:] }
+        let resolved = kinds.map { (kind: $0, w: clampWeight(weights[$0] ?? 1.0)) }
+        let total = resolved.reduce(0) { $0 + $1.w }
+        guard total > 0 else {
+            let equal = 1.0 / Double(kinds.count)
+            return Dictionary(uniqueKeysWithValues: kinds.map { ($0, equal) })
+        }
+        var out: [String: Double] = [:]
+        for item in resolved { out[item.kind] = item.w / total }
+        return out
+    }
     /// User size for the expanded pill, as a multiplier on the design scale.
     /// Clamped on write so a hand-edited plist cannot produce a pill that is
     /// invisible or wider than the screen.
@@ -137,6 +179,8 @@ final class AppSettings: ObservableObject {
         static let showExpandedBattery = "showExpandedBattery"
         static let showExpandedShelf = "showExpandedShelf"
         static let showExpandedAgents = "showExpandedAgents"
+        static let showExpandedCI = "showExpandedCI"
+        static let cardWeights = "cardWeights"
         static let notchScale = "notchScale"
         static let showDevReadyPings = "showDevReadyPings"
         static let devReadyDuration = "devReadyDuration"
@@ -169,6 +213,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: false,
             Keys.showExpandedAgents: true,
+            Keys.showExpandedCI: true,
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 13.0,
@@ -196,6 +241,8 @@ final class AppSettings: ObservableObject {
         showExpandedBattery = defaults.bool(forKey: Keys.showExpandedBattery)
         showExpandedShelf = defaults.bool(forKey: Keys.showExpandedShelf)
         showExpandedAgents = defaults.bool(forKey: Keys.showExpandedAgents)
+        showExpandedCI = defaults.bool(forKey: Keys.showExpandedCI)
+        cardWeights = (defaults.dictionary(forKey: Keys.cardWeights) as? [String: Double]) ?? [:]
         notchScale = AppSettings.clampNotchScale(defaults.double(forKey: Keys.notchScale))
         showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
         let storedDuration = defaults.double(forKey: Keys.devReadyDuration)
@@ -241,6 +288,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: false,
             Keys.showExpandedAgents: true,
+            Keys.showExpandedCI: true,
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 13.0,
@@ -268,6 +316,8 @@ final class AppSettings: ObservableObject {
         showExpandedBattery = false
         showExpandedShelf = false
         showExpandedAgents = true
+        showExpandedCI = true
+        cardWeights = [:]
         notchScale = AppSettings.defaultNotchScale
         showDevReadyPings = true
         devReadyDuration = 13.0

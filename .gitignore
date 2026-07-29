@@ -35,3 +35,4 @@ Vendor/
 
 # Vendored MediaRemote adapter build output
 Vendor/mediaremote-adapter/build/
+build-dev/

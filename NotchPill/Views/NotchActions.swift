@@ -14,6 +14,8 @@ struct NotchActions {
     var answer: (DevReadyAlert, AgentAnswer) -> Void
     /// Bring forward the app this agent session is running in.
     var focusAgentSession: (AgentSession) -> Void = { _ in }
+    /// Open a URL (a CI run) in the default browser.
+    var openURL: (String) -> Void = { _ in }
 
     static let noop = NotchActions(
         togglePlayPause: {}, next: {}, previous: {},
@@ -21,6 +23,7 @@ struct NotchActions {
         dismissPeek: { _ in },
         beginReply: { _ in }, sendReply: { _, _ in },
         answer: { _, _ in },
-        focusAgentSession: { _ in }
+        focusAgentSession: { _ in },
+        openURL: { _ in }
     )
 }

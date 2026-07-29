@@ -65,6 +65,7 @@ actor AgentSessionScanner {
                                           now: now),
                 lastActivity: mod,
                 locatorId: sidechain == nil ? sessionId : parentSessionId(of: url),
+                directory: workingDirectory(for: url, isCodex: isCodex),
                 subagent: info?.type,
                 // A sidechain has no `last-prompt` record, so without the
                 // parent's description a sub-agent row had no task line at all
@@ -243,6 +244,16 @@ actor AgentSessionScanner {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
     }
 
+    /// The session's cwd, for anything that needs the repo rather than a label.
+    private func workingDirectory(for url: URL, isCodex: Bool) -> String? {
+        if isCodex { return firstValue(in: url, key: "cwd") }
+        var dir = url.deletingLastPathComponent()
+        if dir.lastPathComponent == "subagents" {
+            dir = dir.deletingLastPathComponent().deletingLastPathComponent()
+        }
+        return AgentTranscriptProvider.claudePath(fromDirectory: dir.lastPathComponent)
+    }
+
     private func projectName(for url: URL, isCodex: Bool) -> String? {
         if !isCodex {
             // A sub-agent transcript sits at <project>/<session>/subagents/agent-x
@@ -312,12 +323,18 @@ actor AgentSessionScanner {
             let json = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? "{}"
             let meta = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
             let blocked = meta["hasBlockingPendingActions"] as? Bool ?? false
+            let folder = workspace.flatMap(cursorWorkspaceFolder)
             out.append(AgentSession(
                 id: id,
                 agent: "cursor",
-                project: workspace.flatMap(cursorProject) ?? "Cursor",
+                project: folder.flatMap { AgentTranscriptProvider.displayName(forPath: $0) }
+                    ?? "Cursor",
                 state: AgentSession.state(lastWrite: updated, blocked: blocked, now: now),
                 lastActivity: updated,
+                // Cursor records the workspace folder, so its sessions can feed
+                // the CI card the same way a terminal agent's do. Without this
+                // a repo open only in Cursor could never surface its builds.
+                directory: folder,
                 // Cursor names its own conversations, which beats anything that
                 // could be recovered from the prompt.
                 task: AgentSession.summarize((meta["name"] as? String)
@@ -326,7 +343,8 @@ actor AgentSessionScanner {
         return out
     }
 
-    private func cursorProject(_ workspaceId: String) -> String? {
+    /// The folder a Cursor conversation belongs to.
+    private func cursorWorkspaceFolder(_ workspaceId: String) -> String? {
         let url = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Cursor/User/workspaceStorage")
             .appendingPathComponent(workspaceId)
@@ -335,6 +353,6 @@ actor AgentSessionScanner {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let folder = obj["folder"] as? String,
               let decoded = URL(string: folder) else { return nil }
-        return AgentTranscriptProvider.displayName(forPath: decoded.path)
+        return decoded.path
     }
 }

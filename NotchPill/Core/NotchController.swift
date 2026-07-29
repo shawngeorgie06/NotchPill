@@ -29,6 +29,8 @@ final class NotchController {
     private let transcripts = AgentTranscriptProvider()
     private let cursorActivity = CursorActivityProvider()
     private let agentSessions = AgentSessionsProvider()
+    private let ciStatus = CIStatusProvider()
+    private var ciTimer: Timer?
     private let replyHotKey = GlobalHotKey()
     /// Most-recent finished-agent alert, kept so the reply hotkey can target it
     /// even after its peek has auto-dismissed.
@@ -133,6 +135,7 @@ final class NotchController {
             TimerStore.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher(),
             state.$devReadyAlerts.map { _ in () }.eraseToAnyPublisher(),
             state.$agentSessions.map { _ in () }.eraseToAnyPublisher(),
+            state.$ciRuns.map { _ in () }.eraseToAnyPublisher(),
             state.$updateProgress.map { _ in () }.eraseToAnyPublisher(),
             state.$replyCompose.map { _ in () }.eraseToAnyPublisher()
         )
@@ -237,7 +240,11 @@ final class NotchController {
             beginReply: { [weak self] alert in self?.state.beginReply(to: alert) },
             sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) },
             answer: { [weak self] alert, ans in self?.performAnswer(alert: alert, answer: ans) },
-            focusAgentSession: { [weak self] session in self?.focusAgentSession(session) }
+            focusAgentSession: { [weak self] session in self?.focusAgentSession(session) },
+            openURL: { url in
+                guard let u = URL(string: url) else { return }
+                NSWorkspace.shared.open(u)
+            }
         )
         return NotchRootView(state: state, shelf: shelf, timer: TimerStore.shared, metrics: metrics, actions: actions)
     }
@@ -294,7 +301,10 @@ final class NotchController {
         transcripts.start()
         cursorActivity.onDevReady = { [weak self] alert in self?.presentDevReady(alert, origin: "cursordb") }
         cursorActivity.start()
-        agentSessions.onUpdate = { [weak self] sessions in self?.state.agentSessions = sessions }
+        agentSessions.onUpdate = { [weak self] sessions in
+            self?.state.agentSessions = sessions
+            self?.refreshCI(for: sessions)
+        }
         agentSessions.start()
         devReady.start()
 
@@ -729,6 +739,23 @@ final class NotchController {
                                   fallbackBundleId: fallback)
         pillEngaged = false
         state.setExpanded(false)
+    }
+
+    /// The repos to watch come from wherever agents are working, so the card
+    /// follows you rather than needing configuration.
+    private func refreshCI(for sessions: [AgentSession]) {
+        guard AppSettings.shared.showExpandedCI else {
+            if !state.ciRuns.isEmpty { state.ciRuns = [] }
+            return
+        }
+        // Deliberately called even with no directories: the provider remembers
+        // repos for an hour, so CI outlives the session that introduced it.
+        let dirs = sessions.compactMap(\.directory)
+        Task { [weak self] in
+            guard let self else { return }
+            let runs = await ciStatus.runs(forDirectories: dirs)
+            await MainActor.run { self.state.ciRuns = runs }
+        }
     }
 
     private func presentDevReady(_ alert: DevReadyAlert, origin: String = "?") {

@@ -668,6 +668,7 @@ enum ExpandedActivityBuilder {
         shelfCount: Int,
         shelfNames: [String],
         agentSessions: [AgentSession] = [],
+        ciRuns: [CIRun] = [],
         showMedia: Bool,
         showActiveApp: Bool,
         showVolume: Bool,
@@ -677,12 +678,15 @@ enum ExpandedActivityBuilder {
         showSystemStats: Bool,
         showBattery: Bool,
         showShelf: Bool,
-        showAgents: Bool = false
+        showAgents: Bool = false,
+        showCI: Bool = false
     ) -> [ExpandedActivity] {
         var items: [ExpandedActivity] = []
         // Live agents lead: they are the only card that answers "what is
         // running right now", and they are the reason to look at all.
         if showAgents, !agentSessions.isEmpty { items.append(.agents(agentSessions)) }
+        // Right after the agents: both answer "is the thing I started done yet?"
+        if showCI, !ciRuns.isEmpty { items.append(.ci(ciRuns)) }
         if showMedia, let np = nowPlaying, !np.isEmpty { items.append(.media(np)) }
         if showActiveApp {
             if let hint = appSwitchHint {
@@ -741,6 +745,8 @@ struct ExpandedActivityCard: View {
                 shelfCard(count: count, names: names)
             case .agents(let sessions):
                 agentsCard(sessions)
+            case .ci(let runs):
+                ciCard(runs)
             }
         }
         .frame(
@@ -775,6 +781,57 @@ struct ExpandedActivityCard: View {
             .scrollBounceBehavior(.basedOnSize)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// GitHub Actions for the repos you have agents working in.
+    private func ciCard(_ runs: [CIRun]) -> some View {
+        VStack(alignment: .leading, spacing: s(3)) {
+            HStack(spacing: s(4)) {
+                Image(systemName: "checkmark.seal")
+                    .font(.system(size: s(9)))
+                Text("CI")
+                    .font(font(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.45))
+
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: s(3)) {
+                    ForEach(runs) { run in
+                        Button { actions.openURL(run.id) } label: {
+                            HStack(spacing: s(5)) {
+                                Circle()
+                                    .fill(color(for: run.state))
+                                    .frame(width: s(5), height: s(5))
+                                Text(run.workflow)
+                                    .font(font(size: 11, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .lineLimit(1)
+                                Spacer(minLength: s(4))
+                                Text(run.statusLabel)
+                                    .font(font(size: 10, weight: .medium))
+                                    .foregroundStyle(color(for: run.state).opacity(0.85))
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Red is reserved for a failure — the only state that wants you to stop
+    /// what you are doing.
+    private func color(for state: CIRun.State) -> Color {
+        switch state {
+        case .failed: return .red
+        case .running: return .yellow
+        case .passed: return .green
+        case .other: return .white.opacity(0.4)
+        }
     }
 
     private func agentRow(_ session: AgentSession) -> some View {

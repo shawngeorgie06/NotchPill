@@ -12,6 +12,7 @@ struct PreferencesView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     collapsedSection
                     expandedSection
+                    cardShareSection
                     timerSection
                     devReadySection
                     shortcutsSection
@@ -47,6 +48,63 @@ struct PreferencesView: View {
         }
     }
 
+    /// One slider per card that is currently switched on, labelled with the
+    /// share of the row it actually gets — the percentage moves as you drag
+    /// *other* sliders too, which is the only honest way to show a proportion.
+    private var cardShareSection: some View {
+        let kinds = enabledCardKinds
+        let shares = AppSettings.shares(for: kinds.map(\.0), weights: settings.cardWeights)
+        return SettingsPanel(title: "Card Widths",
+                             subtitle: "How the expanded row is divided") {
+            if kinds.isEmpty {
+                Text("No cards enabled.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(kinds, id: \.0) { kind, label in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(label)
+                            Spacer()
+                            Text("\(Int(((shares[kind] ?? 0) * 100).rounded()))%")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(
+                            value: Binding(
+                                get: { settings.cardWeight(kind) },
+                                set: { settings.setCardWeight(kind, $0) }),
+                            in: AppSettings.cardWeightRange)
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button("Equal widths") { settings.cardWeights = [:] }
+                        .buttonStyle(.link)
+                        .disabled(settings.cardWeights.isEmpty)
+                }
+            }
+        }
+    }
+
+    /// Only cards that can actually appear — a slider for something switched
+    /// off would do nothing and read as broken.
+    private var enabledCardKinds: [(String, String)] {
+        var out: [(String, String)] = []
+        if settings.showExpandedAgents { out.append(("agents", "Live agents")) }
+        if settings.showExpandedCI { out.append(("ci", "CI status")) }
+        if settings.showExpandedMedia { out.append(("media", "Now playing")) }
+        if settings.showExpandedActiveApp { out.append(("activeApp", "Active app")) }
+        if settings.showExpandedCalendar { out.append(("calendar", "Calendar")) }
+        if settings.showExpandedTimer { out.append(("timer", "Timer")) }
+        if settings.showExpandedVolume { out.append(("volume", "Volume")) }
+        if settings.showExpandedSystemStats { out.append(("systemStats", "CPU & memory")) }
+        if settings.showExpandedBattery { out.append(("battery", "Battery")) }
+        if settings.showExpandedShelf { out.append(("shelf", "File shelf")) }
+        if settings.showExpandedClock { out.append(("clock", "Clock")) }
+        return out
+    }
+
     private var sizeSlider: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -75,6 +133,7 @@ struct PreferencesView: View {
             sizeSlider
             Divider().padding(.vertical, 2)
             Toggle("Live agents", isOn: $settings.showExpandedAgents)
+            Toggle("CI status", isOn: $settings.showExpandedCI)
             Toggle("Now playing", isOn: $settings.showExpandedMedia)
             Toggle("Timer", isOn: $settings.showExpandedTimer)
             Toggle("Active app", isOn: $settings.showExpandedActiveApp)

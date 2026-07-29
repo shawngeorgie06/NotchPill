@@ -25,6 +25,9 @@ struct AgentSession: Equatable, Identifiable {
     /// its own — it runs inside its parent's — so tapping its row has to look
     /// for the parent, or it finds nothing and the tap does nothing.
     var locatorId: String?
+    /// Working directory, when it can be recovered — the CI card resolves the
+    /// repo from it.
+    var directory: String?
     /// The named sub-agent currently running inside this session, if any —
     /// "code-reviewer", "debugger". Nil means the main agent is doing the work.
     var subagent: String?

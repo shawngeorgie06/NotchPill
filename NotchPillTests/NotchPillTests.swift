@@ -1972,3 +1972,135 @@ struct HoverPaddingTests {
         #expect(negative.x == 28)
     }
 }
+
+@Suite("CI status")
+struct CIStatusTests {
+    // gh reports an in-flight run as queued/in_progress with an *empty*
+    // conclusion. Reading the conclusion alone would paint every running build
+    // as a failure — the loudest possible wrong answer.
+    @Test("a running build is not a failure")
+    func runningIsNotFailure() {
+        #expect(CIRun.state(status: "in_progress", conclusion: "") == .running)
+        #expect(CIRun.state(status: "queued", conclusion: "") == .running)
+        #expect(CIRun.state(status: "completed", conclusion: "") == .running)
+    }
+
+    @Test("finished states map correctly")
+    func finishedStates() {
+        #expect(CIRun.state(status: "completed", conclusion: "success") == .passed)
+        #expect(CIRun.state(status: "completed", conclusion: "failure") == .failed)
+        #expect(CIRun.state(status: "completed", conclusion: "startup_failure") == .failed)
+        #expect(CIRun.state(status: "completed", conclusion: "cancelled") == .other("cancelled"))
+    }
+
+    @Test("failures sort above everything, then running")
+    func ordering() {
+        let now = Date()
+        func run(_ id: String, _ st: CIRun.State, _ age: TimeInterval) -> CIRun {
+            CIRun(id: id, repo: "o/r", workflow: id, branch: "main",
+                  state: st, started: now.addingTimeInterval(-age))
+        }
+        let ordered = CIRun.ordered([
+            run("newest-pass", .passed, 10),
+            run("running", .running, 300),
+            run("failed", .failed, 900)
+        ])
+        #expect(ordered.map(\.id) == ["failed", "running", "newest-pass"])
+    }
+
+    @Test("both remote forms yield the repo slug")
+    func slugParsing() {
+        #expect(CIRun.repoSlug(fromRemote: "https://github.com/owner/name.git") == "owner/name")
+        #expect(CIRun.repoSlug(fromRemote: "https://github.com/owner/name") == "owner/name")
+        #expect(CIRun.repoSlug(fromRemote: "git@github.com:owner/name.git") == "owner/name")
+        #expect(CIRun.repoSlug(fromRemote: "  git@github.com:owner/name.git\n") == "owner/name")
+    }
+
+    // A non-GitHub remote has no runs to fetch, and guessing a slug would send
+    // `gh` after a repo that does not exist.
+    @Test("non-GitHub remotes are declined")
+    func nonGitHubDeclined() {
+        #expect(CIRun.repoSlug(fromRemote: "git@gitlab.com:owner/name.git") == nil)
+        #expect(CIRun.repoSlug(fromRemote: "/local/path/repo") == nil)
+        #expect(CIRun.repoSlug(fromRemote: "") == nil)
+        #expect(CIRun.repoSlug(fromRemote: "https://github.com/owner") == nil)
+    }
+}
+
+@Suite("Card width shares")
+struct CardShareTests {
+    @Test("no weights set means equal shares")
+    func equalByDefault() {
+        let shares = AppSettings.shares(for: ["agents", "media"], weights: [:])
+        #expect(shares["agents"] == 0.5)
+        #expect(shares["media"] == 0.5)
+    }
+
+    // The thing the feature is for: "live agents 80%, media 20%".
+    @Test("weights produce the asked-for split")
+    func eightyTwenty() {
+        let shares = AppSettings.shares(for: ["agents", "media"],
+                                        weights: ["agents": 2.0, "media": 0.5])
+        #expect(shares["agents"] == 0.8)
+        #expect(shares["media"] == 0.2)
+    }
+
+    @Test("shares always sum to the whole row")
+    func sharesSumToOne() {
+        let kinds = ["agents", "media", "clock", "battery"]
+        let shares = AppSettings.shares(for: kinds,
+                                        weights: ["agents": 3, "media": 0.4, "clock": 1])
+        let total = shares.values.reduce(0, +)
+        #expect(abs(total - 1.0) < 0.0001)
+        // A card with no weight set still gets a share.
+        #expect((shares["battery"] ?? 0) > 0)
+    }
+
+    // A zero or negative weight would divide the row by nothing and collapse
+    // every card to a sliver.
+    @Test("degenerate weights cannot collapse the row")
+    func degenerateWeights() {
+        #expect(AppSettings.clampWeight(0) == AppSettings.cardWeightRange.lowerBound)
+        #expect(AppSettings.clampWeight(-5) == AppSettings.cardWeightRange.lowerBound)
+        #expect(AppSettings.clampWeight(.nan) == 1.0)
+        #expect(AppSettings.clampWeight(99) == AppSettings.cardWeightRange.upperBound)
+        let shares = AppSettings.shares(for: ["a", "b"], weights: ["a": 0, "b": -1])
+        #expect(abs((shares["a"] ?? 0) - 0.5) < 0.0001)
+    }
+
+    @Test("an empty row yields no shares rather than dividing by zero")
+    func emptyRow() {
+        #expect(AppSettings.shares(for: [], weights: [:]).isEmpty)
+    }
+}
+
+@Suite("CI repo memory")
+struct CIRepoMemoryTests {
+    // A release is tagged and then walked away from: the agent session ends in
+    // seconds, the build takes minutes. Tying the card to the session made CI
+    // disappear exactly when it mattered.
+    @Test("a repo outlives the session that introduced it")
+    func repoIsRemembered() async {
+        let p = CIStatusProvider()
+        let now = Date()
+        await p.remember("owner/repo", at: now)
+        #expect(await p.repos(at: now.addingTimeInterval(1800)) == ["owner/repo"])
+    }
+
+    @Test("but not forever")
+    func repoExpires() async {
+        let p = CIStatusProvider()
+        let now = Date()
+        await p.remember("owner/repo", at: now)
+        #expect(await p.repos(at: now.addingTimeInterval(7200)).isEmpty)
+    }
+
+    @Test("the most recent repo wins the budget")
+    func newestFirst() async {
+        let p = CIStatusProvider()
+        let now = Date()
+        await p.remember("old/one", at: now.addingTimeInterval(-600))
+        await p.remember("new/two", at: now)
+        #expect(await p.repos(at: now).first == "new/two")
+    }
+}
