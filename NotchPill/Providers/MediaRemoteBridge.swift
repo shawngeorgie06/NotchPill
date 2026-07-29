@@ -174,14 +174,14 @@ final class MediaRemoteBridge {
             artist: resolved.artist,
             isPlaying: isPlaying,
             artwork: artwork,
-            elapsed: parseElapsed(payload),
-            duration: parseDuration(payload),
+            elapsed: Self.parseElapsed(payload),
+            duration: Self.parseDuration(payload),
             playbackRate: rate ?? 1,
-            timestamp: parseTimestamp(payload)
+            timestamp: Self.parseTimestamp(payload)
         )
     }
 
-    private func parseDuration(_ payload: [String: Any]) -> TimeInterval? {
+    nonisolated static func parseDuration(_ payload: [String: Any]) -> TimeInterval? {
         if let micros = payload["durationMicros"] as? NSNumber {
             return micros.doubleValue / 1_000_000
         }
@@ -191,7 +191,7 @@ final class MediaRemoteBridge {
         return nil
     }
 
-    private func parseElapsed(_ payload: [String: Any]) -> TimeInterval? {
+    nonisolated static func parseElapsed(_ payload: [String: Any]) -> TimeInterval? {
         if let micros = payload["elapsedTimeNowMicros"] as? NSNumber {
             return micros.doubleValue / 1_000_000
         }
@@ -207,7 +207,7 @@ final class MediaRemoteBridge {
         return nil
     }
 
-    private func parseTimestamp(_ payload: [String: Any]) -> Date? {
+    nonisolated static func parseTimestamp(_ payload: [String: Any]) -> Date? {
         if let micros = payload["timestampEpochMicros"] as? NSNumber {
             return Date(timeIntervalSince1970: micros.doubleValue / 1_000_000)
         }

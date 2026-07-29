@@ -1762,3 +1762,129 @@ struct SubagentPathTests {
         #expect(AgentSessionScanner.subagentId(from: URL(fileURLWithPath: odd)) == nil)
     }
 }
+
+@Suite("Pill hit rule")
+struct HitRuleTests {
+    private let bounds = CGRect(x: 0, y: 0, width: 500, height: 200)
+    private let notchW: CGFloat = 200
+    private let notchH: CGFloat = 32
+    private let expandedSize = CGSize(width: 400, height: 160)
+    private let collapsedSize = CGSize(width: 200, height: 40)
+
+    private func accepts(_ p: NSPoint, expanded: Bool = true) -> Bool {
+        NotchContainerView.accepts(p, bounds: bounds,
+                                   notchWidth: notchW, notchHeight: notchH,
+                                   expanded: expanded,
+                                   collapsedSize: collapsedSize,
+                                   expandedSize: expandedSize)
+    }
+
+    @Test("clicks land on the pill body")
+    func bodyAccepts() {
+        #expect(accepts(NSPoint(x: 250, y: 80)))
+    }
+
+    // REGRESSION: the passthrough check grew the rects by 2pt while hitTest used
+    // them exact, leaving a band around every edge where the window swallowed a
+    // click and routed it nowhere. The peek's ✕ sits ~8pt from that edge, which
+    // is exactly how it came to feel unreliable. Both callers now share this
+    // rule, so the band can only come back if the slack itself is dropped.
+    @Test("the slack band just outside the body is still clickable")
+    func slackBandAccepts() {
+        let bodyRight: CGFloat = 250 + 400 / 2      // 450
+        #expect(accepts(NSPoint(x: bodyRight - 1, y: 80)))   // inside
+        #expect(accepts(NSPoint(x: bodyRight + 1, y: 80)))   // within slack
+    }
+
+    @Test("well outside the pill is not clickable")
+    func outsideRejected() {
+        #expect(!accepts(NSPoint(x: 490, y: 80)))
+        #expect(!accepts(NSPoint(x: 10, y: 80)))
+    }
+
+    // The strip beside the physical notch must stay with the browser, or
+    // clicking a tab hits the overlay instead.
+    @Test("tab ears beside the notch never accept")
+    func tabEarsRejected() {
+        let earY = bounds.height - notchH / 2
+        #expect(!accepts(NSPoint(x: 20, y: earY)))
+        #expect(!accepts(NSPoint(x: 480, y: earY)))
+        // …but the notch column between them does.
+        #expect(accepts(NSPoint(x: 250, y: earY)))
+    }
+
+    @Test("collapsed only accepts the collapsed pill")
+    func collapsedRule() {
+        #expect(accepts(NSPoint(x: 250, y: 190), expanded: false))
+        #expect(!accepts(NSPoint(x: 250, y: 80), expanded: false))
+    }
+
+    // A rect list that disagrees with the accept rule is how the two paths
+    // drifted apart the first time.
+    @Test("every interactive rect's centre is accepted")
+    func rectsAgreeWithRule() {
+        let rects = NotchContainerView.interactiveRects(
+            bounds: bounds, notchWidth: notchW, notchHeight: notchH,
+            expanded: true, collapsedSize: collapsedSize, expandedSize: expandedSize)
+        #expect(rects.count == 2)
+        for rect in rects {
+            #expect(accepts(NSPoint(x: rect.midX, y: rect.midY)))
+        }
+    }
+}
+
+@Suite("Media payload parsing")
+struct MediaPayloadTests {
+    // Micros must win over seconds. If the precedence flips, a 3-minute track
+    // reports 180 million seconds and the scrubber is off by 10^6 — visible as
+    // a progress bar that never moves.
+    @Test("microsecond keys take precedence over second keys")
+    func microsWin() {
+        let payload: [String: Any] = ["durationMicros": NSNumber(value: 180_000_000),
+                                      "duration": NSNumber(value: 999)]
+        #expect(MediaRemoteBridge.parseDuration(payload) == 180)
+    }
+
+    @Test("seconds are used when micros are absent")
+    func secondsFallback() {
+        #expect(MediaRemoteBridge.parseDuration(["duration": NSNumber(value: 210)]) == 210)
+        #expect(MediaRemoteBridge.parseDuration([:]) == nil)
+    }
+
+    // Four keys in a documented order; "now" variants are fresher than the
+    // plain ones and must be preferred.
+    @Test("elapsed prefers the freshest key available")
+    func elapsedPrecedence() {
+        let all: [String: Any] = [
+            "elapsedTimeNowMicros": NSNumber(value: 30_000_000),
+            "elapsedTimeMicros": NSNumber(value: 20_000_000),
+            "elapsedTimeNow": NSNumber(value: 10),
+            "elapsedTime": NSNumber(value: 5)
+        ]
+        #expect(MediaRemoteBridge.parseElapsed(all) == 30)
+        var without = all; without["elapsedTimeNowMicros"] = nil
+        #expect(MediaRemoteBridge.parseElapsed(without) == 20)
+        without["elapsedTimeMicros"] = nil
+        #expect(MediaRemoteBridge.parseElapsed(without) == 10)
+        without["elapsedTimeNow"] = nil
+        #expect(MediaRemoteBridge.parseElapsed(without) == 5)
+        without["elapsedTime"] = nil
+        #expect(MediaRemoteBridge.parseElapsed(without) == nil)
+    }
+
+    @Test("timestamps convert from epoch micros")
+    func timestampConversion() {
+        let d = MediaRemoteBridge.parseTimestamp(["timestampEpochMicros": NSNumber(value: 1_700_000_000_000_000)])
+        #expect(d?.timeIntervalSince1970 == 1_700_000_000)
+        let plain = MediaRemoteBridge.parseTimestamp(["timestamp": NSNumber(value: 1_700_000_000)])
+        #expect(plain?.timeIntervalSince1970 == 1_700_000_000)
+    }
+
+    @Test("wrong types are ignored rather than coerced")
+    func wrongTypesIgnored() {
+        // A string here would previously read as nil, not as a bogus number —
+        // pin it, because `as? NSNumber` on a numeric string is a classic trap.
+        #expect(MediaRemoteBridge.parseDuration(["duration": "210"]) == nil)
+        #expect(MediaRemoteBridge.parseElapsed(["elapsedTime": NSNull()]) == nil)
+    }
+}

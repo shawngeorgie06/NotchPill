@@ -100,22 +100,76 @@ final class NotchContainerView: NSView {
     /// The peek's trailing controls sit ~8pt from that edge, which is how the ✕
     /// ended up feeling unreliable.
     private func acceptsLocalPoint(_ local: NSPoint) -> Bool {
-        let verdict: Bool
-        if isInTabEar(at: local) {
-            verdict = false
-        } else {
+        let verdict = Self.accepts(
+            local,
+            bounds: bounds,
+            notchWidth: metrics.notchWidth,
+            notchHeight: metrics.notchHeight,
+            expanded: isExpandedProvider(),
+            collapsedSize: collapsedContentSizeProvider(),
+            expandedSize: expandedContentSizeProvider())
+        logHitVerdict(local, verdict)
+        return verdict
+    }
+
+    /// The rule itself, with the view's state passed in.
+    ///
+    /// Extracted so the invariant both callers depend on — that the passthrough
+    /// check and `hitTest` answer *identically* — is pinned by a test rather
+    /// than by the two implementations happening to agree. They once did not,
+    /// and the 2pt band it left is what made the peek's ✕ feel unreliable.
+    static func accepts(_ local: NSPoint,
+                        bounds: CGRect,
+                        notchWidth: CGFloat,
+                        notchHeight: CGFloat,
+                        expanded: Bool,
+                        collapsedSize: CGSize,
+                        expandedSize: CGSize) -> Bool {
+        let rects = interactiveRects(bounds: bounds,
+                                     notchWidth: notchWidth, notchHeight: notchHeight,
+                                     expanded: expanded,
+                                     collapsedSize: collapsedSize,
+                                     expandedSize: expandedSize)
+        if expanded, inTabEar(local, bounds: bounds,
+                              notchWidth: notchWidth, notchHeight: notchHeight) {
+            return false
+        }
             // The pill's own pixels win over the browser flank. The flank rects run
             // 52pt below the menu bar (for unified tab bars), and an expanded peek is
             // wider than the notch — so a blanket flank rejection here made the peek's
             // trailing controls (reply ↰, ✕) unclickable and dropped the click onto
             // the browser behind, pausing whatever was playing. `isInTabEar` already
             // protects the strip beside the notch, which is what tabs actually need.
-            let slack = Self.hitSlack
-            verdict = interactiveRectsLocal()
-                .contains { $0.insetBy(dx: -slack, dy: -slack).contains(local) }
+        let slack = hitSlack
+        return rects.contains { $0.insetBy(dx: -slack, dy: -slack).contains(local) }
+    }
+
+    /// Pure form of `interactiveRectsLocal`.
+    static func interactiveRects(bounds: CGRect,
+                                 notchWidth: CGFloat, notchHeight: CGFloat,
+                                 expanded: Bool,
+                                 collapsedSize: CGSize,
+                                 expandedSize: CGSize) -> [CGRect] {
+        let w = bounds.width, h = bounds.height
+        guard expanded else {
+            return [CGRect(x: (w - collapsedSize.width) / 2, y: h - collapsedSize.height,
+                           width: collapsedSize.width, height: collapsedSize.height)]
         }
-        logHitVerdict(local, verdict)
-        return verdict
+        let pw = min(expandedSize.width, w)
+        return [CGRect(x: (w - pw) / 2, y: 0, width: pw, height: max(0, h - notchHeight)),
+                CGRect(x: (w - notchWidth) / 2, y: h - notchHeight,
+                       width: notchWidth, height: notchHeight)]
+    }
+
+    /// Pure form of `isInTabEar`.
+    static func inTabEar(_ local: NSPoint, bounds: CGRect,
+                         notchWidth: CGFloat, notchHeight: CGFloat) -> Bool {
+        let w = bounds.width, h = bounds.height
+        let notchLeft = (w - notchWidth) / 2
+        let left = CGRect(x: 0, y: h - notchHeight, width: notchLeft, height: notchHeight)
+        let right = CGRect(x: notchLeft + notchWidth, y: h - notchHeight,
+                           width: w - (notchLeft + notchWidth), height: notchHeight)
+        return left.contains(local) || right.contains(local)
     }
 
     /// Traces the hit rule (NOTCHPILL_LOG_HIT=1). "The button sometimes doesn't
