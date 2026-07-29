@@ -84,6 +84,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         setupAgents.target = self
         menu.addItem(setupAgents)
 
+        let guide = NSMenuItem(title: "Getting Started…",
+                               action: #selector(showOnboarding), keyEquivalent: "")
+        guide.target = self
+        menu.addItem(guide)
+
         menu.addItem(.separator())
 
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
@@ -162,37 +167,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// someone who installed via Homebrew and never cloned the repo — which is
     /// the whole point: the hooks used to require a git checkout to exist.
     @objc private func setUpAgentHooks() {
-        guard let script = Bundle.main.url(forResource: "install-agent-hooks",
-                                           withExtension: "sh",
-                                           subdirectory: "Scripts") else {
-            presentAgentHookResult(title: "Setup script missing",
-                                   body: "This build of NotchPill did not ship "
-                                       + "Scripts/install-agent-hooks.sh.")
-            return
+        AgentHooks.install { [weak self] output in
+            self?.presentAgentHookResult(title: "Agent notifications", body: output)
         }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/bash")
-        task.arguments = [script.path]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = pipe
-        DispatchQueue.global(qos: .userInitiated).async {
-            var output = ""
-            do {
-                try task.run()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                task.waitUntilExit()
-                output = String(data: data, encoding: .utf8) ?? ""
-            } catch {
-                output = "Couldn't run the setup script: \(error.localizedDescription)"
-            }
-            // Strip the ANSI colouring the script uses for a terminal.
-            let cleaned = output.replacingOccurrences(
-                of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
-            DispatchQueue.main.async { [weak self] in
-                self?.presentAgentHookResult(title: "Agent notifications", body: cleaned)
-            }
-        }
+    }
+
+    @objc private func showOnboarding() {
+        OnboardingController.shared.show()
     }
 
     private func presentAgentHookResult(title: String, body: String) {

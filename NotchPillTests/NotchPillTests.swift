@@ -2104,3 +2104,93 @@ struct CIRepoMemoryTests {
         #expect(await p.repos(at: now).first == "new/two")
     }
 }
+
+// MARK: - Onboarding
+
+@Suite("Onboarding flow")
+struct OnboardingFlowTests {
+    @Test("walks forward and stops at the end")
+    func walksForward() {
+        var flow = OnboardingFlow()
+        #expect(flow.current == .welcome)
+        #expect(flow.isFirst)
+        for _ in 0..<20 { flow.next() }
+        #expect(flow.current == .finish)
+        #expect(flow.isLast)
+    }
+
+    @Test("walks back and stops at the start")
+    func walksBack() {
+        var flow = OnboardingFlow()
+        flow.next()
+        #expect(flow.current == .accessibility)
+        for _ in 0..<20 { flow.back() }
+        #expect(flow.current == .welcome)
+    }
+
+    // Dividing by steps.count - 1 is one off-by-one away from dividing by zero,
+    // and a one-step flow is exactly what an all-satisfied guide would be.
+    @Test("a single-step flow has finite progress")
+    func singleStep() {
+        let flow = OnboardingFlow(steps: [.finish])
+        #expect(flow.progress == 0)
+        #expect(flow.isFirst && flow.isLast)
+    }
+
+    @Test("an empty flow still has a step to show")
+    func emptyFlow() {
+        let flow = OnboardingFlow(steps: [])
+        #expect(flow.current == .finish)
+    }
+
+    @Test("progress ends at 1")
+    func progressCompletes() {
+        var flow = OnboardingFlow()
+        while !flow.isLast { flow.next() }
+        #expect(flow.progress == 1)
+    }
+
+    @Test("every step says something")
+    func everyStepHasCopy() {
+        for step in OnboardingStep.allCases {
+            #expect(!step.title.isEmpty)
+            #expect(step.detail.count > 20)
+        }
+    }
+}
+
+@Suite("Onboarding gating")
+struct OnboardingGateTests {
+    @Test("a fresh install sees the guide")
+    func freshInstall() {
+        #expect(Onboarding.shouldShow(completedVersion: 0))
+    }
+
+    @Test("a completed install does not")
+    func alreadyDone() {
+        #expect(!Onboarding.shouldShow(completedVersion: Onboarding.currentVersion))
+    }
+}
+
+@Suite("Agent hook detection")
+struct AgentHookDetectionTests {
+    // Detection must agree with the installer's own --status, which greps
+    // case-insensitively for the same word.
+    @Test("finds the marker whatever the case")
+    func findsMarker() {
+        #expect(AgentHooks.isInstalled(inConfig: #"{"command": "notchpill-agent-question.sh"}"#))
+        #expect(AgentHooks.isInstalled(inConfig: "command = \"/x/NotchPill/hook.sh\""))
+    }
+
+    @Test("an unrelated config is not wired up")
+    func noMarker() {
+        #expect(!AgentHooks.isInstalled(inConfig: #"{"hooks": {"Stop": []}}"#))
+        #expect(!AgentHooks.isInstalled(inConfig: ""))
+    }
+
+    @Test("ANSI colouring is stripped from the transcript")
+    func stripsAnsi() {
+        #expect(AgentHooks.cleanOutput("\u{1B}[32m✓\u{1B}[0m Claude Code — wired up\n")
+                == "✓ Claude Code — wired up")
+    }
+}

@@ -31,11 +31,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         UpdateChecker.shared.start()
 
-        // First launch only: show settings once so new installs know where to configure.
-        if !UserDefaults.standard.bool(forKey: "didCompleteFirstLaunch") {
-            UserDefaults.standard.set(true, forKey: "didCompleteFirstLaunch")
+        // First launch only. Settings used to open here, which showed every
+        // control at once and explained none of them; the guide walks the two
+        // grants that gate real features and then shows what the row can hold.
+        if Onboarding.shouldShow {
             DispatchQueue.main.async {
-                PreferencesController.shared.show()
+                OnboardingController.shared.show(takeFocus: false)
             }
         }
     }

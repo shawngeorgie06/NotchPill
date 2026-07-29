@@ -55,6 +55,13 @@ now-playing controls, live status cards, and optional collapsed activity chips.
 
 - macOS 14+ (built and tested on macOS 26, Xcode 26, a notched MacBook)
 
+## First launch
+
+The first time NotchPill runs it opens a short **Getting Started** guide: the
+Accessibility grant, agent notifications, and which cards belong in the expanded
+row. Everything in it is optional and reversible, and you can reopen it any time
+from **NotchPill menu bar icon → Getting Started…**.
+
 ## Agent notifications
 
 Getting your coding agents to peek the notch is one menu click:
