@@ -335,6 +335,18 @@ final class NotchController {
     /// clamshell / no-notch arrangements, the window is hidden and disabled.
     private func rebuildForCurrentDisplays() {
         guard let geometry = NotchGeometry.current() else {
+            // No notched display any more — clamshell, or the lid closed while
+            // docked. Hiding the window is not enough: everything that decides
+            // hover, click passthrough and browser-flank exclusion reads
+            // `self.geometry`, so leaving the old screen behind means those keep
+            // computing against a display that is gone, and the hot zones sit at
+            // coordinates nothing can reach.
+            self.geometry = nil
+            collapsedHotZone = .zero
+            expandedHotZone = .zero
+            menuBarStrip = .zero
+            pillEngaged = false
+            state.setExpanded(false)
             window?.orderOut(nil)
             return
         }

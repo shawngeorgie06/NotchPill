@@ -289,6 +289,10 @@ Environment flags (off by default):
 - `NOTCHPILL_FORCE_EXPAND=1` — starts expanded (screenshots).
 - `NOTCHPILL_LOG_HOVER=1` — hover enter/exit logging.
 - `NOTCHPILL_LOG_NOWPLAYING=1` — MediaRemote adapter stream logging.
+- `NOTCHPILL_LOG_AGENTS=1` — appends each published live-agents list to
+  `~/.notchpill/agents.log`. The card only exists while the notch is hovered, so
+  "it shows nothing" and "it was never given anything" are otherwise
+  indistinguishable. Records project names and task text.
 - `NOTCHPILL_LOG_PEEKS=1` — appends every agent peek to `~/.notchpill/peeks.log`
   with the provider that emitted it and the fields that decide its badge. The
   way to answer "why did that say Claude Code?" — a faded peek leaves no other

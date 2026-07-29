@@ -86,6 +86,41 @@ final class AgentSessionsProvider {
         }
     }
 
+    private static let logging = ProcessInfo.processInfo.environment["NOTCHPILL_LOG_AGENTS"] == "1"
+
+    /// Appends each published list to `~/.notchpill/agents.log`.
+    ///
+    /// The card is only visible while the notch is hovered, so "it shows
+    /// nothing" and "it was never given anything" look identical from outside.
+    /// This tells the two apart. Off by default: the lines carry project names
+    /// and task text.
+    private static func log(_ sessions: [AgentSession]) {
+        guard logging else { return }
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".notchpill")
+        let url = dir.appendingPathComponent("agents.log")
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        var line = "\(stamp) published \(sessions.count)\n"
+        for s in sessions {
+            line += "    \(s.displayName) | \(s.project) | \(s.statusLabel)"
+                + " | \(s.task ?? "-") | locator=\(s.locatorId ?? "-")\n"
+        }
+        guard let data = line.data(using: .utf8) else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            if (try? handle.seekToEnd()) ?? 0 > 512_000 {
+                try? handle.close()
+                try? FileManager.default.removeItem(at: url)
+                try? data.write(to: url)
+                return
+            }
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
     private func publish(_ ordered: [AgentSession], from issued: Int) {
         guard issued == generation else { return }   // stopped mid-scan
         scanning = false
@@ -97,6 +132,7 @@ final class AgentSessionsProvider {
         guard ordered != lastPublished || labels != lastLabels else { return }
         lastLabels = labels
         lastPublished = ordered
+        Self.log(ordered)
         onUpdate?(ordered)
     }
 }
