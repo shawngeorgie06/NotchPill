@@ -1888,3 +1888,43 @@ struct MediaPayloadTests {
         #expect(MediaRemoteBridge.parseElapsed(["elapsedTime": NSNull()]) == nil)
     }
 }
+
+/// Characterization tests: these record what the resolver does *today*, so a
+/// cleanup can be proven not to change behaviour.
+@Suite("Now playing video titles")
+struct VideoTitleTests {
+    private func resolve(_ t: String, _ a: String, _ al: String) -> (title: String, artist: String)? {
+        NowPlayingDisplayResolver.resolve(title: t, artist: a, album: al,
+                                          mediaType: "video",
+                                          bundleIdentifier: "com.apple.Safari")
+    }
+
+    // The case the dead branch was reaching for: a player putting a site domain
+    // in the title and the real name in the artist. The title must not survive
+    // as the artist line — showing "netflix.com" under the show is the bug.
+    @Test("a domain title is replaced, not demoted to the artist line")
+    func domainTitleReplaced() {
+        let out = resolve("netflix.com", "Stranger Things", "")
+        #expect(out?.title == "Stranger Things")
+        #expect(out?.artist == "")
+    }
+
+    @Test("a real title is left alone")
+    func realTitleKept() {
+        let out = resolve("Chapter One", "Stranger Things", "")
+        #expect(out?.title == "Chapter One")
+        #expect(out?.artist == "Stranger Things")
+    }
+
+    @Test("the album supplies the show when the title is noise")
+    func albumSuppliesShow() {
+        let out = resolve("youtube.com", "", "Stranger Things, Season 1")
+        #expect(out?.title == "Stranger Things")
+    }
+
+    @Test("nothing at all resolves to nothing")
+    func emptyIsNil() {
+        #expect(NowPlayingDisplayResolver.resolve(title: "", artist: "", album: "") == nil)
+        #expect(NowPlayingDisplayResolver.resolve(title: nil, artist: nil, album: nil) == nil)
+    }
+}

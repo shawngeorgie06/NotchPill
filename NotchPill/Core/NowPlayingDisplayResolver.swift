@@ -46,13 +46,13 @@ enum NowPlayingDisplayResolver {
         var primary = stripStreamingDecorations(title)
         var secondary = isNoiseSecondary(artist) ? "" : artist
 
-        // Some players put the real name in artist while title is a site/domain.
-        if (primary.isEmpty || isNoisePrimary(primary)) && !secondary.isEmpty {
-            // keep secondary as primary below via swap logic
-        } else if isNoisePrimary(primary), !secondary.isEmpty {
-            swap(&primary, &secondary)
-        }
-
+        // NOTE: there used to be a swap here for players that put the real name
+        // in `artist` while `title` is a site domain. It was unreachable — its
+        // condition was a strict subset of an empty `if` above it — and it is
+        // better gone than fixed: swapping would have left the domain sitting in
+        // the artist line, whereas the promotion below moves the name up and
+        // clears the domain entirely. That is what already happens today, and
+        // `VideoTitleTests.domainTitleReplaced` pins it.
         let showFromAlbum = showName(from: album)
 
         if primary.isEmpty || isNoisePrimary(primary) {
