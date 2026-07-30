@@ -162,6 +162,18 @@ final class AppSettings: ObservableObject {
     @Published var devReadyPlaySound: Bool {
         didSet { defaults.set(devReadyPlaySound, forKey: Keys.devReadyPlaySound) }
     }
+    /// Each system HUD is separately opt-in. The providers may continue to
+    /// observe their public system state, but no visual interruption is shown
+    /// unless the corresponding HUD is enabled.
+    @Published var showVolumeHUD: Bool {
+        didSet { defaults.set(showVolumeHUD, forKey: Keys.showVolumeHUD) }
+    }
+    @Published var showBrightnessHUD: Bool {
+        didSet { defaults.set(showBrightnessHUD, forKey: Keys.showBrightnessHUD) }
+    }
+    @Published var showMicrophoneHUD: Bool {
+        didSet { defaults.set(showMicrophoneHUD, forKey: Keys.showMicrophoneHUD) }
+    }
     @Published var autoCheckUpdates: Bool {
         didSet { defaults.set(autoCheckUpdates, forKey: Keys.autoCheckUpdates) }
     }
@@ -204,6 +216,9 @@ final class AppSettings: ObservableObject {
         static let showDevReadyPings = "showDevReadyPings"
         static let devReadyDuration = "devReadyDuration"
         static let devReadyPlaySound = "devReadyPlaySound"
+        static let showVolumeHUD = "showVolumeHUD"
+        static let showBrightnessHUD = "showBrightnessHUD"
+        static let showMicrophoneHUD = "showMicrophoneHUD"
         static let autoCheckUpdates = "autoCheckUpdates"
         static let agentReplyEnabled = "agentReplyEnabled"
         static let watchAgentTranscripts = "watchAgentTranscripts"
@@ -237,6 +252,9 @@ final class AppSettings: ObservableObject {
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 13.0,
             Keys.devReadyPlaySound: true,
+            Keys.showVolumeHUD: true,
+            Keys.showBrightnessHUD: true,
+            Keys.showMicrophoneHUD: true,
             Keys.autoCheckUpdates: true,
             Keys.agentReplyEnabled: true,
         ])
@@ -267,6 +285,9 @@ final class AppSettings: ObservableObject {
         let storedDuration = defaults.double(forKey: Keys.devReadyDuration)
         devReadyDuration = storedDuration > 0 ? storedDuration : 13.0
         devReadyPlaySound = defaults.object(forKey: Keys.devReadyPlaySound) as? Bool ?? true
+        showVolumeHUD = defaults.object(forKey: Keys.showVolumeHUD) as? Bool ?? true
+        showBrightnessHUD = defaults.object(forKey: Keys.showBrightnessHUD) as? Bool ?? true
+        showMicrophoneHUD = defaults.object(forKey: Keys.showMicrophoneHUD) as? Bool ?? true
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
         agentReplyEnabled = defaults.object(forKey: Keys.agentReplyEnabled) as? Bool ?? true
         watchAgentTranscripts = defaults.object(forKey: Keys.watchAgentTranscripts) as? Bool ?? true
@@ -312,6 +333,9 @@ final class AppSettings: ObservableObject {
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 13.0,
             Keys.devReadyPlaySound: true,
+            Keys.showVolumeHUD: true,
+            Keys.showBrightnessHUD: true,
+            Keys.showMicrophoneHUD: true,
             Keys.autoCheckUpdates: true,
             Keys.agentReplyEnabled: true,
         ]
@@ -341,6 +365,9 @@ final class AppSettings: ObservableObject {
         showDevReadyPings = true
         devReadyDuration = 13.0
         devReadyPlaySound = true
+        showVolumeHUD = true
+        showBrightnessHUD = true
+        showMicrophoneHUD = true
         autoCheckUpdates = true
         agentReplyEnabled = true
         watchAgentTranscripts = true

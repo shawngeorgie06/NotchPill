@@ -13,6 +13,7 @@ struct PreferencesView: View {
                     collapsedSection
                     expandedSection
                     cardShareSection
+                    systemHUDSection
                     timerSection
                     devReadySection
                     shortcutsSection
@@ -173,6 +174,17 @@ struct PreferencesView: View {
                         .buttonStyle(TimerPillButtonStyle())
                 }
             }
+        }
+    }
+
+    private var systemHUDSection: some View {
+        SettingsPanel(title: "System HUDs", subtitle: "Brief controls that appear below the notch") {
+            Toggle("Volume", isOn: $settings.showVolumeHUD)
+            Toggle("Brightness", isOn: $settings.showBrightnessHUD)
+            Toggle("Microphone mute", isOn: $settings.showMicrophoneHUD)
+            Text("Brightness is shown for the built-in display. Microphone mute is shown only when the current input device reports that state.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

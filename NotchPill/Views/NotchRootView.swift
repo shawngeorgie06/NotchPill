@@ -98,15 +98,15 @@ struct NotchRootView: View {
         }
         .overlay {
             VStack(spacing: 8) {
-                if let level = state.volumeLevel {
+                if settings.showVolumeHUD, let level = state.volumeLevel {
                     VolumeHUD(level: level)
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
-                if let level = state.brightnessLevel {
+                if settings.showBrightnessHUD, let level = state.brightnessLevel {
                     BrightnessHUD(level: level)
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
-                if let muted = state.microphoneMuted {
+                if settings.showMicrophoneHUD, let muted = state.microphoneMuted {
                     MicrophoneHUD(isMuted: muted)
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
