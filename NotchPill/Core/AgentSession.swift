@@ -151,6 +151,29 @@ struct AgentSession: Equatable, Identifiable {
     /// failure.
     static let liveWindow: TimeInterval = 7200
 
+    /// How long a *quiet* session stays on the card.
+    ///
+    /// `liveWindow` is two hours because an agent blocked on a permission prompt
+    /// writes nothing, and dropping one that is still running is the worse
+    /// failure. But that generosity was applied to every session, so a card that
+    /// should have said "one agent working" said "7 agents" — six of them idle
+    /// for a quarter of an hour, occupying the row you actually wanted to read.
+    ///
+    /// So the long window is spent only where it was earned: on sessions that
+    /// are working or blocked on you. A session that is merely quiet is history
+    /// after five minutes, and comes straight back the moment it writes again.
+    static let idleWindow: TimeInterval = 300
+
+    /// Drops quiet sessions that have stopped being news. Working and waiting
+    /// sessions are kept whatever their age — a long build and an unanswered
+    /// question are both exactly what the card is for.
+    static func current(_ sessions: [AgentSession], now: Date = Date()) -> [AgentSession] {
+        sessions.filter { session in
+            guard case .idle(let since) = session.state else { return true }
+            return now.timeIntervalSince(since) < idleWindow
+        }
+    }
+
     /// Newest first, but anything blocked on you floats to the top — that is the
     /// row you can actually act on.
     static func ordered(_ sessions: [AgentSession]) -> [AgentSession] {

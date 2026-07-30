@@ -40,7 +40,10 @@ actor AgentSessionScanner {
         let live = Set(found.map(\.id))
         taskCache = taskCache.filter { live.contains(URL(fileURLWithPath: $0.key)
             .deletingPathExtension().lastPathComponent) }
-        return AgentSession.ordered(found)
+        // Aged out here rather than at render time, so an emptied card can take
+        // itself off the row — and so the task cache above is pruned against
+        // what actually got scanned, not what survives.
+        return AgentSession.ordered(AgentSession.current(found, now: now))
     }
 
     private var blockedSessions: [String: Date] = [:]

@@ -3278,3 +3278,50 @@ struct PermissionAnswerabilityTests {
         #expect(PermissionDecision.Verdict(answers[1].keystroke) == .deny)
     }
 }
+
+@Suite("Idle agents age off the card")
+struct AgentSessionAgeingTests {
+    private let now = Date()
+
+    private func session(_ id: String, _ state: AgentSession.State,
+                         age: TimeInterval = 0) -> AgentSession {
+        AgentSession(id: id, agent: "claude-code", project: "p", state: state,
+                     lastActivity: now.addingTimeInterval(-age))
+    }
+
+    @Test("A session quiet past the idle window is history")
+    func idleAgesOut() {
+        let stale = session("a", .idle(since: now.addingTimeInterval(-600)))
+        #expect(AgentSession.current([stale], now: now).isEmpty)
+    }
+
+    @Test("A recently quiet session is still shown")
+    func recentIdleStays() {
+        let fresh = session("a", .idle(since: now.addingTimeInterval(-60)))
+        #expect(AgentSession.current([fresh], now: now).count == 1)
+    }
+
+    @Test("A long build is not idle and never ages out")
+    func workingSurvives() {
+        let working = session("a", .working, age: 10_000)
+        #expect(AgentSession.current([working], now: now).count == 1)
+    }
+
+    @Test("An unanswered question outlives the idle window")
+    func waitingSurvives() {
+        // The whole reason the live window is two hours: an agent blocked on a
+        // permission prompt writes nothing, and dropping it would hide the one
+        // row you can act on.
+        let waiting = session("a", .waiting, age: 10_000)
+        #expect(AgentSession.current([waiting], now: now).count == 1)
+    }
+
+    @Test("A card of stale agents empties rather than filling with nothing")
+    func theReportedCase() {
+        let sessions = (1...6).map {
+            session("s\($0)", .idle(since: now.addingTimeInterval(-480)))
+        } + [session("live", .working)]
+        let kept = AgentSession.current(sessions, now: now)
+        #expect(kept.map(\.id) == ["live"])
+    }
+}
