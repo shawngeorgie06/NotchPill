@@ -28,12 +28,7 @@ enum AgentSessionLocator {
     /// look like the agent binary are preferred, and the rest are only a
     /// fallback.
     static func hostingBundleId(forSessionId sessionId: String, in table: [Entry]) -> String? {
-        let matches = table.filter { $0.args.contains(sessionId) }
-        guard !matches.isEmpty else { return nil }
-        let agentish = matches.filter { entry in
-            ["/claude", "/codex", "claude ", "codex "].contains { entry.args.contains($0) }
-        }
-        for candidate in agentish + matches {
+        for candidate in candidates(forSessionId: sessionId, in: table) {
             if let id = bundleId(walkingUpFrom: candidate.pid, in: table) { return id }
         }
         return nil
@@ -43,11 +38,39 @@ enum AgentSessionLocator {
     /// placed, so the caller can decide whether to say so.
     @discardableResult
     static func focus(sessionId: String?, fallbackBundleId: String?) -> Bool {
-        let target = sessionId.flatMap { hostingBundleId(forSessionId: $0) } ?? fallbackBundleId
+        let table = processTable()
+        let candidateEntries: [Entry] = sessionId.map { candidates(forSessionId: $0, in: table) } ?? []
+        let target: String? = candidateEntries.lazy.compactMap { bundleId(walkingUpFrom: $0.pid, in: table) }.first
+            ?? fallbackBundleId
         guard let target, !target.isEmpty else { return false }
+
+        // Terminal exposes each tab's TTY to AppleScript. That lets us return
+        // to the exact agent pane rather than merely bringing every Terminal
+        // window forward. Automation can be denied or Terminal may not own the
+        // process, so this is intentionally best-effort and falls through to
+        // the normal focus path in every failure case.
+        if target == "com.apple.Terminal",
+           let pid = candidateEntries.first?.pid,
+           let tty = controllingTTY(for: pid),
+           focusTerminalTab(tty: tty) {
+            return true
+        }
+
         guard let app = NSRunningApplication
             .runningApplications(withBundleIdentifier: target).first else { return false }
         return app.activate(options: [.activateAllWindows])
+    }
+
+    /// Candidates in preference order. Kept independent of the process query
+    /// both for tests and so focusing uses precisely the same safety rule as
+    /// the host-app lookup.
+    static func candidates(forSessionId sessionId: String, in table: [Entry]) -> [Entry] {
+        guard !sessionId.isEmpty else { return [] }
+        let matches = table.filter { $0.args.contains(sessionId) }
+        let agentish = matches.filter { entry in
+            ["/claude", "/codex", "claude ", "codex "].contains { entry.args.contains($0) }
+        }
+        return agentish + matches.filter { candidate in !agentish.contains { $0.pid == candidate.pid } }
     }
 
     // MARK: - Process tree
@@ -72,6 +95,55 @@ enum AgentSessionLocator {
         process.waitUntilExit()
         guard let text = String(data: data, encoding: .utf8) else { return [] }
         return parse(text)
+    }
+
+    /// `ps` reports the controlling terminal as (for example) `ttys012`.
+    /// Terminal's scripting API uses the corresponding `/dev/ttys012` value.
+    private static func controllingTTY(for pid: Int32) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-p", String(pid), "-o", "tty="]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let name = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty, name != "??" else { return nil }
+        return name.hasPrefix("/dev/") ? name : "/dev/" + name
+    }
+
+    private static func focusTerminalTab(tty: String) -> Bool {
+        var error: NSDictionary?
+        let result = NSAppleScript(source: terminalFocusScript(tty: tty))?
+            .executeAndReturnError(&error)
+        return error == nil && result?.booleanValue == true
+    }
+
+    /// Exposed for a small pure test. Inputs are escaped before being placed in
+    /// AppleScript, even though a real TTY cannot normally contain quotes.
+    static func terminalFocusScript(tty: String) -> String {
+        let escaped = tty
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return """
+        tell application "Terminal"
+            activate
+            repeat with terminalWindow in windows
+                repeat with terminalTab in tabs of terminalWindow
+                    if tty of terminalTab is "\(escaped)" then
+                        set selected tab of terminalWindow to terminalTab
+                        set index of terminalWindow to 1
+                        return true
+                    end if
+                end repeat
+            end repeat
+            return false
+        end tell
+        """
     }
 
     /// Split out so the walk can be tested without spawning anything.

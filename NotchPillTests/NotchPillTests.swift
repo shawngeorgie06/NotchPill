@@ -1831,6 +1831,13 @@ struct LocatorChoiceTests {
         #expect(AgentSessionLocator.hostingBundleId(forSessionId: sid, in: table) == nil)
         #expect(AgentSessionLocator.hostingBundleId(forSessionId: "", in: table) == nil)
     }
+
+    @Test("Terminal tab script targets only the session TTY")
+    func terminalTabScriptUsesEscapedTTY() {
+        let script = AgentSessionLocator.terminalFocusScript(tty: #"/dev/ttys\"012"#)
+        #expect(script.contains(#"tty of terminalTab is \"/dev/ttys\\\"012\""#))
+        #expect(script.contains("set selected tab of terminalWindow to terminalTab"))
+    }
 }
 
 @Suite("Sub-agent path parsing")
