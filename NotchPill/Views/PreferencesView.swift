@@ -79,7 +79,9 @@ struct PreferencesView: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Equal widths") { settings.cardWeights = [:] }
+                    // Not "equal" any more: cards have per-kind starting
+                    // widths, so this restores those rather than a flat split.
+                    Button("Reset widths") { settings.cardWeights = [:] }
                         .buttonStyle(.link)
                         .disabled(settings.cardWeights.isEmpty)
                 }

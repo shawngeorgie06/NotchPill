@@ -2029,11 +2029,38 @@ struct CIStatusTests {
 
 @Suite("Card width shares")
 struct CardShareTests {
-    @Test("no weights set means equal shares")
+    @Test("cards with no per-kind default split evenly")
     func equalByDefault() {
-        let shares = AppSettings.shares(for: ["agents", "media"], weights: [:])
-        #expect(shares["agents"] == 0.5)
+        let shares = AppSettings.shares(for: ["media", "clock"], weights: [:])
         #expect(shares["media"] == 0.5)
+        #expect(shares["clock"] == 0.5)
+    }
+
+    // CI is three short rows of "repo — passed". At an equal split it took half
+    // the row to say very little, and the first thing anyone did was drag it
+    // back down; agents carries a task line per session and earns the width.
+    @Test("out of the box, agents is wider than CI")
+    func defaultsFavourAgents() {
+        let shares = AppSettings.shares(for: ["agents", "ci"], weights: [:])
+        #expect((shares["agents"] ?? 0) > (shares["ci"] ?? 1))
+        #expect(abs((shares["agents"] ?? 0) + (shares["ci"] ?? 0) - 1) < 0.0001)
+    }
+
+    // A row someone has already arranged must not move when a default changes.
+    @Test("an explicit weight beats the per-kind default")
+    func explicitWinsOverDefault() {
+        let shares = AppSettings.shares(for: ["agents", "ci"],
+                                        weights: ["agents": 1.0, "ci": 1.0])
+        #expect(shares["agents"] == 0.5)
+        #expect(shares["ci"] == 0.5)
+    }
+
+    @Test("every default sits inside the range the sliders allow")
+    func defaultsAreReachable() {
+        for kind in ["agents", "ci", "media", "clock", "battery", "anything"] {
+            let w = AppSettings.defaultWeight(for: kind)
+            #expect(AppSettings.cardWeightRange.contains(w))
+        }
     }
 
     // The thing the feature is for: "live agents 80%, media 20%".

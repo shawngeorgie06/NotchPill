@@ -82,8 +82,25 @@ final class AppSettings: ObservableObject {
 
     nonisolated static let cardWeightRange: ClosedRange<Double> = 0.4...3.0
 
+    /// Not every card wants an equal share out of the box. CI is three short
+    /// rows of "repo — passed"; at an equal split it took half the row to say
+    /// very little, and the first thing anyone does is drag it back down. The
+    /// agents card is the opposite — it holds a task line per session and is
+    /// the one people lean on — so it starts wider.
+    ///
+    /// This is only the starting point: an explicit weight in `cardWeights`
+    /// always wins, so changing a default never moves a row someone has
+    /// already arranged.
+    nonisolated static func defaultWeight(for kind: String) -> Double {
+        switch kind {
+        case "ci": return 0.7
+        case "agents": return 1.6
+        default: return 1.0
+        }
+    }
+
     func cardWeight(_ kind: String) -> Double {
-        AppSettings.clampWeight(cardWeights[kind] ?? 1.0)
+        AppSettings.clampWeight(cardWeights[kind] ?? AppSettings.defaultWeight(for: kind))
     }
 
     func setCardWeight(_ kind: String, _ value: Double) {
@@ -102,7 +119,9 @@ final class AppSettings: ObservableObject {
     nonisolated static func shares(for kinds: [String],
                                    weights: [String: Double]) -> [String: Double] {
         guard !kinds.isEmpty else { return [:] }
-        let resolved = kinds.map { (kind: $0, w: clampWeight(weights[$0] ?? 1.0)) }
+        let resolved = kinds.map {
+            (kind: $0, w: clampWeight(weights[$0] ?? defaultWeight(for: $0)))
+        }
         let total = resolved.reduce(0) { $0 + $1.w }
         guard total > 0 else {
             let equal = 1.0 / Double(kinds.count)
