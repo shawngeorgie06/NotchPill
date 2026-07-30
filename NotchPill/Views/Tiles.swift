@@ -445,7 +445,7 @@ struct DevReadyPeekRow: View {
                     sourceIcon
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(alert.title)
+                        Text(alert.displayTitle)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white)
                             .lineLimit(1)
@@ -458,7 +458,7 @@ struct DevReadyPeekRow: View {
                                alert.agent?.caseInsensitiveCompare(source) != .orderedSame {
                                 agentBadge(source, prominent: false)
                             }
-                            if let subtitle = alert.subtitle, !subtitle.isEmpty {
+                            if let subtitle = alert.displaySubtitle, !subtitle.isEmpty {
                                 Text(subtitle)
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.5))

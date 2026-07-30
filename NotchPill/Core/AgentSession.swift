@@ -87,6 +87,10 @@ struct AgentSession: Equatable, Identifiable {
                                              options: .regularExpression)
         }
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Before truncation, so a token cannot survive by being cut in half:
+        // the card shows whatever you typed, and people paste credentials to
+        // their agents.
+        text = SecretRedactor.redact(text)
         guard !text.isEmpty else { return nil }
         guard text.count > limit else { return text }
         // Break on a word so the tail is not a half word.

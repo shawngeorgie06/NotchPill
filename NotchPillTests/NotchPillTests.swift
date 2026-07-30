@@ -2686,3 +2686,82 @@ struct NotchRectTests {
         #expect(notch?.width == 200)
     }
 }
+
+// MARK: - Secret redaction
+
+@Suite("Secret redaction")
+struct SecretRedactorTests {
+    // This is not hypothetical. A GitHub PAT pasted into an agent session was
+    // rendered on the notch as the task line — an overlay that sits above every
+    // window and ends up in screenshots and screen shares.
+    @Test("a GitHub token never reaches the screen")
+    func githubToken() {
+        let text = "use " + fixture("ghp_", "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345") + " to push"
+        let out = SecretRedactor.redact(text)
+        #expect(!out.contains("ghp_"))
+        #expect(out.contains(SecretRedactor.placeholder))
+    }
+
+    @Test("fine-grained tokens too")
+    func fineGrained() {
+        #expect(!SecretRedactor.redact(fixture("github_pat_", "11ABCDEFG0abcdefghij_KLMNOPQRSTUVWXYZ"))
+            .contains("github_pat_"))
+    }
+
+    // Fixtures are assembled from pieces on purpose. Written as literals they
+    // are realistic enough that GitHub's own push protection rejects the
+    // commit — which is a fair verdict on a file full of credential shapes,
+    // and a neat confirmation that the patterns match what scanners match.
+    private func fixture(_ prefix: String, _ body: String) -> String { prefix + body }
+
+    @Test("and the other vendors")
+    func otherVendors() {
+        let secrets = [
+            fixture("sk-ant-", "api03-abcdefghijklmnopqrstuvwxyz012345"),
+            fixture("AKIA", "IOSFODNN7EXAMPLE"),
+            fixture("xox", "b-123456789012-abcdefghijklmnop"),
+            fixture("AIza", "SyA1234567890abcdefghijklmnopqrstuv"),
+        ]
+        for secret in secrets {
+            #expect(SecretRedactor.containsSecret(secret), "missed \(secret.prefix(4))…")
+        }
+    }
+
+    // Permission-request peeks quote the command an agent wants to run, which
+    // is exactly where a credential ends up.
+    @Test("a token on a command line, and one in a URL")
+    func inCommands() {
+        #expect(!SecretRedactor.redact("curl -H 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz012345'")
+            .contains("abcdefghijklmnopqrstuvwxyz"))
+        #expect(SecretRedactor.containsSecret("git clone https://x-access-token:" + fixture("ghp_", "secret") + "@github.com/o/r"))
+    }
+
+    // A rule that ate ordinary text would be noise, and noise gets ignored.
+    @Test("ordinary task text is left completely alone")
+    func leavesNormalText() {
+        for ordinary in ["fix the hover zone depending on size",
+                        "Review this change for security vulnerabilities",
+                        "commit 6cdcad6 and tag v1.18.0",
+                        "session 93a48a21-849b-4f5b-986a-a3bb5794a63d"] {
+            #expect(SecretRedactor.redact(ordinary) == ordinary)
+        }
+    }
+
+    @Test("the task line on the card is redacted before it is truncated")
+    func summarizeRedacts() {
+        let task = AgentSession.summarize("push with " + fixture("ghp_", "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345") + " please")
+        #expect(task?.contains("ghp_") == false)
+    }
+
+    @Test("a peek's question is redacted")
+    func questionRedacted() {
+        let alert = DevReadyAlert(id: "1", title: "repo", kind: .waiting,
+                                  message: "run: curl -u " + fixture("ghp_", "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345") + " api?")
+        #expect(alert.questionText?.contains("ghp_") == false)
+    }
+
+    @Test("empty input is not a special case")
+    func empty() {
+        #expect(SecretRedactor.redact("") == "")
+    }
+}

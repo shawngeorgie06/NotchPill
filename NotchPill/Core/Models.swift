@@ -78,8 +78,16 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// reserved and whether anything fills it.
     var questionText: String? {
         guard kind == .waiting, let message, !message.isEmpty else { return nil }
-        return message
+        // The question is quoted from the agent, and for a permission request
+        // it is the command it wants to run — which is exactly where a token
+        // ends up on a command line. The peek floats above every window.
+        return SecretRedactor.redact(message)
     }
+
+    /// Title and subtitle as they should appear on screen. Both are carried
+    /// through from hook payloads, so neither is ours to trust.
+    var displayTitle: String { SecretRedactor.redact(title) }
+    var displaySubtitle: String? { subtitle.map(SecretRedactor.redact) }
 
     /// Whether two alerts came from the same agent session.
     ///
