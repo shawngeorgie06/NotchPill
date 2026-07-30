@@ -21,6 +21,8 @@ struct ExpandedMediaRow: View {
             Spacer(minLength: 0)
             controls
         }
+        .modifier(MediaTransportSwipe(actions: actions))
+        .accessibilityHint("Swipe left for next track or right for previous track")
     }
 
     private var artwork: some View {
@@ -808,6 +810,8 @@ struct ExpandedActivityCard: View {
             switch activity {
             case .media(let np):
                 mediaCard(np)
+                    .modifier(MediaTransportSwipe(actions: actions))
+                    .accessibilityHint("Swipe left for next track or right for previous track")
             case .appSwitch(let name):
                 appCard(title: "Switched to", name: name)
             case .activeApp(let name):
@@ -989,6 +993,10 @@ struct ExpandedActivityCard: View {
                         .lineLimit(1)
                 }
                 if np.isPlaying { EqualizerBars(scale: readability) }
+                Image(systemName: "arrow.left.and.right")
+                    .font(.system(size: s(9), weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.28))
+                    .help("Swipe left/right for next/previous track")
             }
             HStack(spacing: s(18)) {
                 transportButton("backward.fill", action: actions.previous)
@@ -1178,6 +1186,36 @@ struct ExpandedActivityCard: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(TransportButtonStyle())
+    }
+}
+
+/// A media-only gesture recogniser. It deliberately ignores short or vertical
+/// drags, so inspecting the expanded pill never produces accidental playback
+/// changes and no gesture leaks out to the rest of the notch.
+enum MediaSwipeDirection: Equatable {
+    case previous
+    case next
+
+    static func from(translation: CGSize, minimumDistance: CGFloat = 36) -> Self? {
+        guard abs(translation.width) >= minimumDistance,
+              abs(translation.width) > abs(translation.height) else { return nil }
+        return translation.width < 0 ? .next : .previous
+    }
+}
+
+private struct MediaTransportSwipe: ViewModifier {
+    let actions: NotchActions
+
+    func body(content: Content) -> some View {
+        content.simultaneousGesture(
+            DragGesture(minimumDistance: 12).onEnded { value in
+                switch MediaSwipeDirection.from(translation: value.translation) {
+                case .previous: actions.previous()
+                case .next: actions.next()
+                case nil: break
+                }
+            }
+        )
     }
 }
 

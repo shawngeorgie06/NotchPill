@@ -1437,6 +1437,21 @@ struct FocusedActivityTests {
     }
 }
 
+@Suite("Media swipe controls")
+struct MediaSwipeTests {
+    @Test("horizontal swipes select the matching transport action")
+    func horizontalDirections() {
+        #expect(MediaSwipeDirection.from(translation: CGSize(width: -48, height: 3)) == .next)
+        #expect(MediaSwipeDirection.from(translation: CGSize(width: 48, height: 3)) == .previous)
+    }
+
+    @Test("short and vertical drags do not change playback")
+    func ignoresAmbiguousDrags() {
+        #expect(MediaSwipeDirection.from(translation: CGSize(width: 20, height: 0)) == nil)
+        #expect(MediaSwipeDirection.from(translation: CGSize(width: 42, height: 72)) == nil)
+    }
+}
+
 @Suite("Live agent sessions")
 struct AgentSessionTests {
     private func session(_ id: String, _ state: AgentSession.State,
