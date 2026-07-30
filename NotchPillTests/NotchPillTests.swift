@@ -1835,7 +1835,9 @@ struct LocatorChoiceTests {
     @Test("Terminal tab script targets only the session TTY")
     func terminalTabScriptUsesEscapedTTY() {
         let script = AgentSessionLocator.terminalFocusScript(tty: #"/dev/ttys\"012"#)
-        #expect(script.contains(#"tty of terminalTab is \"/dev/ttys\\\"012\""#))
+        // Raw string: `\"` is literal here, so the quotes around the value are
+        // plain. Only the escaping *inside* it is the thing under test.
+        #expect(script.contains(#"tty of terminalTab is "/dev/ttys\\\"012""#))
         #expect(script.contains("set selected tab of terminalWindow to terminalTab"))
     }
 
