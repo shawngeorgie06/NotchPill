@@ -2504,3 +2504,65 @@ struct AgentStateWindowTests {
         #expect(AgentSession.workingWindow < AgentSession.liveWindow)
     }
 }
+
+// MARK: - CI run lifetime
+
+@Suite("CI run lifetime")
+struct CIRunLifetimeTests {
+    private func run(_ state: CIRun.State, ageMinutes: Double, now: Date) -> CIRun {
+        CIRun(id: "r\(ageMinutes)\(state)", repo: "o/r", workflow: "Release", branch: "main",
+              state: state, started: now.addingTimeInterval(-ageMinutes * 60))
+    }
+
+    // Reported: the same three "Release — passed" rows sitting there forever.
+    // `gh run list` has no notion of age, so a repo built once kept showing
+    // last week's green ticks every time an agent opened in it.
+    @Test("a pass stops being news")
+    func passedAgesOut() {
+        let now = Date()
+        let fresh = run(.passed, ageMinutes: 5, now: now)
+        let stale = run(.passed, ageMinutes: 120, now: now)
+        let kept = CIRun.current([fresh, stale], now: now)
+        #expect(kept.map(\.id) == [fresh.id])
+    }
+
+    // The one you have not dealt with yet is worth keeping around.
+    @Test("a failure sticks around far longer than a pass")
+    func failureOutlivesPass() {
+        #expect(CIRun.failedLifetime > CIRun.passedLifetime)
+        let now = Date()
+        let failed = run(.failed, ageMinutes: 90, now: now)
+        #expect(CIRun.current([failed], now: now).count == 1)
+    }
+
+    @Test("but not forever")
+    func failureAlsoAgesOut() {
+        let now = Date()
+        #expect(CIRun.current([run(.failed, ageMinutes: 600, now: now)], now: now).isEmpty)
+    }
+
+    // A build going for two hours is exactly the one you want on screen.
+    @Test("a long-running build is never aged out")
+    func runningAlwaysStays() {
+        let now = Date()
+        let old = run(.running, ageMinutes: 240, now: now)
+        #expect(CIRun.current([old], now: now).map(\.id) == [old.id])
+    }
+
+    @Test("cancelled and skipped age out like a pass")
+    func otherAgesOut() {
+        let now = Date()
+        #expect(CIRun.current([run(.other("cancelled"), ageMinutes: 120, now: now)],
+                              now: now).isEmpty)
+    }
+
+    // Everything aging out has to reach the card as an empty list, so the
+    // card can take itself off the row instead of showing a stale header.
+    @Test("an all-stale repo yields nothing at all")
+    func emptiesCompletely() {
+        let now = Date()
+        let stale = [run(.passed, ageMinutes: 200, now: now),
+                     run(.passed, ageMinutes: 300, now: now)]
+        #expect(CIRun.current(stale, now: now).isEmpty)
+    }
+}

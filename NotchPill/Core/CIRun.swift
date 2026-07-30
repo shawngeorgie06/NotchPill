@@ -49,6 +49,33 @@ struct CIRun: Equatable, Identifiable {
         return "\(s / 3600)h"
     }
 
+    /// How long a finished run stays on the card.
+    ///
+    /// `gh run list` has no notion of age — it hands back the three most recent
+    /// runs whether they finished a minute or a fortnight ago. So a repo you
+    /// built once kept showing the same three green rows every time you opened
+    /// an agent in it, which is not status, it is wallpaper.
+    ///
+    /// A pass is worth knowing about for as long as you might still be watching
+    /// for it, and then it is over. A failure is worth keeping much longer:
+    /// it is the one you have not dealt with yet.
+    static let passedLifetime: TimeInterval = 1800
+    static let failedLifetime: TimeInterval = 21600
+
+    /// Drops finished runs that have stopped being news. Anything still
+    /// running stays regardless of age — a build that has been going for two
+    /// hours is exactly the one you want to see.
+    static func current(_ runs: [CIRun], now: Date = Date()) -> [CIRun] {
+        runs.filter { run in
+            let age = now.timeIntervalSince(run.started)
+            switch run.state {
+            case .running: return true
+            case .failed: return age < failedLifetime
+            case .passed, .other: return age < passedLifetime
+            }
+        }
+    }
+
     /// A failure is the only state worth interrupting for, so failures come
     /// first, then anything still running, then the rest newest-first.
     static func ordered(_ runs: [CIRun]) -> [CIRun] {

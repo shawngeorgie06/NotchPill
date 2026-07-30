@@ -19,7 +19,9 @@ now-playing controls, live status cards, and optional collapsed activity chips.
 - **CI status** — GitHub Actions for the repos your agents are working in:
   running, passed or failed, tap to open the run. No list to configure — repos
   come from the live sessions and are remembered for an hour after one ends, so
-  a build you tagged and walked away from is still there. Needs `gh`.
+  a build you tagged and walked away from is still there. A pass drops off the
+  card after 30 minutes and a failure after six hours; anything still running
+  stays however long it takes. Needs `gh`.
 - **Card widths** — Settings → **Card Widths** divides the expanded row however
   you like: live agents at 60% and now playing at 20%, say. Weights are
   relative, so the split re-normalises as cards come and go.

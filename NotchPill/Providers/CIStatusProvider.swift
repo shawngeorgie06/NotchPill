@@ -36,7 +36,12 @@ actor CIStatusProvider {
         guard ghPath != nil else { return [] }
         // Note: no early return on an empty directory list — the remembered
         // repos below are the whole point.
-        guard now.timeIntervalSince(lastFetch) >= pollInterval || cached.isEmpty else {
+        // No `|| cached.isEmpty` escape here. The first call always fetches
+        // because `lastFetch` starts at the distant past, so that clause only
+        // ever fired when a fetch had legitimately produced nothing — and now
+        // that finished runs age out, "nothing" is the steady state. It would
+        // have meant a `gh` network round trip every three seconds, forever.
+        guard now.timeIntervalSince(lastFetch) >= pollInterval else {
             return cached
         }
         lastFetch = now
@@ -63,7 +68,9 @@ actor CIStatusProvider {
 
         var found: [CIRun] = []
         for slug in unique { found.append(contentsOf: fetchRuns(repo: slug)) }
-        cached = CIRun.ordered(found)
+        // Age them out here rather than at render time: an empty result has to
+        // reach the card so it can take itself off the row.
+        cached = CIRun.ordered(CIRun.current(found, now: now))
         return cached
     }
 
