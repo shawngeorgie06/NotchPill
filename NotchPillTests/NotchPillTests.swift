@@ -1322,6 +1322,21 @@ struct TranscriptTurnTests {
                 == "Fix the Codex live-agent text")
     }
 
+    @Test("Codex approval handoffs use an activity label, not protocol text")
+    func codexApprovalHandoff() {
+        let handoff = "The following is the Codex agent history added since your last approval assessment."
+        let transcript = tail([
+            #"{"type":"event_msg","payload":{"type":"user_message","message":"Draft the release notes"}}"#,
+            #"{"type":"event_msg","payload":{"type":"user_message","message":"\#(handoff)"}}"#
+        ])
+        #expect(AgentSessionScanner.codexLastPrompt(in: transcript)
+                == "Draft the release notes")
+
+        #expect(AgentSessionScanner.codexLastPrompt(in:
+            #"{"type":"event_msg","payload":{"type":"user_message","message":"\#(handoff)"}}"#)
+                == "Reviewing a permission request")
+    }
+
     @Test("an assistant message ends the turn")
     func assistantEnds() {
         #expect(AgentTranscriptProvider.turnEnded(inTail: tail([

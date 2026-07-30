@@ -220,14 +220,31 @@ actor AgentSessionScanner {
     /// Scan backwards so the live-agents card names the current request rather
     /// than the prompt that originally created a long-running session.
     nonisolated static func codexLastPrompt(in text: String) -> String? {
+        var sawApprovalHandoff = false
         for line in text.split(separator: "\n").reversed() {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                   let payload = obj["payload"] as? [String: Any],
                   payload["type"] as? String == "user_message",
                   let message = payload["message"] as? String, !message.isEmpty else { continue }
+            // The desktop app's approval reviewer is itself an agent session.
+            // It receives a synthetic user_message containing the transcript
+            // delta for every approval check; that is protocol plumbing, not a
+            // user task, and otherwise leaked as a misleading live-agent row.
+            if isCodexApprovalHandoff(message) {
+                sawApprovalHandoff = true
+                continue
+            }
             return message
         }
-        return nil
+        // A reviewer session has no user-authored request in its own transcript.
+        // Give its row truthful, stable language instead of exposing the internal
+        // handoff text. A normal Codex session never reaches this fallback.
+        return sawApprovalHandoff ? "Reviewing a permission request" : nil
+    }
+
+    nonisolated private static func isCodexApprovalHandoff(_ message: String) -> Bool {
+        let prefix = "The following is the Codex agent history "
+        return message.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix(prefix)
     }
 
     /// Reads a window of a file as text.
