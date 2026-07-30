@@ -2614,3 +2614,75 @@ struct PeekDismissHitTests {
         #expect(accepts(expanded: true) != accepts(expanded: false))
     }
 }
+
+// MARK: - Notch detection
+
+@Suite("Notch detection")
+struct NotchRectTests {
+    // A 14" MacBook Pro in points.
+    private let frame = CGRect(x: 0, y: 0, width: 1512, height: 982)
+    private let safeTop: CGFloat = 37
+
+    private func rect(left: CGRect?, right: CGRect?) -> CGRect? {
+        NotchGeometry.notchRect(inFrame: frame, safeTop: safeTop, left: left, right: right)
+    }
+
+    @Test("a normal pair of auxiliary areas gives a centred notch")
+    func normalCase() {
+        let left = CGRect(x: 0, y: 945, width: 656, height: 37)
+        let right = CGRect(x: 856, y: 945, width: 656, height: 37)
+        let notch = rect(left: left, right: right)
+        #expect(notch?.width == 200)
+        #expect(notch?.midX == frame.midX)
+    }
+
+    // The reported failure: a degenerate right-hand area made the "notch" run
+    // to the right edge of the display. The pill centres on that rect and is
+    // sized from it — a black bar, off to the right.
+    @Test("a zero-width right area does not become a screen-wide notch")
+    func degenerateRightArea() {
+        let left = CGRect(x: 0, y: 945, width: 656, height: 37)
+        let right = CGRect(x: 1512, y: 945, width: 0, height: 0)
+        let notch = rect(left: left, right: right)
+        #expect(notch?.width == 200)          // fell back
+        #expect(notch?.midX == frame.midX)    // and is centred
+    }
+
+    @Test("an off-centre reading is rejected")
+    func offCentreRejected() {
+        // Left area far too wide: the gap would sit well right of centre.
+        let left = CGRect(x: 0, y: 945, width: 1100, height: 37)
+        let right = CGRect(x: 1350, y: 945, width: 162, height: 37)
+        #expect(rect(left: left, right: right)?.midX == frame.midX)
+    }
+
+    @Test("an absurdly wide gap is rejected")
+    func tooWideRejected() {
+        let left = CGRect(x: 0, y: 945, width: 200, height: 37)
+        let right = CGRect(x: 1312, y: 945, width: 200, height: 37)
+        // Gap of 1112pt is not a notch.
+        #expect(rect(left: left, right: right)?.width == 200)
+    }
+
+    @Test("missing areas fall back to a centred notch")
+    func missingAreas() {
+        #expect(rect(left: nil, right: nil)?.midX == frame.midX)
+    }
+
+    @Test("no safe-area inset means no notch at all")
+    func noInset() {
+        #expect(NotchGeometry.notchRect(inFrame: frame, safeTop: 0,
+                                        left: nil, right: nil) == nil)
+    }
+
+    // Edges, not widths: an area that does not start at the screen edge used to
+    // be measured as though it did.
+    @Test("the gap is measured from the areas' facing edges")
+    func usesFacingEdges() {
+        let left = CGRect(x: 10, y: 945, width: 646, height: 37)   // inset by 10
+        let right = CGRect(x: 856, y: 945, width: 646, height: 37)
+        let notch = rect(left: left, right: right)
+        #expect(notch?.minX == 656)
+        #expect(notch?.width == 200)
+    }
+}

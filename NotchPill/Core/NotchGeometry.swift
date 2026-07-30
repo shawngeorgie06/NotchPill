@@ -97,29 +97,61 @@ struct NotchGeometry {
 
     /// Computes the notch rect from the two auxiliary top areas that flank it.
     private static func notchRect(for screen: NSScreen) -> CGRect? {
-        let frame = screen.frame
-        let notchHeight = screen.safeAreaInsets.top
-        guard notchHeight > 0 else { return nil }
+        notchRect(inFrame: screen.frame,
+                  safeTop: screen.safeAreaInsets.top,
+                  left: screen.auxiliaryTopLeftArea,
+                  right: screen.auxiliaryTopRightArea)
+    }
 
-        // The areas to the left/right of the notch. Their gap is the notch width.
-        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
-            let notchLeftX = frame.minX + left.width
-            let notchRightX = frame.maxX - right.width
-            let width = notchRightX - notchLeftX
-            if width > 0 {
-                return CGRect(x: notchLeftX,
-                              y: frame.maxY - notchHeight,
-                              width: width,
-                              height: notchHeight)
-            }
+    /// The rule on its own, so the awkward inputs can be fed to it directly.
+    ///
+    /// Two things were wrong here, and together they put the pill off to the
+    /// right of the screen under a black bar.
+    ///
+    /// It read the auxiliary areas' *widths* and assumed each was flush to a
+    /// screen edge, instead of reading the edges it actually wanted. And it
+    /// accepted whatever came out as long as the width was positive — so one
+    /// degenerate area (macOS hands back an empty or zero-width one in some
+    /// configurations) produced a "notch" running to the right edge of the
+    /// display. The pill centres on that rect and is sized from it, which is a
+    /// black bar, off to the right, in one step.
+    ///
+    /// A notch is a small gap near the middle of the top edge. Anything that
+    /// is not that is not a measurement, and the centred fallback is better
+    /// than a confident wrong answer.
+    static func notchRect(inFrame frame: CGRect,
+                          safeTop: CGFloat,
+                          left: CGRect?,
+                          right: CGRect?) -> CGRect? {
+        guard safeTop > 0, frame.width > 0 else { return nil }
+
+        if let left, let right,
+           left.width > 1, left.height > 1,
+           right.width > 1, right.height > 1 {
+            // The edges facing the notch — not the widths.
+            let width = right.minX - left.maxX
+            let candidate = CGRect(x: left.maxX,
+                                   y: frame.maxY - safeTop,
+                                   width: width,
+                                   height: safeTop)
+            if isPlausibleNotch(candidate, in: frame) { return candidate }
         }
 
         // Fallback: assume a centered notch of a typical width.
         let assumedWidth: CGFloat = 200
         return CGRect(x: frame.midX - assumedWidth / 2,
-                      y: frame.maxY - notchHeight,
+                      y: frame.maxY - safeTop,
                       width: assumedWidth,
-                      height: notchHeight)
+                      height: safeTop)
+    }
+
+    /// A notch is narrow and sits near the middle. Bounds chosen wide enough to
+    /// cover every shipping Mac and narrow enough to reject a bad reading.
+    static func isPlausibleNotch(_ rect: CGRect, in frame: CGRect) -> Bool {
+        guard rect.width >= 80, rect.width <= 400 else { return false }
+        guard rect.width < frame.width / 3 else { return false }
+        // Physically centred, give or take a rounding error.
+        return abs(rect.midX - frame.midX) <= frame.width * 0.05
     }
 
     /// The window that hosts the overlay. Sized to fit the fully expanded pill when
