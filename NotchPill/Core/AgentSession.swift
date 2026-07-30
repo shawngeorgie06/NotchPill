@@ -131,9 +131,21 @@ struct AgentSession: Equatable, Identifiable {
             : .idle(since: lastWrite)
     }
 
-    static let workingWindow: TimeInterval = 8
+    /// Eight seconds was measured against an agent writing steadily, which is
+    /// the easy case. An agent running a build, a test suite, or any tool call
+    /// longer than a breath writes nothing while it works — so the card called
+    /// four busy agents "idle 4m" and was believed, because that is what it
+    /// said. A tool call is the unit here, not a keystroke.
+    static let workingWindow: TimeInterval = 45
     /// Past this, a session is history rather than something you are "in".
-    static let liveWindow: TimeInterval = 1800
+    ///
+    /// Thirty minutes sounds generous until an agent sits on one long task, or
+    /// waits on a permission prompt nobody has answered: it writes nothing, and
+    /// the row did not go stale — it disappeared, while the agent was still
+    /// running. Two hours costs a few extra rows, sorted below the live ones,
+    /// and they age visibly. Silently dropping a running agent is the worse
+    /// failure.
+    static let liveWindow: TimeInterval = 7200
 
     /// Newest first, but anything blocked on you floats to the top — that is the
     /// row you can actually act on.

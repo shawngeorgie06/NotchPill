@@ -2462,3 +2462,45 @@ struct ExpandedHeightTests {
         #expect(NotchContentLayout.expandedContentBaseHeight([.clock]) >= 48)
     }
 }
+
+// MARK: - Agent liveness windows
+
+@Suite("Agent state windows")
+struct AgentStateWindowTests {
+    // Reported: four agents running, one row, and it said idle. Both halves of
+    // that were the thresholds, not the detection.
+    @Test("an agent mid tool call is still working, not idle")
+    func longToolCallStaysWorking() {
+        let now = Date()
+        // A build, a test run, a slow search — nothing is written meanwhile.
+        let state = AgentSession.state(lastWrite: now.addingTimeInterval(-30),
+                                       blocked: false, now: now)
+        #expect(state == .working)
+    }
+
+    @Test("but a genuinely quiet session does go idle")
+    func quietGoesIdle() {
+        let now = Date()
+        let state = AgentSession.state(lastWrite: now.addingTimeInterval(-300),
+                                       blocked: false, now: now)
+        if case .idle = state {} else { Issue.record("expected idle, got \(state)") }
+    }
+
+    @Test("blocked still beats both")
+    func blockedWins() {
+        let now = Date()
+        #expect(AgentSession.state(lastWrite: now, blocked: true, now: now) == .waiting)
+    }
+
+    // A session that has gone quiet for an hour is still one you are "in" —
+    // dropping it made a running agent vanish from the card entirely.
+    @Test("an hour of quiet still counts as live")
+    func quietHourIsStillLive() {
+        #expect(AgentSession.liveWindow > 3600)
+    }
+
+    @Test("the working window is shorter than the live window")
+    func windowsAreOrdered() {
+        #expect(AgentSession.workingWindow < AgentSession.liveWindow)
+    }
+}

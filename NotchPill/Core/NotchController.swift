@@ -528,11 +528,29 @@ final class NotchController {
         window?.makeKey()
     }
 
+    /// True whenever the pill is drawn at its larger size — hovered, engaged,
+    /// or showing something that took over the window on its own.
+    ///
+    /// A peek is the case that mattered: it never sets `isExpanded`, so click
+    /// targeting fell back to the *collapsed* rect while a 380pt-wide peek was
+    /// on screen. Its ✕ sits past the right edge of that rect, so the window
+    /// declared itself click-through and the press went to whatever was
+    /// underneath. Intermittent, because the container's own tracking rects
+    /// covered it whenever they had been refreshed in time.
+    private var rendersLargeContent: Bool {
+        state.isExpanded
+            || pillEngaged
+            || !state.devReadyAlerts.isEmpty
+            || state.replyCompose != nil
+            || state.updateProgress != nil
+    }
+
     private func isPointerOverPill(_ point: NSPoint) -> Bool {
         if container?.isPointOnInteractivePill(point) == true { return true }
         guard geometry != nil else { return false }
-        let pad: CGFloat = state.isExpanded ? 16 : 10
-        let rect = state.isExpanded ? expandedInteractionRect() : collapsedInteractionRect()
+        let large = rendersLargeContent
+        let pad: CGFloat = large ? 16 : 10
+        let rect = large ? expandedInteractionRect() : collapsedInteractionRect()
         return rect.insetBy(dx: -pad, dy: -pad).contains(point)
     }
 
@@ -598,7 +616,14 @@ final class NotchController {
         if pillEngaged, expandedInteractionRect().insetBy(dx: -14, dy: -12).contains(mouse) {
             return
         }
-        if expandHoverScreenRect().insetBy(dx: -8, dy: -6).contains(mouse) {
+        // Leaving is judged more tightly than arriving. The entry zone is
+        // padded, and that padding *grows* as the pill shrinks (a smaller pill
+        // needs a relatively bigger target) — so at 75% the old exit test held
+        // the pill open for roughly 27pt past its own edge, which reads as the
+        // notch refusing to go away. Proper hysteresis keeps the generous zone
+        // for arriving and uses the pill itself, already padded by
+        // `isPointerOverPill`, for leaving.
+        if expandHoverScreenRect().contains(mouse) {
             return
         }
         if isPointerInBrowserFlank(mouse) {
@@ -614,7 +639,11 @@ final class NotchController {
         // person is actually typing in.
         arming.disarm()
         if Self.logHover { print("HOVER exit -> collapse in \(collapseGrace)s") }
-        let grace = state.isExpanded ? 0.35 : collapseGrace
+        // 0.35 was tuned to stop the pill flickering shut on a mouse crossing
+        // it, but the exit test is tighter now, so the grace no longer has to
+        // carry that on its own — and a third of a second after you have
+        // already looked away is long enough to notice.
+        let grace = state.isExpanded ? 0.18 : collapseGrace
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             let mouse = NSEvent.mouseLocation
@@ -731,13 +760,16 @@ final class NotchController {
             return
         }
 
-        if !state.isExpanded {
+        if !rendersLargeContent {
             let overPill = isPointerOverPill(mouse)
             window.ignoresMouseEvents = !overPill
             return
         }
 
-        let overPill = container.isPointOnInteractivePill(mouse)
+        // Same rule as `isPointerOverPill`: the container's tracking rects are
+        // authoritative when they are current, but a peek that has just
+        // appeared may not be in them yet, and a click-through ✕ is the result.
+        let overPill = container.isPointOnInteractivePill(mouse) || isPointerOverPill(mouse)
         window.ignoresMouseEvents = !overPill
     }
 
