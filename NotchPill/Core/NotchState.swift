@@ -36,6 +36,7 @@ final class NotchState: ObservableObject {
     @Published private(set) var microphoneMuted: Bool? = nil
     /// Active dev-ready peeks (multiple agents can finish at once).
     @Published private(set) var devReadyAlerts: [DevReadyAlert] = []
+    @Published private(set) var recentDevReadyAlerts: [DevReadyAlert] = []
     /// Agent conversations alive right now. Distinct from `devReadyAlerts`:
     /// those are events that fire once, this is a standing list.
     @Published var agentSessions: [AgentSession] = []
@@ -71,6 +72,11 @@ final class NotchState: ObservableObject {
     func enqueueDevReady(_ alerts: [DevReadyAlert]) {
         guard !alerts.isEmpty else { return }
         for alert in alerts {
+            if alert.kind == .finished {
+                recentDevReadyAlerts.removeAll { $0.id == alert.id }
+                recentDevReadyAlerts.insert(alert, at: 0)
+                recentDevReadyAlerts = Array(recentDevReadyAlerts.prefix(3))
+            }
             // A finished ping means that session is no longer blocked, so it
             // supersedes that session's waiting peek. Without this, waiting peeks
             // (which deliberately never auto-dismiss) would outlive the question:

@@ -844,6 +844,7 @@ enum ExpandedActivityBuilder {
         shelfNames: [String],
         agentSessions: [AgentSession] = [],
         ciRuns: [CIRun] = [],
+        recentAlerts: [DevReadyAlert] = [],
         showMedia: Bool,
         showActiveApp: Bool,
         showVolume: Bool,
@@ -854,7 +855,8 @@ enum ExpandedActivityBuilder {
         showBattery: Bool,
         showShelf: Bool,
         showAgents: Bool = false,
-        showCI: Bool = false
+        showCI: Bool = false,
+        showRecentAlerts: Bool = false
     ) -> [ExpandedActivity] {
         var items: [ExpandedActivity] = []
         // Live agents lead: they are the only card that answers "what is
@@ -862,6 +864,7 @@ enum ExpandedActivityBuilder {
         if showAgents, !agentSessions.isEmpty { items.append(.agents(agentSessions)) }
         // Right after the agents: both answer "is the thing I started done yet?"
         if showCI, !ciRuns.isEmpty { items.append(.ci(ciRuns)) }
+        if showRecentAlerts, !recentAlerts.isEmpty { items.append(.recentAlerts(recentAlerts)) }
         if showMedia, let np = nowPlaying, !np.isEmpty { items.append(.media(np)) }
         if showActiveApp {
             if let hint = appSwitchHint {
@@ -924,6 +927,8 @@ struct ExpandedActivityCard: View {
                 agentsCard(sessions)
             case .ci(let runs):
                 ciCard(runs)
+            case .recentAlerts(let alerts):
+                recentAlertsCard(alerts)
             }
         }
         .frame(
@@ -1007,6 +1012,31 @@ struct ExpandedActivityCard: View {
                 }
             }
             .scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func recentAlertsCard(_ alerts: [DevReadyAlert]) -> some View {
+        VStack(alignment: .leading, spacing: s(3)) {
+            HStack(spacing: s(4)) {
+                Image(systemName: "bell.badge")
+                    .font(.system(size: s(9)))
+                Text("Recent")
+                    .font(font(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.45))
+            ForEach(alerts) { alert in
+                Button { if let bundleId = alert.bundleId { actions.focusApp(bundleId) } } label: {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(alert.displayTitle).font(font(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
+                        if let subtitle = alert.displaySubtitle, !subtitle.isEmpty {
+                            Text(subtitle).font(font(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

@@ -48,6 +48,7 @@ enum NotchContentSnapshot {
             shelfNames: shelf.items.prefix(3).map(\.name),
             agentSessions: state.agentSessions,
             ciRuns: state.ciRuns,
+            recentAlerts: state.recentDevReadyAlerts,
             showMedia: settings.showExpandedMedia,
             showActiveApp: settings.showExpandedActiveApp,
             showVolume: settings.showExpandedVolume,
@@ -58,7 +59,8 @@ enum NotchContentSnapshot {
             showBattery: settings.showExpandedBattery,
             showShelf: settings.showExpandedShelf,
             showAgents: settings.showExpandedAgents,
-            showCI: settings.showExpandedCI
+            showCI: settings.showExpandedCI,
+            showRecentAlerts: settings.showExpandedRecentActivity
         )
         // Smaller pill, fewer cards. The builder already returns them in
         // priority order, so this drops the least important tail rather than

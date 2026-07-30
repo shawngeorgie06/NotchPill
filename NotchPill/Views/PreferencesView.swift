@@ -96,6 +96,7 @@ struct PreferencesView: View {
         var out: [(String, String)] = []
         if settings.showExpandedAgents { out.append(("agents", "Live agents")) }
         if settings.showExpandedCI { out.append(("ci", "CI status")) }
+        if settings.showExpandedRecentActivity { out.append(("recentAlerts", "Recent activity")) }
         if settings.showExpandedMedia { out.append(("media", "Now playing")) }
         if settings.showExpandedActiveApp { out.append(("activeApp", "Active app")) }
         if settings.showExpandedCalendar { out.append(("calendar", "Calendar")) }
@@ -137,6 +138,7 @@ struct PreferencesView: View {
             Divider().padding(.vertical, 2)
             Toggle("Live agents", isOn: $settings.showExpandedAgents)
             Toggle("CI status", isOn: $settings.showExpandedCI)
+            Toggle("Recent activity", isOn: $settings.showExpandedRecentActivity)
             Toggle("Now playing", isOn: $settings.showExpandedMedia)
             Toggle("Timer", isOn: $settings.showExpandedTimer)
             Toggle("Active app", isOn: $settings.showExpandedActiveApp)

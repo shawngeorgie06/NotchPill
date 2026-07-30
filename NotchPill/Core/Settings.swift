@@ -73,6 +73,9 @@ final class AppSettings: ObservableObject {
     @Published var showExpandedCI: Bool {
         didSet { defaults.set(showExpandedCI, forKey: Keys.showExpandedCI) }
     }
+    @Published var showExpandedRecentActivity: Bool {
+        didSet { defaults.set(showExpandedRecentActivity, forKey: Keys.showExpandedRecentActivity) }
+    }
     /// How much of the row each card gets, relative to the others. 1.0 is an
     /// equal share; a card at 2.0 takes twice the width of one at 1.0. Stored
     /// per card kind so it survives cards coming and going.
@@ -224,6 +227,7 @@ final class AppSettings: ObservableObject {
         static let showExpandedShelf = "showExpandedShelf"
         static let showExpandedAgents = "showExpandedAgents"
         static let showExpandedCI = "showExpandedCI"
+        static let showExpandedRecentActivity = "showExpandedRecentActivity"
         static let cardWeights = "cardWeights"
         static let notchScale = "notchScale"
         static let showDevReadyPings = "showDevReadyPings"
@@ -262,6 +266,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedShelf: false,
             Keys.showExpandedAgents: true,
             Keys.showExpandedCI: true,
+            Keys.showExpandedRecentActivity: false,
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 13.0,
@@ -294,6 +299,7 @@ final class AppSettings: ObservableObject {
         showExpandedShelf = defaults.bool(forKey: Keys.showExpandedShelf)
         showExpandedAgents = defaults.bool(forKey: Keys.showExpandedAgents)
         showExpandedCI = defaults.bool(forKey: Keys.showExpandedCI)
+        showExpandedRecentActivity = defaults.bool(forKey: Keys.showExpandedRecentActivity)
         cardWeights = (defaults.dictionary(forKey: Keys.cardWeights) as? [String: Double]) ?? [:]
         notchScale = AppSettings.clampNotchScale(defaults.double(forKey: Keys.notchScale))
         showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
@@ -345,6 +351,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedShelf: false,
             Keys.showExpandedAgents: true,
             Keys.showExpandedCI: true,
+            Keys.showExpandedRecentActivity: false,
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: 13.0,
@@ -377,6 +384,7 @@ final class AppSettings: ObservableObject {
         showExpandedShelf = false
         showExpandedAgents = true
         showExpandedCI = true
+        showExpandedRecentActivity = false
         cardWeights = [:]
         notchScale = AppSettings.defaultNotchScale
         showDevReadyPings = true
