@@ -504,6 +504,7 @@ struct DevReadyPeekRow: View {
     var isFocused = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
+    @State private var dismissOffset: CGFloat = 0
 
     /// Reply/answer affordances. The rule lives on the alert so the height
     /// budget in `NotchContentLayout` reads the same one.
@@ -588,13 +589,9 @@ struct DevReadyPeekRow: View {
             // swipe can clear one without switching focus to its source app.
             // Waiting rows intentionally ignore this gesture: an approval must
             // always require the explicit × or Esc dismissal path.
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 12).onEnded { value in
-                    guard alert.kind == .finished,
-                          DevReadyDismissSwipe.isDismissal(translation: value.translation) else { return }
-                    actions.dismissPeek(alert.id)
-                }
-            )
+            .offset(x: dismissOffset)
+            .opacity(1 - min(abs(dismissOffset) / 180, 0.45))
+            .simultaneousGesture(dismissGesture)
             .accessibilityHint(alert.kind == .finished
                                ? "Swipe left to dismiss, or double tap to open"
                                : "Double tap to open")
@@ -645,6 +642,27 @@ struct DevReadyPeekRow: View {
             .accessibilityLabel("Dismiss")
             .padding(.trailing, 8)
         }
+    }
+
+    private var dismissGesture: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                guard alert.kind == .finished,
+                      abs(value.translation.width) > abs(value.translation.height) else { return }
+                // Only move left, matching the action; a right drag leaves the
+                // row in place instead of implying a second, hidden action.
+                dismissOffset = max(-150, min(0, value.translation.width))
+            }
+            .onEnded { value in
+                guard alert.kind == .finished else { return }
+                if DevReadyDismissSwipe.isDismissal(translation: value.translation) {
+                    actions.dismissPeek(alert.id)
+                } else {
+                    withAnimation(reduceMotion ? .linear(duration: 0.01) : .spring(response: 0.24, dampingFraction: 0.82)) {
+                        dismissOffset = 0
+                    }
+                }
+            }
     }
 
     /// `.waiting`-only: the agent's question, always visible, plus quick-answer
@@ -1021,7 +1039,7 @@ struct ExpandedActivityCard: View {
             HStack(spacing: s(4)) {
                 Image(systemName: "bell.badge")
                     .font(.system(size: s(9)))
-                Text("Recent")
+                Text("Recent activity")
                     .font(font(size: 10, weight: .semibold))
                 Spacer(minLength: 0)
                 Button("Clear") { actions.clearRecentActivity() }
@@ -1032,13 +1050,19 @@ struct ExpandedActivityCard: View {
             .foregroundStyle(.white.opacity(0.45))
             ForEach(alerts) { alert in
                 Button { if let bundleId = alert.bundleId { actions.focusApp(bundleId) } } label: {
-                    HStack(alignment: .top, spacing: s(5)) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(alert.displayTitle).font(font(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
+                    HStack(alignment: .top, spacing: s(6)) {
+                        VStack(alignment: .leading, spacing: s(1)) {
+                            Text(alert.displayTitle)
+                                .font(font(size: 11, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.92))
+                                .lineLimit(1)
                         if let subtitle = alert.displaySubtitle, !subtitle.isEmpty {
-                            Text(subtitle).font(font(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
+                            Text(subtitle)
+                                .font(font(size: 9, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.48))
+                                .lineLimit(1)
                         }
-                    }
+                        }
                     Text(alert.shortAgeText())
                         .font(font(size: 9, weight: .medium))
                         .foregroundStyle(.white.opacity(0.38))
