@@ -13,6 +13,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.setActivationPolicy(.accessory)
 
+        // First line in the log, so an exported report always says which build
+        // and which permissions produced everything below it.
+        LogStore.log("app", "launched "
+            + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
+                as? String ?? "?")
+            + " · accessibility "
+            + (AccessibilityAuthorization.isGranted ? "granted" : "NOT granted"))
+
         let menuBar = MenuBarController()
         menuBar.install()
         self.menuBar = menuBar

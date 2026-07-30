@@ -770,13 +770,27 @@ final class NotchController {
         Task { [weak self] in
             guard let self else { return }
             let runs = await ciStatus.runs(forDirectories: dirs)
-            await MainActor.run { self.state.ciRuns = runs }
+            await MainActor.run {
+                if runs.count != self.state.ciRuns.count {
+                    LogStore.log("ci", "\(runs.count) run(s) from \(dirs.count) agent director"
+                        + (dirs.count == 1 ? "y" : "ies"))
+                }
+                self.state.ciRuns = runs
+            }
         }
     }
 
     private func presentDevReady(_ alert: DevReadyAlert, origin: String = "?") {
-        guard AppSettings.shared.showDevReadyPings else { return }
+        guard AppSettings.shared.showDevReadyPings else {
+            LogStore.log("peek", "suppressed (peeks are switched off) from=\(origin)", level: .warn)
+            return
+        }
         Self.logPeek(alert, origin: origin)
+        // Branding, not content: which agent it claims to be and whether we
+        // recognised it is what every mislabelled-peek report has turned on.
+        LogStore.log("peek", "\(alert.kind) from=\(origin) agent=\(alert.agent ?? "-") "
+            + "shows=\(alert.knownAgent.map(String.init(describing:)) ?? "unknown") "
+            + "session=\(alert.sessionId?.prefix(8) ?? "-")")
         // A pending prompt is never written to a transcript, so the sessions
         // list cannot see "waiting" on its own for the terminal agents. The
         // peek is the only carrier of that fact.

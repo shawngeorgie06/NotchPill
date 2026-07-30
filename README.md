@@ -297,6 +297,21 @@ Views/                  → SwiftUI overlay (NotchRootView, Tiles, PreferencesVi
 
 ## Diagnostics
 
+**NotchPill menu bar icon → Show Log…** opens a live view of what the app is
+doing: which build launched and whether Accessibility was granted, agent scans,
+CI polls, peeks arriving and how each one decided its badge. It is capped at 600
+lines and kept in memory, so it starts empty at every launch and never touches
+your disk.
+
+**→ Copy Diagnostics** puts a report on the clipboard for a bug report: version,
+macOS, Accessibility, whether the agent hooks and `gh` are present, which cards
+are on, and the log. Home paths are shortened to `~` and no prompt or task text
+is included, so it can be pasted into an issue as-is.
+
+The environment flags below predate that window and write to files instead. They
+record project names and agent text, which the in-app log deliberately does not
+— reach for them only when the window is not enough.
+
 Environment flags (off by default):
 
 - `NOTCHPILL_DIAG=1` — geometry assertions and debounce burst test, then exit.

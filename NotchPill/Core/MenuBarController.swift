@@ -89,6 +89,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guide.target = self
         menu.addItem(guide)
 
+        let logItem = NSMenuItem(title: "Show Log…", action: #selector(showLog), keyEquivalent: "")
+        logItem.target = self
+        menu.addItem(logItem)
+
+        let report = NSMenuItem(title: "Copy Diagnostics",
+                                action: #selector(copyDiagnostics), keyEquivalent: "")
+        report.target = self
+        menu.addItem(report)
+
         menu.addItem(.separator())
 
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
@@ -174,6 +183,25 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func showOnboarding() {
         OnboardingController.shared.show()
+    }
+
+    @objc private func showLog() {
+        LogViewerController.shared.show()
+    }
+
+    /// Straight to the clipboard rather than a save panel: this exists to be
+    /// pasted into an issue, and a file on the Desktop is one more step and one
+    /// more thing to delete afterwards.
+    @objc private func copyDiagnostics() {
+        let report = DiagnosticsReport.current()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report, forType: .string)
+        presentAgentHookResult(
+            title: "Diagnostics copied",
+            body: "A report is on your clipboard — paste it into a bug report.\n\n"
+                + "It contains your NotchPill version, macOS version, which "
+                + "permissions and cards are on, and the log. Home paths are "
+                + "shortened to ~, and no prompt or task text is included.")
     }
 
     private func presentAgentHookResult(title: String, body: String) {

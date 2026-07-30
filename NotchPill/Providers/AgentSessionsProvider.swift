@@ -133,6 +133,15 @@ final class AgentSessionsProvider {
         lastLabels = labels
         lastPublished = ordered
         Self.log(ordered)
+        // Counts and states only — the project names and task text that make
+        // the file log private stay out of the in-app one.
+        let states = Dictionary(grouping: ordered, by: { $0.state.name })
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value.count)" }
+            .joined(separator: " ")
+        LogStore.log("agents", ordered.isEmpty
+            ? "no live sessions"
+            : "\(ordered.count) session(s): \(states)")
         onUpdate?(ordered)
     }
 }

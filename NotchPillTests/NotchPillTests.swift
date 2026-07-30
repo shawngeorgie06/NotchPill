@@ -2291,3 +2291,99 @@ struct ShortcutArmingTests {
         #expect(step(&a, 702, 900, inZone: true) == true)
     }
 }
+
+// MARK: - Log store
+
+@Suite("Log ring buffer")
+struct LogStoreTests {
+    private func entries(_ n: Int) -> [LogEntry] {
+        (0..<n).map { LogEntry(id: UInt64($0), date: Date(), level: .info,
+                               category: "test", message: "m\($0)") }
+    }
+
+    @Test("under capacity, nothing is dropped")
+    func keepsEverything() {
+        let kept = LogStore.trim(entries(10), to: 600)
+        #expect(kept.count == 10)
+    }
+
+    // The oldest lines go, not the newest — the tail is what you were doing
+    // when the thing you are chasing happened.
+    @Test("over capacity, the oldest go first")
+    func dropsOldest() {
+        let kept = LogStore.trim(entries(700), to: 600)
+        #expect(kept.count == 600)
+        #expect(kept.first?.message == "m100")
+        #expect(kept.last?.message == "m699")
+    }
+
+    @Test("a zero capacity keeps nothing rather than crashing")
+    func zeroCapacity() {
+        #expect(LogStore.trim(entries(5), to: 0).isEmpty)
+    }
+
+    @Test("a line carries its level, category and message")
+    func lineFormat() {
+        let e = LogEntry(id: 1, date: Date(timeIntervalSince1970: 0), level: .error,
+                         category: "peek", message: "boom")
+        let line = e.line(formatter: LogStore.lineFormatter)
+        #expect(line.contains("[peek]"))
+        #expect(line.contains("boom"))
+        #expect(line.contains(LogEntry.Level.error.symbol))
+    }
+}
+
+@Suite("Diagnostics report")
+struct DiagnosticsReportTests {
+    private var facts: DiagnosticsReport.Facts {
+        .init(appVersion: "1.13.0", systemVersion: "Version 26.0",
+              accessibilityGranted: true, hooksInstalled: false, ghAvailable: true,
+              enabledCards: ["agents", "ci"], notchScale: 0.9,
+              cardWeights: ["agents": 3.0, "ci": 0.75],
+              logLines: "12:00:00.000 · [app] launched",
+              home: "/Users/someone")
+    }
+
+    // The whole point is that it can be pasted into a public issue without
+    // thinking about it, and the account name is the thing that would leak.
+    @Test("home paths are collapsed to ~")
+    func redactsHome() {
+        let text = DiagnosticsReport.redact(
+            "hook at /Users/someone/.claude/settings.json", home: "/Users/someone")
+        #expect(text == "hook at ~/.claude/settings.json")
+        #expect(!text.contains("someone"))
+    }
+
+    @Test("a report redacts the log it carries too")
+    func redactsInsideLog() {
+        var f = facts
+        f.logLines = "· [hooks] wrote /Users/someone/.codex/config.toml"
+        let report = DiagnosticsReport.build(f)
+        #expect(!report.contains("/Users/someone"))
+        #expect(report.contains("~/.codex/config.toml"))
+    }
+
+    @Test("an empty or root home is left alone")
+    func degenerateHome() {
+        #expect(DiagnosticsReport.redact("/a/b", home: "") == "/a/b")
+        #expect(DiagnosticsReport.redact("/a/b", home: "/") == "/a/b")
+    }
+
+    // Every field here has explained a real bug report at least once.
+    @Test("the report states the facts that decide most problems")
+    func statesTheFacts() {
+        let report = DiagnosticsReport.build(facts)
+        #expect(report.contains("1.13.0"))
+        #expect(report.contains("granted"))
+        #expect(report.contains("not installed"))
+        #expect(report.contains("agents, ci"))
+        #expect(report.contains("90%"))
+    }
+
+    @Test("an empty log says so rather than trailing off")
+    func emptyLog() {
+        var f = facts
+        f.logLines = ""
+        #expect(DiagnosticsReport.build(f).contains("(empty"))
+    }
+}

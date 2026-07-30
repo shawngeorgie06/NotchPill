@@ -88,6 +88,10 @@ actor CIStatusProvider {
 
     // MARK: - Shell
 
+    /// Whether the CI card can work at all, for the diagnostics report — "no
+    /// card" and "gh isn't installed" look identical from the outside.
+    nonisolated static var hasGH: Bool { findGH() != nil }
+
     private static func findGH() -> String? {
         // A GUI app inherits a minimal PATH, so `gh` is looked for where it
         // actually lives rather than trusted to be on it.

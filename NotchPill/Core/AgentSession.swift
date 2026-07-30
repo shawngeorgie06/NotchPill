@@ -14,6 +14,16 @@ struct AgentSession: Equatable, Identifiable {
         case waiting
         /// Alive but quiet. `since` is when it went quiet, so the row can age.
         case idle(since: Date)
+
+        /// Name without the payload — for logging, where the timestamp inside
+        /// `.idle` would make every entry look different.
+        var name: String {
+            switch self {
+            case .working: return "working"
+            case .waiting: return "waiting"
+            case .idle: return "idle"
+            }
+        }
     }
 
     var id: String

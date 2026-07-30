@@ -65,7 +65,14 @@ enum AgentHooks {
                 output = "Couldn't run the setup script: \(error.localizedDescription)"
             }
             let cleaned = cleanOutput(output)
-            DispatchQueue.main.async { completion(cleaned) }
+            DispatchQueue.main.async {
+                // Which agents ended up wired is the single most common cause of
+                // "the notch stopped telling me anything".
+                LogStore.log("hooks", "installer finished — "
+                    + (isInstalled() ? "at least one agent wired up" : "nothing wired up"),
+                    level: isInstalled() ? .info : .warn)
+                completion(cleaned)
+            }
         }
     }
 }
