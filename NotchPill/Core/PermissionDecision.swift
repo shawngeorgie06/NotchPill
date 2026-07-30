@@ -92,6 +92,15 @@ struct PermissionDecision: Equatable {
                                   verdict: Verdict(raw),
                                   reason: root["reason"] as? String)
     }
+
+    /// A concise, bounded reason for returning a Claude plan. This goes only
+    /// through the decision file to the blocked hook; it is never logged or
+    /// synthesised as a keystroke into an arbitrary window.
+    static func planRevisionReason(_ feedback: String) -> String? {
+        let trimmed = feedback.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return "Plan revision: " + String(trimmed.prefix(600))
+    }
 }
 
 extension PermissionDecision.Verdict {

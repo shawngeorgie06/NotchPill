@@ -11,6 +11,10 @@ struct NotchActions {
     var dismissPeek: (String) -> Void
     var beginReply: (DevReadyAlert) -> Void
     var sendReply: (DevReadyAlert, String) -> Void
+    /// Open a feedback field that returns a plan for revision through the
+    /// waiting PreToolUse hook, rather than typing into a terminal.
+    var beginPlanRevision: (DevReadyAlert) -> Void
+    var submitPlanRevision: (DevReadyAlert, String) -> Void
     var answer: (DevReadyAlert, AgentAnswer) -> Void
     var clearRecentActivity: () -> Void = {}
     /// Bring forward the app this agent session is running in.
@@ -23,6 +27,7 @@ struct NotchActions {
         focusApp: { _ in }, dismissDevReady: { _ in },
         dismissPeek: { _ in },
         beginReply: { _ in }, sendReply: { _, _ in },
+        beginPlanRevision: { _ in }, submitPlanRevision: { _, _ in },
         answer: { _, _ in },
         clearRecentActivity: {},
         focusAgentSession: { _ in },

@@ -242,6 +242,8 @@ final class NotchController {
             dismissPeek: { [weak self] id in self?.dismissPeek(id: id) },
             beginReply: { [weak self] alert in self?.state.beginReply(to: alert) },
             sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) },
+            beginPlanRevision: { [weak self] alert in self?.state.beginPlanRevision(for: alert) },
+            submitPlanRevision: { [weak self] alert, text in self?.performPlanRevision(alert: alert, feedback: text) },
             answer: { [weak self] alert, ans in self?.performAnswer(alert: alert, answer: ans) },
             clearRecentActivity: { [weak self] in self?.state.clearRecentDevReady() },
             focusAgentSession: { [weak self] session in self?.focusAgentSession(session) },
@@ -461,7 +463,7 @@ final class NotchController {
         if let compose = state.replyCompose {
             return NotchContentLayout.replyComposeLayout(
                 metrics: metrics,
-                hasQuestion: compose.targetAlert.questionText != nil
+                hasQuestion: compose.contextText != nil
             ).size
         }
         if !state.devReadyAlerts.isEmpty { return devReadyContentSize() }
@@ -1153,6 +1155,31 @@ final class NotchController {
             return
         }
         dismissDevReady(id: alert.id)   // dismiss the answered waiting peek
+    }
+
+    /// Sends plan feedback over the same file-backed verdict channel as Allow.
+    /// A plan is not terminal input: Claude's hook is still waiting, so this
+    /// reaches the precise process even if no terminal app is open.
+    private func performPlanRevision(alert: DevReadyAlert, feedback: String) {
+        guard alert.permissionRequest?.isPlan == true, let requestId = alert.requestId else {
+            state.setReplyError("This plan is no longer waiting")
+            return
+        }
+        guard let reason = PermissionDecision.planRevisionReason(feedback) else {
+            state.setReplyError("Add what you want changed")
+            return
+        }
+        do {
+            try PermissionDecision(requestId: requestId, verdict: .deny, reason: reason).write()
+            LogStore.log("permission", "plan revision " + requestId)
+            state.cancelReply()
+            dismissDevReady(id: alert.id)
+        } catch {
+            // The hook's timeout falls back to Claude's normal prompt, which is
+            // safer than claiming the feedback reached a process that never got it.
+            LogStore.log("permission", "could not revise plan: \(error)", level: .warn)
+            state.setReplyError("Couldn't send revision")
+        }
     }
 
     /// Appends one line per peek to `~/.notchpill/peeks.log`.

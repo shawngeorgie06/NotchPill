@@ -243,6 +243,10 @@ final class NotchState: ObservableObject {
         replyCompose = ReplyComposeState(targetAlert: alert)
     }
 
+    func beginPlanRevision(for alert: DevReadyAlert) {
+        replyCompose = ReplyComposeState(targetAlert: alert, mode: .planRevision)
+    }
+
     func updateReplyDraft(_ text: String) {
         guard replyCompose != nil else { return }
         replyCompose?.draft = text
@@ -261,7 +265,14 @@ final class NotchState: ObservableObject {
 
 /// The in-notch reply composer's state: which agent it targets and the draft.
 struct ReplyComposeState: Equatable {
+    enum Mode: Equatable { case reply, planRevision }
+
     var targetAlert: DevReadyAlert
+    var mode: Mode = .reply
     var draft: String = ""
     var errorText: String? = nil
+
+    var contextText: String? {
+        mode == .planRevision ? "Tell Claude what to change before it starts." : targetAlert.questionText
+    }
 }

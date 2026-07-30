@@ -40,8 +40,10 @@ enum AgentSessionLocator {
     static func focus(sessionId: String?, fallbackBundleId: String?) -> Bool {
         let table = processTable()
         let candidateEntries: [Entry] = sessionId.map { candidates(forSessionId: $0, in: table) } ?? []
-        let target: String? = candidateEntries.lazy.compactMap { bundleId(walkingUpFrom: $0.pid, in: table) }.first
-            ?? fallbackBundleId
+        let located = candidateEntries.lazy.compactMap { entry in
+            bundleId(walkingUpFrom: entry.pid, in: table).map { (entry, $0) }
+        }.first
+        let target: String? = located?.1 ?? fallbackBundleId
         guard let target, !target.isEmpty else { return false }
 
         // Terminal exposes each tab's TTY to AppleScript. That lets us return
@@ -50,9 +52,16 @@ enum AgentSessionLocator {
         // process, so this is intentionally best-effort and falls through to
         // the normal focus path in every failure case.
         if target == "com.apple.Terminal",
-           let pid = candidateEntries.first?.pid,
+           let pid = located?.0.pid,
            let tty = controllingTTY(for: pid),
            focusTerminalTab(tty: tty) {
+            return true
+        }
+
+        if target == "com.googlecode.iterm2",
+           let pid = located?.0.pid,
+           let tty = controllingTTY(for: pid),
+           focusITermSession(tty: tty) {
             return true
         }
 
@@ -117,8 +126,19 @@ enum AgentSessionLocator {
     }
 
     private static func focusTerminalTab(tty: String) -> Bool {
+        runAppleScript(terminalFocusScript(tty: tty))
+    }
+
+    /// iTerm2's AppleScript dictionary exposes each split-pane session's TTY
+    /// and `select` operations at every level. Unlike an accessibility-tree
+    /// guess, this returns the process to the exact pane that owns it.
+    private static func focusITermSession(tty: String) -> Bool {
+        runAppleScript(iTermFocusScript(tty: tty))
+    }
+
+    private static func runAppleScript(_ source: String) -> Bool {
         var error: NSDictionary?
-        let result = NSAppleScript(source: terminalFocusScript(tty: tty))?
+        let result = NSAppleScript(source: source)?
             .executeAndReturnError(&error)
         return error == nil && result?.booleanValue == true
     }
@@ -126,9 +146,7 @@ enum AgentSessionLocator {
     /// Exposed for a small pure test. Inputs are escaped before being placed in
     /// AppleScript, even though a real TTY cannot normally contain quotes.
     static func terminalFocusScript(tty: String) -> String {
-        let escaped = tty
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
+        let escaped = escapedAppleScriptString(tty)
         return """
         tell application "Terminal"
             activate
@@ -144,6 +162,36 @@ enum AgentSessionLocator {
             return false
         end tell
         """
+    }
+
+    /// Exposed for a pure test. iTerm sessions remain distinct in split panes,
+    /// so selecting all three levels is required for a true return-to-work.
+    static func iTermFocusScript(tty: String) -> String {
+        let escaped = escapedAppleScriptString(tty)
+        return """
+        tell application "iTerm2"
+            activate
+            repeat with terminalWindow in windows
+                repeat with terminalTab in tabs of terminalWindow
+                    repeat with terminalSession in sessions of terminalTab
+                        if tty of terminalSession is "\(escaped)" then
+                            tell terminalWindow to select
+                            tell terminalTab to select
+                            tell terminalSession to select
+                            return true
+                        end if
+                    end repeat
+                end repeat
+            end repeat
+            return false
+        end tell
+        """
+    }
+
+    private static func escapedAppleScriptString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
     /// Split out so the walk can be tested without spawning anything.

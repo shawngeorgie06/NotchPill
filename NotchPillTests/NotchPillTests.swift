@@ -1838,6 +1838,15 @@ struct LocatorChoiceTests {
         #expect(script.contains(#"tty of terminalTab is \"/dev/ttys\\\"012\""#))
         #expect(script.contains("set selected tab of terminalWindow to terminalTab"))
     }
+
+    @Test("iTerm script selects the exact split-pane session")
+    func iTermSessionScriptUsesTTY() {
+        let script = AgentSessionLocator.iTermFocusScript(tty: "/dev/ttys012")
+        #expect(script.contains("tty of terminalSession is \"/dev/ttys012\""))
+        #expect(script.contains("tell terminalWindow to select"))
+        #expect(script.contains("tell terminalTab to select"))
+        #expect(script.contains("tell terminalSession to select"))
+    }
 }
 
 @Suite("Sub-agent path parsing")
@@ -3087,6 +3096,16 @@ struct PermissionRequestTests {
         #expect(PermissionRequest.parse(payload: Data(json.utf8))?.summary == "rm -rf build")
     }
 
+    @Test("an ExitPlanMode request previews the proposed plan")
+    func exitPlanMode() {
+        let request = PermissionRequest.parse(tool: "ExitPlanMode", input: [
+            "plan": "# Approach\n1. Inspect the model\n2. Make the change",
+        ])
+        #expect(request?.isPlan == true)
+        #expect(request?.summary == "Review plan")
+        #expect(request?.planPreviewLines == ["# Approach", "1. Inspect the model", "2. Make the change"])
+    }
+
     // A command line is the likeliest place for a credential, and this renders
     // on an overlay above every window.
     @Test("a token in a command never reaches the peek")
@@ -3167,6 +3186,14 @@ struct PermissionDecisionTests {
 
         let data = try Data(contentsOf: PermissionDecision.file(for: "req-2", home: home))
         #expect(PermissionDecision.parse(data)?.reason == "not that file")
+    }
+
+    @Test("Plan feedback becomes a bounded denial reason")
+    func planRevisionReason() {
+        #expect(PermissionDecision.planRevisionReason("  split the migration first  ")
+                == "Plan revision: split the migration first")
+        #expect(PermissionDecision.planRevisionReason(" \n ") == nil)
+        #expect(PermissionDecision.planRevisionReason(String(repeating: "x", count: 700))?.count == 615)
     }
 
     @Test("Two requests answered at once do not read each other's verdict")

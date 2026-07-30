@@ -27,7 +27,7 @@ struct NotchRootView: View {
         if let compose = state.replyCompose {
             return NotchContentLayout.replyComposeLayout(
                 metrics: metrics,
-                hasQuestion: compose.targetAlert.questionText != nil
+                hasQuestion: compose.contextText != nil
             )
         }
         if !state.devReadyAlerts.isEmpty {
@@ -268,15 +268,15 @@ struct ReplyComposeView: View {
             // The question, verbatim, above the field. The whole point of
             // answering from the notch is not having to switch back to the
             // terminal — which you'd have to do just to re-read what was asked.
-            if let question = compose.targetAlert.questionText {
-                Text(question)
+            if let context = compose.contextText {
+                Text(context)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.75))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            TextField(compose.targetAlert.questionText != nil ? "Your answer…" : "Reply…",
+            TextField(compose.mode == .planRevision ? "What should change?" : (compose.targetAlert.questionText != nil ? "Your answer…" : "Reply…"),
                       text: Binding(
                 get: { state.replyCompose?.draft ?? "" },
                 set: { state.updateReplyDraft($0) }
@@ -285,7 +285,14 @@ struct ReplyComposeView: View {
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(.white)
             .focused($fieldFocused)
-            .onSubmit { actions.sendReply(compose.targetAlert, state.replyCompose?.draft ?? "") }
+            .onSubmit {
+                let draft = state.replyCompose?.draft ?? ""
+                if compose.mode == .planRevision {
+                    actions.submitPlanRevision(compose.targetAlert, draft)
+                } else {
+                    actions.sendReply(compose.targetAlert, draft)
+                }
+            }
             .onExitCommand { state.cancelReply() }   // Esc
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
@@ -296,7 +303,7 @@ struct ReplyComposeView: View {
                     .foregroundStyle(.orange)
                     .lineLimit(1)
             } else {
-                Text("Enter to send · ✕ to close")
+                Text(compose.mode == .planRevision ? "Enter to request revision · ✕ to close" : "Enter to send · ✕ to close")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.35))
             }

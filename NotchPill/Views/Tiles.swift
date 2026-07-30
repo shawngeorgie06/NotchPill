@@ -682,36 +682,57 @@ struct DevReadyPeekRow: View {
                     .padding(.horizontal, 12)
             }
             if canAnswer {
-                // The set comes from the alert, not a constant: an agent that
-                // declares `Approve:a|Deny:d` gets those buttons and those keys.
-                let answers = alert.answers
-                HStack(spacing: NotchContentLayout.answerButtonSpacing) {
-                    ForEach(answers.indices, id: \.self) { i in
-                        let ans = answers[i]
-                        Button { actions.answer(alert, ans) } label: {
-                            Text(ans.label)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.9))
-                                .lineLimit(1)
-                                .padding(.horizontal, 14)
-                                .frame(minWidth: NotchContentLayout.answerButtonHeight,
-                                       minHeight: NotchContentLayout.answerButtonHeight)
-                                .background(Capsule().fill(Color.white.opacity(0.14)))
-                                // Without this the capsule's transparent corners
-                                // don't take clicks, so the target is smaller than
-                                // it looks — the reason these felt fiddly.
-                                .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        // "1"/"2"/"3" are meaningless read aloud on their own.
-                        .accessibilityLabel(ans.accessibilityLabel)
-                        .help(ans.accessibilityLabel)
+                Group {
+                    if alert.permissionRequest?.isPlan == true {
+                        planReviewButtons
+                    } else {
+                        answerButtons(alert.answers)
                     }
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 6)
             }
         }
+    }
+
+    private var planReviewButtons: some View {
+        HStack(spacing: NotchContentLayout.answerButtonSpacing) {
+            answerButton(label: "Approve", accessibilityLabel: "Approve plan") {
+                actions.answer(alert, AgentAnswer(label: "Approve", keystroke: "allow"))
+            }
+            answerButton(label: "Revise", accessibilityLabel: "Request plan revisions") {
+                actions.beginPlanRevision(alert)
+            }
+        }
+    }
+
+    private func answerButtons(_ answers: [AgentAnswer]) -> some View {
+        HStack(spacing: NotchContentLayout.answerButtonSpacing) {
+            ForEach(answers.indices, id: \.self) { i in
+                let answer = answers[i]
+                answerButton(label: answer.label, accessibilityLabel: answer.accessibilityLabel) {
+                    actions.answer(alert, answer)
+                }
+            }
+        }
+    }
+
+    private func answerButton(label: String, accessibilityLabel: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
+                .padding(.horizontal, 14)
+                .frame(minWidth: NotchContentLayout.answerButtonHeight,
+                       minHeight: NotchContentLayout.answerButtonHeight)
+                .background(Capsule().fill(Color.white.opacity(0.14)))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .help(accessibilityLabel)
     }
 
     /// What the agent is asking to do, drawn as the thing you would decide on:
