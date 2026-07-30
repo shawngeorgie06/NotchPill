@@ -245,6 +245,13 @@ struct SystemHUDSourceTests {
         #expect(BrightnessProvider.percent(from: 0.625) == 63)
         #expect(BrightnessProvider.percent(from: 1.5) == 100)
     }
+
+    @Test("HUD duration stays within a readable range")
+    func hudDurationClamp() {
+        #expect(AppSettings.clampSystemHUDDuration(0.1) == 0.8)
+        #expect(AppSettings.clampSystemHUDDuration(1.7) == 1.7)
+        #expect(AppSettings.clampSystemHUDDuration(9) == 3.0)
+    }
 }
 
 @Suite("Dev-ready dismiss gesture")

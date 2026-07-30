@@ -174,6 +174,19 @@ final class AppSettings: ObservableObject {
     @Published var showMicrophoneHUD: Bool {
         didSet { defaults.set(showMicrophoneHUD, forKey: Keys.showMicrophoneHUD) }
     }
+    /// How long a system HUD remains visible after its state changes.
+    @Published var systemHUDDuration: Double {
+        didSet {
+            let clamped = AppSettings.clampSystemHUDDuration(systemHUDDuration)
+            if clamped != systemHUDDuration { systemHUDDuration = clamped; return }
+            defaults.set(systemHUDDuration, forKey: Keys.systemHUDDuration)
+        }
+    }
+    nonisolated static let systemHUDDurationRange: ClosedRange<Double> = 0.8...3.0
+    nonisolated static func clampSystemHUDDuration(_ value: Double) -> Double {
+        guard value.isFinite else { return 1.4 }
+        return min(max(value, systemHUDDurationRange.lowerBound), systemHUDDurationRange.upperBound)
+    }
     @Published var autoCheckUpdates: Bool {
         didSet { defaults.set(autoCheckUpdates, forKey: Keys.autoCheckUpdates) }
     }
@@ -219,6 +232,7 @@ final class AppSettings: ObservableObject {
         static let showVolumeHUD = "showVolumeHUD"
         static let showBrightnessHUD = "showBrightnessHUD"
         static let showMicrophoneHUD = "showMicrophoneHUD"
+        static let systemHUDDuration = "systemHUDDuration"
         static let autoCheckUpdates = "autoCheckUpdates"
         static let agentReplyEnabled = "agentReplyEnabled"
         static let watchAgentTranscripts = "watchAgentTranscripts"
@@ -255,6 +269,7 @@ final class AppSettings: ObservableObject {
             Keys.showVolumeHUD: true,
             Keys.showBrightnessHUD: true,
             Keys.showMicrophoneHUD: true,
+            Keys.systemHUDDuration: 1.4,
             Keys.autoCheckUpdates: true,
             Keys.agentReplyEnabled: true,
         ])
@@ -288,6 +303,7 @@ final class AppSettings: ObservableObject {
         showVolumeHUD = defaults.object(forKey: Keys.showVolumeHUD) as? Bool ?? true
         showBrightnessHUD = defaults.object(forKey: Keys.showBrightnessHUD) as? Bool ?? true
         showMicrophoneHUD = defaults.object(forKey: Keys.showMicrophoneHUD) as? Bool ?? true
+        systemHUDDuration = AppSettings.clampSystemHUDDuration(defaults.object(forKey: Keys.systemHUDDuration) as? Double ?? 1.4)
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
         agentReplyEnabled = defaults.object(forKey: Keys.agentReplyEnabled) as? Bool ?? true
         watchAgentTranscripts = defaults.object(forKey: Keys.watchAgentTranscripts) as? Bool ?? true
@@ -336,6 +352,7 @@ final class AppSettings: ObservableObject {
             Keys.showVolumeHUD: true,
             Keys.showBrightnessHUD: true,
             Keys.showMicrophoneHUD: true,
+            Keys.systemHUDDuration: 1.4,
             Keys.autoCheckUpdates: true,
             Keys.agentReplyEnabled: true,
         ]
@@ -368,6 +385,7 @@ final class AppSettings: ObservableObject {
         showVolumeHUD = true
         showBrightnessHUD = true
         showMicrophoneHUD = true
+        systemHUDDuration = 1.4
         autoCheckUpdates = true
         agentReplyEnabled = true
         watchAgentTranscripts = true

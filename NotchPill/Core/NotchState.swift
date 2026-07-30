@@ -136,7 +136,7 @@ final class NotchState: ObservableObject {
         volumeHideItem?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.volumeLevel = nil }
         volumeHideItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + AppSettings.shared.systemHUDDuration, execute: item)
     }
 
     /// Updates the stored volume without flashing the HUD.
@@ -150,7 +150,7 @@ final class NotchState: ObservableObject {
         brightnessHideItem?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.brightnessLevel = nil }
         brightnessHideItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + AppSettings.shared.systemHUDDuration, execute: item)
     }
 
     /// Shows whether the current default microphone was muted or unmuted.
@@ -159,7 +159,7 @@ final class NotchState: ObservableObject {
         microphoneHideItem?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.microphoneMuted = nil }
         microphoneHideItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + AppSettings.shared.systemHUDDuration, execute: item)
     }
 
     func updateSystemStats(_ stats: SystemStats?) {

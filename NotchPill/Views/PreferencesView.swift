@@ -182,6 +182,16 @@ struct PreferencesView: View {
             Toggle("Volume", isOn: $settings.showVolumeHUD)
             Toggle("Brightness", isOn: $settings.showBrightnessHUD)
             Toggle("Microphone mute", isOn: $settings.showMicrophoneHUD)
+            HStack {
+                Text("Display duration")
+                Spacer()
+                Text(String(format: "%.1fs", settings.systemHUDDuration))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: $settings.systemHUDDuration,
+                   in: AppSettings.systemHUDDurationRange,
+                   step: 0.1)
             Text("Brightness is shown for the built-in display. Microphone mute is shown only when the current input device reports that state.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
