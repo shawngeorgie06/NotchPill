@@ -110,9 +110,10 @@ actor AgentSessionScanner {
     ///
     /// Claude Code writes a `last-prompt` record whose `lastPrompt` is exactly
     /// this, updated each turn — so the tail is read backwards for the most
-    /// recent one. Codex has no such record, so the *first* `user_message` is
-    /// used instead: it is what the session was opened to do, which is the
-    /// closest honest answer.
+    /// recent one. Codex has no such record, so its newest `user_message` is
+    /// used instead. A Codex session can stay alive across several requests;
+    /// the first message describes its history, while the newest one is what
+    /// it is working on now.
     ///
     /// Cached per file+mtime. This reads the last 256KB of a transcript that
     /// can run to tens of megabytes, and re-reading it every 3 seconds for a
@@ -124,7 +125,7 @@ actor AgentSessionScanner {
         // could never invalidate itself.
         let stamp = modified(url)
         if let cached = taskCache[key], cached.stamp == stamp { return cached.task }
-        let task = isCodex ? codexFirstPrompt(url) : claudeLastPrompt(url)
+        let task = isCodex ? codexLastPrompt(url) : claudeLastPrompt(url)
         taskCache[key] = (stamp, task)
         return task
     }
@@ -210,9 +211,16 @@ actor AgentSessionScanner {
         return nil
     }
 
-    private func codexFirstPrompt(_ url: URL) -> String? {
-        guard let text = text(of: url, head: 262_144) else { return nil }
-        for line in text.split(separator: "\n") {
+    private func codexLastPrompt(_ url: URL) -> String? {
+        guard let text = text(of: url, tail: 262_144) else { return nil }
+        return Self.codexLastPrompt(in: text)
+    }
+
+    /// Codex records every submitted request as a nested `user_message` event.
+    /// Scan backwards so the live-agents card names the current request rather
+    /// than the prompt that originally created a long-running session.
+    nonisolated static func codexLastPrompt(in text: String) -> String? {
+        for line in text.split(separator: "\n").reversed() {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                   let payload = obj["payload"] as? [String: Any],
                   payload["type"] as? String == "user_message",

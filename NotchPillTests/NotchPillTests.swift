@@ -1301,6 +1301,17 @@ struct AgentAnswerTests {
 struct TranscriptTurnTests {
     private func tail(_ lines: [String]) -> String { lines.joined(separator: "\n") }
 
+    @Test("Codex live session names its newest user request")
+    func codexUsesNewestPrompt() {
+        let transcript = tail([
+            #"{"type":"event_msg","payload":{"type":"user_message","message":"Draft the release notes"}}"#,
+            #"{"type":"event_msg","payload":{"type":"agent_message","message":"I will do that"}}"#,
+            #"{"type":"event_msg","payload":{"type":"user_message","message":"Fix the Codex live-agent text"}}"#
+        ])
+        #expect(AgentSessionScanner.codexLastPrompt(in: transcript)
+                == "Fix the Codex live-agent text")
+    }
+
     @Test("an assistant message ends the turn")
     func assistantEnds() {
         #expect(AgentTranscriptProvider.turnEnded(inTail: tail([
