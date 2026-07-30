@@ -2566,3 +2566,51 @@ struct CIRunLifetimeTests {
         #expect(CIRun.current(stale, now: now).isEmpty)
     }
 }
+
+// MARK: - Peek hit testing
+
+@Suite("Peek ✕ hit testing")
+struct PeekDismissHitTests {
+    // Geometry of a real peek: much wider than the notch, with its ✕ ~20pt in
+    // from the trailing edge.
+    private let bounds = CGRect(x: 0, y: 0, width: 720, height: 200)
+    private let collapsed = CGSize(width: 240, height: 92)
+    private let peek = CGSize(width: 420, height: 110)
+    private let notchW: CGFloat = 200
+    private let notchH: CGFloat = 32
+
+    /// Where the ✕ actually sits: inside the peek, well outside the collapsed pill.
+    private var dismissPoint: CGPoint {
+        CGPoint(x: bounds.midX + peek.width / 2 - 20, y: bounds.maxY - 60)
+    }
+
+    private func accepts(expanded: Bool) -> Bool {
+        NotchContainerView.accepts(dismissPoint,
+                                   bounds: bounds,
+                                   notchWidth: notchW, notchHeight: notchH,
+                                   expanded: expanded,
+                                   collapsedSize: collapsed,
+                                   expandedSize: peek)
+    }
+
+    // The bug: a peek never sets `isExpanded`, so this rule was asked with
+    // `expanded: false` while a peek was on screen. It then measured the ✕
+    // against the *collapsed* pill, found it outside, and returned nil from
+    // hitTest — dropping the click onto whatever was behind the notch.
+    @Test("the ✕ is outside the collapsed pill")
+    func outsideCollapsed() {
+        #expect(accepts(expanded: false) == false)
+    }
+
+    @Test("but inside the pill a peek actually draws")
+    func insidePeek() {
+        #expect(accepts(expanded: true) == true)
+    }
+
+    // Which is why the controller must report "rendering large content" rather
+    // than "expanded" — the two are not the same thing for a peek.
+    @Test("the two answers genuinely differ, so the flag matters")
+    func flagDecidesIt() {
+        #expect(accepts(expanded: true) != accepts(expanded: false))
+    }
+}

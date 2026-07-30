@@ -383,7 +383,14 @@ final class NotchController {
             )
             let win = NotchWindow(contentRect: initialFrame)
             let container = NotchContainerView(metrics: metrics)
-            container.isExpandedProvider = { [weak self] in self?.state.isExpanded ?? false }
+            // `rendersLargeContent`, not `isExpanded`. A peek never sets
+            // `isExpanded`, so this fed `false` into the hit test while a peek
+            // was on screen — the rule then measured against the *collapsed*
+            // rect, decided the ✕ was outside the pill, and returned nil, so
+            // the click went to whatever was behind it. This is the layer that
+            // actually decides; the passthrough flag and `acceptsFirstMouse`
+            // are both upstream of it and could not save a click it rejected.
+            container.isExpandedProvider = { [weak self] in self?.rendersLargeContent ?? false }
             container.collapsedContentSizeProvider = { [weak self] in self?.collapsedContentSize() ?? .zero }
             container.expandedContentSizeProvider = { [weak self] in self?.expandedContentSize() ?? .zero }
             container.onSpacePressed = { [weak self] in self?.nowPlaying.togglePlayPause() }
@@ -537,7 +544,7 @@ final class NotchController {
     /// declared itself click-through and the press went to whatever was
     /// underneath. Intermittent, because the container's own tracking rects
     /// covered it whenever they had been refreshed in time.
-    private var rendersLargeContent: Bool {
+    var rendersLargeContent: Bool {
         state.isExpanded
             || pillEngaged
             || !state.devReadyAlerts.isEmpty
