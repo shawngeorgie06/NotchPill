@@ -219,6 +219,43 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         }
     }
 
+    /// Which app the peek should *present* as, which is not always the agent
+    /// that produced it.
+    ///
+    /// Cursor runs Claude Code as a backend. Finish a task in Cursor and the
+    /// Claude Code hook fires, carrying `agent=claude-code` with `source=cursor`
+    /// — both true, and shown side by side they read as two different agents
+    /// arguing about who did the work. You did it in Cursor; that is the window
+    /// you would switch back to, so that is what it is called and whose icon it
+    /// wears. The engine stays visible, just not in the lead.
+    ///
+    /// Kept separate from `knownAgent` on purpose: that one decides *behaviour*
+    /// (whether typed answers can reach it), which still depends on the agent
+    /// rather than on the window it happens to be hosted in.
+    var displayAgent: KnownAgent? {
+        if let host = source?.lowercased(), host.contains("cursor") { return .cursor }
+        return knownAgent
+    }
+
+    /// The name to lead with, and the one to keep as a footnote. Nil second
+    /// element when there is nothing distinct left to say.
+    var displayIdentity: (lead: String, secondary: String?) {
+        let agentName = agent?.trimmingCharacters(in: .whitespaces)
+        let hostName = source?.trimmingCharacters(in: .whitespaces)
+        // Host in the lead only when it is a recognised app that is genuinely
+        // hosting a different agent — otherwise the agent's own name is best.
+        if displayAgent == .cursor, knownAgent != .cursor,
+           let hostName, !hostName.isEmpty {
+            return (hostName, agentName)
+        }
+        if let agentName, !agentName.isEmpty {
+            let second = (hostName?.caseInsensitiveCompare(agentName) == .orderedSame)
+                ? nil : hostName
+            return (agentName, second?.isEmpty == true ? nil : second)
+        }
+        return (hostName ?? "agent", nil)
+    }
+
     /// Whether an answer typed at this alert would actually reach the agent.
     ///
     /// Delivery is synthetic key events posted to the target app's frontmost
@@ -268,7 +305,7 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// bundle to look up, which is what `ClaudeMark` draws instead.
     var agentAppIcon: NSImage? {
         let candidates: [String]
-        switch knownAgent {
+        switch displayAgent {
         case .claudeCode: candidates = ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
         case .codex: candidates = ["com.openai.codex", "com.openai.chat"]
         // Cursor pings already carry Cursor's own bundle id, so `appIcon` covers

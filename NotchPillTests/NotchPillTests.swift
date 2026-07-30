@@ -2816,3 +2816,111 @@ struct CIRowIdentityTests {
         #expect(CIRun.current([old], now: now).isEmpty)
     }
 }
+
+@Suite("Redaction has no gaps")
+struct SecretRedactorGapTests {
+    private func fixture(_ prefix: String, _ body: String) -> String { prefix + body }
+
+    private var samples: [String] {
+        [fixture("ghp_", "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"),
+         fixture("github_pat_", "11ABCDEFG0abcdefghij_KLMNOPQRSTUVWXYZ"),
+         fixture("sk-ant-", "api03-abcdefghijklmnopqrstuvwxyz012345"),
+         fixture("AKIA", "IOSFODNN7EXAMPLE"),
+         fixture("xox", "b-123456789012-abcdefghijklmnop")]
+    }
+
+    // A second pass must not find anything a first pass missed. If it does, the
+    // patterns are rewriting text into new matches and the first answer was a
+    // lie about what reached the screen.
+    @Test("redaction is idempotent")
+    func idempotent() {
+        for s in samples {
+            let once = SecretRedactor.redact("token \(s) end")
+            #expect(SecretRedactor.redact(once) == once)
+        }
+    }
+
+    // Whatever the surrounding punctuation, no fragment of the secret survives.
+    @Test("no fragment survives any surrounding context")
+    func noFragmentSurvives() {
+        let contexts = ["%@", "(%@)", "\"%@\"", "run --token=%@ now",
+                        "line1\n%@\nline3", "a,%@;b", "<%@>", "  %@  "]
+        for s in samples {
+            let body = String(s.dropFirst(4))   // the random-looking part
+            for context in contexts {
+                let text = context.replacingOccurrences(of: "%@", with: s)
+                let out = SecretRedactor.redact(text)
+                #expect(!out.contains(body), "survived in \(context)")
+            }
+        }
+    }
+
+    @Test("several secrets in one string all go")
+    func multipleSecrets() {
+        let text = samples.joined(separator: " and ")
+        let out = SecretRedactor.redact(text)
+        for s in samples {
+            #expect(!out.contains(String(s.dropFirst(4))))
+        }
+    }
+
+    // The card truncates; redaction runs first, so a half-token cannot appear.
+    @Test("truncation cannot resurrect a partial token")
+    func truncationSafe() {
+        for s in samples {
+            let task = AgentSession.summarize("please push using \(s) to the remote")
+            #expect(task?.contains(String(s.dropFirst(4))) != true)
+        }
+    }
+}
+
+@Suite("Peek identity")
+struct PeekIdentityTests {
+    private func alert(agent: String?, source: String?) -> DevReadyAlert {
+        DevReadyAlert(id: "1", title: "project", source: source, agent: agent)
+    }
+
+    // Reported: a task finished in Cursor and the peek wore the Claude Code
+    // mark, badged "claude-code", then badged "cursor" beside it. Both facts
+    // are true — Cursor runs Claude Code as its backend — but together they
+    // read as two agents arguing about who did the work.
+    @Test("a Claude agent hosted in Cursor presents as Cursor")
+    func cursorHostWins() {
+        let a = alert(agent: "claude-code", source: "cursor")
+        #expect(a.displayAgent == .cursor)
+        #expect(a.displayIdentity.lead == "cursor")
+        #expect(a.displayIdentity.secondary == "claude-code")
+    }
+
+    // But behaviour still follows the agent: typed answers reach a Claude Code
+    // terminal, and that does not change because of the window hosting it.
+    @Test("presentation does not move the behaviour")
+    func behaviourUnchanged() {
+        #expect(alert(agent: "claude-code", source: "cursor").knownAgent == .claudeCode)
+    }
+
+    @Test("a plain Claude Code peek is unchanged")
+    func plainClaude() {
+        let a = alert(agent: "claude-code", source: "Claude Code")
+        #expect(a.displayAgent == .claudeCode)
+        #expect(a.displayIdentity.lead == "claude-code")
+    }
+
+    @Test("a host that adds nothing is not repeated")
+    func noDuplicateBadge() {
+        let a = alert(agent: "codex", source: "codex")
+        #expect(a.displayIdentity.secondary == nil)
+    }
+
+    @Test("a terminal host stays a footnote")
+    func terminalStaysSecondary() {
+        let a = alert(agent: "claude-code", source: "cmux")
+        #expect(a.displayIdentity.lead == "claude-code")
+        #expect(a.displayIdentity.secondary == "cmux")
+    }
+
+    @Test("an alert with no agent name still says something")
+    func noAgent() {
+        #expect(alert(agent: nil, source: "cursor").displayIdentity.lead == "cursor")
+    }
+}

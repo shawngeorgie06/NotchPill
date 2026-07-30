@@ -451,12 +451,14 @@ struct DevReadyPeekRow: View {
                             .lineLimit(1)
 
                         HStack(spacing: 5) {
-                            if let agent = alert.agent, !agent.isEmpty {
-                                agentBadge(agent, prominent: true)
-                            }
-                            if let source = alert.source, !source.isEmpty,
-                               alert.agent?.caseInsensitiveCompare(source) != .orderedSame {
-                                agentBadge(source, prominent: false)
+                            // Lead with the app you would switch back to. A
+                            // Claude Code agent hosted in Cursor used to badge
+                            // itself "claude-code" then "cursor", which reads
+                            // as two agents rather than one doing the work.
+                            let identity = alert.displayIdentity
+                            agentBadge(identity.lead, prominent: true)
+                            if let secondary = identity.secondary, !secondary.isEmpty {
+                                agentBadge(secondary, prominent: false)
                             }
                             if let subtitle = alert.displaySubtitle, !subtitle.isEmpty {
                                 Text(subtitle)
@@ -592,13 +594,13 @@ struct DevReadyPeekRow: View {
     /// anything unrecognised (Cursor, a CI hook, a bare script).
     @ViewBuilder
     private var sourceIcon: some View {
-        if let icon = alert.agentAppIcon ?? (alert.knownAgent == nil ? alert.appIcon : nil) {
+        if let icon = alert.agentAppIcon ?? (alert.displayAgent == nil ? alert.appIcon : nil) {
             Image(nsImage: icon)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 22, height: 22)
                 .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-        } else if alert.knownAgent == .claudeCode {
+        } else if alert.displayAgent == .claudeCode {
             ClaudeMark()
                 .frame(width: 22, height: 22)
         } else if let icon = alert.appIcon {
