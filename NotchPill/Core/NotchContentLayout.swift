@@ -83,7 +83,7 @@ enum NotchContentLayout {
             maxWidth: maxW,
             fewItemBoost: (2.2, 1.85, 1.5)
         )
-        let baseContentHeight: CGFloat = includesMedia ? 96 : 66
+        let baseContentHeight = expandedContentBaseHeight(activities)
         let cornerPad: CGFloat = 4
         let contentHeight = baseContentHeight * readability + cornerPad
         let width = min(maxW, max(minW, baseRowWidth * readability))
@@ -367,6 +367,52 @@ enum NotchContentLayout {
         case .appSwitch: return 72
         case .battery: return 44
         case .clock: return 72
+        }
+    }
+
+    /// How tall the row needs to be: the tallest card in it, not a constant.
+    ///
+    /// It used to be a flat 96 with media on screen and 66 without, times the
+    /// readability boost. That budgets for a *full* pill regardless of what is
+    /// in it, so one agent row beside three CI rows got the same box as a
+    /// crowded one and the difference showed up as dead space under the cards —
+    /// worst at small sizes, where the whole point was to take less room.
+    ///
+    /// The constant was wrong in both directions, which is why this is measured
+    /// per card rather than retuned. With media on screen and one agent row it
+    /// budgeted 96 and left dead space under everything — the reported bug.
+    /// With three agent rows and no media it budgeted 66 and clipped the third
+    /// row mid-line, which nobody had reported but is visible the moment you
+    /// look.
+    ///
+    /// Row-based cards grow with what they hold, capped at the rows they show
+    /// before their own `ScrollView` takes over. The clamp is the range the
+    /// pill has always lived in: never taller than a media row needs, never so
+    /// short that a row of one-line chips becomes a letterbox.
+    static func expandedContentBaseHeight(_ activities: [ExpandedActivity]) -> CGFloat {
+        guard !activities.isEmpty else { return 66 }
+        let tallest = activities.map(expandedCardBaseHeight).max() ?? 66
+        return min(96, max(48, tallest))
+    }
+
+    /// Rows a card renders before it starts scrolling. Beyond this the card's
+    /// own `ScrollView` takes over, so the pill must not keep growing.
+    private static let expandedMaxCardRows = 3
+
+    private static func rowsHeight(header: CGFloat, row: CGFloat, count: Int) -> CGFloat {
+        header + row * CGFloat(min(expandedMaxCardRows, max(1, count)))
+    }
+
+    private static func expandedCardBaseHeight(_ activity: ExpandedActivity) -> CGFloat {
+        switch activity {
+        // Artwork and title over a transport row. Still the tallest card, and
+        // the reason the old rule keyed off it — but it wants ~78, not the 96
+        // the whole row was being sized to.
+        case .media: return 78
+        case .agents(let sessions): return rowsHeight(header: 18, row: 26, count: sessions.count)
+        case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)
+        // Everything else is a label over a value.
+        default: return 56
         }
     }
 

@@ -2387,3 +2387,78 @@ struct DiagnosticsReportTests {
         #expect(DiagnosticsReport.build(f).contains("(empty"))
     }
 }
+
+// MARK: - Expanded pill height
+
+@Suite("Expanded pill height")
+struct ExpandedHeightTests {
+    private func agents(_ n: Int) -> ExpandedActivity {
+        .agents((0..<n).map {
+            AgentSession(id: "s\($0)", agent: "claude-code", project: "p",
+                         state: .working, lastActivity: Date())
+        })
+    }
+
+    private func ci(_ n: Int) -> ExpandedActivity {
+        .ci((0..<n).map {
+            CIRun(id: "r\($0)", repo: "o/r", workflow: "Release", branch: "main",
+                  state: .passed, started: Date())
+        })
+    }
+
+    private var media: ExpandedActivity {
+        .media(NowPlaying(title: "t", artist: "a", isPlaying: true))
+    }
+
+    // The reported bug: 75% size, one agent row, three CI rows, music playing —
+    // and a pill sized as if every card were full.
+    @Test("a mostly empty row is shorter than a full one")
+    func reportedCase() {
+        let reported = NotchContentLayout.expandedContentBaseHeight([agents(1), ci(3), media])
+        let full = NotchContentLayout.expandedContentBaseHeight([agents(3), ci(3), media])
+        #expect(reported < full)
+    }
+
+    // The other half of the same wrong constant: three agent rows and no media
+    // used to budget 66 and clip the third row.
+    @Test("three agent rows get more than the old flat 66")
+    func threeRowsFit() {
+        #expect(NotchContentLayout.expandedContentBaseHeight([agents(3), ci(3)]) > 66)
+    }
+
+    @Test("height grows with rows, then stops when the card starts scrolling")
+    func growsThenCaps() {
+        let one = NotchContentLayout.expandedContentBaseHeight([agents(1)])
+        let two = NotchContentLayout.expandedContentBaseHeight([agents(2)])
+        let three = NotchContentLayout.expandedContentBaseHeight([agents(3)])
+        let ten = NotchContentLayout.expandedContentBaseHeight([agents(10)])
+        #expect(one < two)
+        #expect(two < three)
+        #expect(three == ten)
+    }
+
+    @Test("the tallest card sets the height, not the first or the last")
+    func tallestWins() {
+        let tall = NotchContentLayout.expandedContentBaseHeight([agents(3)])
+        #expect(NotchContentLayout.expandedContentBaseHeight([.clock, agents(3)]) == tall)
+        #expect(NotchContentLayout.expandedContentBaseHeight([agents(3), .clock]) == tall)
+    }
+
+    @Test("every combination stays inside the range the pill has always used")
+    func clamped() {
+        let rows: [[ExpandedActivity]] = [
+            [], [.clock], [media], [agents(1)], [agents(10), ci(10), media],
+            [.clock, .battery(BatteryStatus(level: 50, isCharging: false))],
+        ]
+        for row in rows {
+            let h = NotchContentLayout.expandedContentBaseHeight(row)
+            #expect(h >= 48 && h <= 96)
+        }
+    }
+
+    // A row of one-line chips must not collapse into a letterbox.
+    @Test("a single small card still gets a usable height")
+    func floorHolds() {
+        #expect(NotchContentLayout.expandedContentBaseHeight([.clock]) >= 48)
+    }
+}
