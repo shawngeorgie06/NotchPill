@@ -84,7 +84,7 @@ for event in ("Stop", "SubagentStop", "Notification", "PreToolUse"):
         # Not async: this hook's whole job is to print a verdict Claude reads
         # back, and an async hook's stdout goes nowhere. The timeout must
         # outlast the script's own wait, or Claude kills it mid-question.
-        cleaned.append({"matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash",
+        cleaned.append({"matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash|ExitPlanMode",
                         "hooks": [{"type": "command",
                                    "command": permission_hook,
                                    "timeout": 60}]})

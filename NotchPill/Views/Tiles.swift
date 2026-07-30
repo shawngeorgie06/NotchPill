@@ -737,6 +737,15 @@ struct DevReadyPeekRow: View {
                         .foregroundStyle(.white.opacity(0.5))
                 }
             }
+            if request.isPlan {
+                ForEach(Array(request.planPreviewLines.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
             ForEach(Array(request.previewLines.enumerated()), id: \.offset) { _, line in
                 Text(line.text.isEmpty ? " " : line.text)
                     .font(.system(size: 10, design: .monospaced))

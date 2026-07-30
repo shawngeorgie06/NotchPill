@@ -17,6 +17,8 @@ struct PermissionRequest: Equatable {
         case write(path: String, lines: Int)
         /// A shell command, and the agent's own description of it if given.
         case run(command: String, note: String?)
+        /// Claude's ExitPlanMode handoff, rendered as a compact Markdown preview.
+        case plan(markdown: String)
         /// Anything else — named, but with no structured body to show.
         case other(tool: String, detail: String?)
     }
@@ -38,6 +40,7 @@ struct PermissionRequest: Equatable {
         case .edit(let path, _): return "Edit \(Self.shorten(path))"
         case .write(let path, _): return "Create \(Self.shorten(path))"
         case .run(let command, _): return command
+        case .plan: return "Review plan"
         case .other(let tool, let detail): return detail.map { "\(tool): \($0)" } ?? tool
         }
     }
@@ -56,6 +59,21 @@ struct PermissionRequest: Equatable {
     var isCommand: Bool {
         if case .run = action { return true }
         return false
+    }
+
+    var isPlan: Bool {
+        if case .plan = action { return true }
+        return false
+    }
+
+    /// Markdown is intentionally rendered as text, not HTML: the plan came
+    /// from an agent and the notch needs a safe, glanceable review surface.
+    var planPreviewLines: [String] {
+        guard case .plan(let markdown) = action else { return [] }
+        let lines = markdown.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(lines.prefix(4))
     }
 
     /// How many diff lines the peek has room for. The peek does not scroll, and
@@ -153,6 +171,11 @@ struct PermissionRequest: Equatable {
             return PermissionRequest(action: .run(command: command,
                                                   note: note?.isEmpty == true ? nil : note),
                                      tool: trimmed)
+        case "exitplanmode":
+            let plan = ((input["plan"] as? String) ?? (input["content"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !plan.isEmpty else { break }
+            return PermissionRequest(action: .plan(markdown: plan), tool: trimmed)
         default:
             break
         }
@@ -186,6 +209,8 @@ struct PermissionRequest: Equatable {
         case .run(let command, let note):
             copy.action = .run(command: SecretRedactor.redact(command),
                                note: note.map(SecretRedactor.redact))
+        case .plan(let markdown):
+            copy.action = .plan(markdown: SecretRedactor.redact(markdown))
         }
         return copy
     }

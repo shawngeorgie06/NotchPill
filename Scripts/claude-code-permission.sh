@@ -68,7 +68,7 @@ TOOL="$(json tool_name)"
 # Only tools that change something. A Read or a Grep is not a decision, and
 # pausing on one would be a full round trip of latency for nothing.
 case "$TOOL" in
-  Edit|MultiEdit|Write|NotebookEdit|Bash) ;;
+  Edit|MultiEdit|Write|NotebookEdit|Bash|ExitPlanMode) ;;
   *) exit 0 ;;
 esac
 
