@@ -3137,6 +3137,18 @@ struct PermissionSignalTests {
         #expect(alert.permissionRequest?.summary == "Edit b/auth.ts")
     }
 
+    @Test("The live notification path carries the request too")
+    func decodesUserInfo() {
+        // There are two parsers — Codable for queued signal files, userInfo for
+        // the live distributed notification. Only the file path was updated at
+        // first, so a request arriving while the app ran drew as a bare "Edit".
+        let alert = DevReadyAlert.parse(userInfo: [
+            "title": "repo", "kind": "waiting", "message": "Edit",
+            "requestId": "abc", "permission": payload,
+        ])
+        #expect(alert?.permissionRequest?.summary == "Edit b/auth.ts")
+    }
+
     @Test("A payload with no request id has nowhere to answer, so shows no request")
     func requiresRequestId() {
         let alert = DevReadyAlert(title: "repo", kind: .waiting, permissionPayload: payload)
@@ -3170,5 +3182,99 @@ struct PermissionSignalTests {
         let alert = DevReadyAlert(title: "repo", kind: .waiting,
                                   requestId: "abc", permissionPayload: "{not json")
         #expect(alert.permissionRequest == nil)
+    }
+}
+
+@Suite("Permission preview")
+struct PermissionPreviewTests {
+    private func request(_ old: String, _ new: String) -> PermissionRequest {
+        PermissionRequest(action: .edit(path: "/a/b.swift",
+                                        diff: PermissionRequest.diff(old: old, new: new)),
+                          tool: "Edit")
+    }
+
+    @Test("A short diff is shown whole")
+    func short() {
+        let r = request("a", "b")
+        #expect(r.previewLines.count == 2)
+    }
+
+    @Test("A long diff is capped to what the peek can draw")
+    func capped() {
+        let old = (1...20).map { "line \($0)" }.joined(separator: "\n")
+        let new = (1...20).map { "changed \($0)" }.joined(separator: "\n")
+        #expect(request(old, new).previewLines.count == PermissionRequest.previewLimit)
+    }
+
+    @Test("When the change alone overflows, context is dropped first")
+    func changesBeatContext() {
+        let old = "keep\n" + (1...6).map { "old \($0)" }.joined(separator: "\n") + "\ntail"
+        let new = "keep\n" + (1...6).map { "new \($0)" }.joined(separator: "\n") + "\ntail"
+        let lines = request(old, new).previewLines
+        #expect(lines.allSatisfy { $0.kind != .context })
+    }
+
+    @Test("The count still describes the whole change, not the visible part")
+    func countIsOfTheWhole() {
+        let old = (1...9).map { "old \($0)" }.joined(separator: "\n")
+        let new = (1...9).map { "new \($0)" }.joined(separator: "\n")
+        let r = request(old, new)
+        #expect(r.previewLines.count == 4)
+        #expect(r.changeCount == "+9 −9")
+    }
+
+    @Test("A command has no diff lines but is set as machine text")
+    func command() {
+        let r = PermissionRequest(action: .run(command: "rm -rf build", note: nil), tool: "Bash")
+        #expect(r.previewLines.isEmpty)
+        #expect(r.isCommand)
+        #expect(request("a", "b").isCommand == false)
+    }
+}
+
+@MainActor
+@Suite("Answering a permission request")
+struct PermissionAnswerabilityTests {
+    private let payload = #"{"tool_name":"Bash","tool_input":{"command":"ls"}}"#
+
+    private func alert(delivery: String?, requestId: String?) -> DevReadyAlert {
+        DevReadyAlert(title: "repo", agent: "claude-code", kind: .waiting, message: "Bash",
+                      createdAt: Date().timeIntervalSince1970,
+                      answerSpec: "Allow:y|Deny:n", deliverySpec: delivery,
+                      requestId: requestId, permissionPayload: payload)
+    }
+
+    @Test("A decision peek offers buttons with no terminal to target")
+    func decisionNeedsNoTerminal() {
+        #expect(alert(delivery: "decision", requestId: "r1")
+            .canAnswerFromNotch(replyEnabled: true) == true)
+    }
+
+    @Test("A decision with no request id has nowhere to answer")
+    func decisionNeedsRequestId() {
+        let a = alert(delivery: "decision", requestId: nil)
+        #expect(a.answersByDecision == false)
+        #expect(a.permissionRequest == nil)
+    }
+
+    @Test("Answers off means no buttons, decision or not")
+    func respectsSetting() {
+        #expect(alert(delivery: "decision", requestId: "r1")
+            .canAnswerFromNotch(replyEnabled: false) == false)
+    }
+
+    @Test("A stale request is not answerable — the hook gave up long ago")
+    func staleness() {
+        var a = alert(delivery: "decision", requestId: "r1")
+        a.createdAt = Date().timeIntervalSince1970 - DevReadyProvider.waitingStaleAfter - 60
+        #expect(a.canAnswerFromNotch(replyEnabled: true) == false)
+    }
+
+    @Test("Allow and Deny map onto the verdicts the hook understands")
+    func buttonsMapToVerdicts() {
+        let answers = alert(delivery: "decision", requestId: "r1").answers
+        #expect(answers.map(\.label) == ["Allow", "Deny"])
+        #expect(PermissionDecision.Verdict(answers[0].keystroke) == .allow)
+        #expect(PermissionDecision.Verdict(answers[1].keystroke) == .deny)
     }
 }

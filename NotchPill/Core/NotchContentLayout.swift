@@ -213,14 +213,19 @@ enum NotchContentLayout {
         answerEnabled: Bool
     ) -> CGFloat {
         guard alert.kind == .waiting else { return 0 }
-        // Must mirror `DevReadyPeekRow.canAnswer` exactly, staleness included, or
-        // the budget reserves space for buttons the row won't draw.
-        let canAnswer = answerEnabled
-            && TerminalReplyInjector.canTarget(alert)
-            && alert.supportsTypedAnswers
-            && DevReadyProvider.demotingStaleWaiting(alert).kind == alert.kind
+        // Same rule the row draws by — shared rather than mirrored, because
+        // when these two drifted the peek reserved space for buttons it never
+        // drew.
+        let canAnswer = alert.canAnswerFromNotch(replyEnabled: answerEnabled)
         let sectionSpacing: CGFloat = 6
-        let messageExtra: CGFloat = alert.questionText != nil ? 30 : 0
+        // A permission request draws its own body — a summary line plus up to
+        // four diff lines — in place of the one-line question.
+        let messageExtra: CGFloat
+        if let request = alert.permissionRequest {
+            messageExtra = 18 + CGFloat(request.previewLines.count) * 14 + 6
+        } else {
+            messageExtra = alert.questionText != nil ? 30 : 0
+        }
         let buttonExtra: CGFloat = canAnswer ? 6 + answerButtonHeight + 6 : 0
         return sectionSpacing + messageExtra + buttonExtra
     }

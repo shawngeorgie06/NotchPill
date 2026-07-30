@@ -51,6 +51,31 @@ struct PermissionRequest: Equatable {
         return "+\(added) −\(removed)"
     }
 
+    /// Whether the summary is machine text (a command) rather than prose, so
+    /// the row can set it in a monospaced face and truncate from the end.
+    var isCommand: Bool {
+        if case .run = action { return true }
+        return false
+    }
+
+    /// How many diff lines the peek has room for. The peek does not scroll, and
+    /// past four lines it is taller than the notch it hangs from.
+    static let previewLimit = 4
+
+    /// The lines to draw, capped.
+    ///
+    /// Context lines are dropped before changed ones. Context is what makes a
+    /// small diff readable, but when there is more change than fits, spending a
+    /// line on something that did *not* change is the wrong trade — the count
+    /// still says how much changed in total, so the cap reads as a cap.
+    var previewLines: [DiffLine] {
+        guard case .edit(_, let diff) = action else { return [] }
+        guard diff.count > Self.previewLimit else { return diff }
+        let changed = diff.filter { $0.kind != .context }
+        return Array((changed.count >= Self.previewLimit ? changed : diff)
+            .prefix(Self.previewLimit))
+    }
+
     /// Trailing path components only. A peek is ~380pt wide and the leading
     /// directories are the least distinguishing part of a path.
     static func shorten(_ path: String, components: Int = 2) -> String {

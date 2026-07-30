@@ -409,12 +409,10 @@ struct DevReadyPeekRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
 
-    /// Reply/answer affordances require the feature on AND a targetable terminal.
+    /// Reply/answer affordances. The rule lives on the alert so the height
+    /// budget in `NotchContentLayout` reads the same one.
     private var canAnswer: Bool {
-        AppSettings.shared.agentReplyEnabled
-            && TerminalReplyInjector.canTarget(alert)
-            && alert.supportsTypedAnswers
-            && DevReadyProvider.demotingStaleWaiting(alert).kind == alert.kind
+        alert.canAnswerFromNotch(replyEnabled: AppSettings.shared.agentReplyEnabled)
     }
 
     var body: some View {
@@ -536,7 +534,9 @@ struct DevReadyPeekRow: View {
     @ViewBuilder
     private var waitingAnswerRow: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let question = alert.questionText {
+            if let request = alert.permissionRequest {
+                permissionBody(request)
+            } else if let question = alert.questionText {
                 Text(question)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.7))
@@ -573,6 +573,59 @@ struct DevReadyPeekRow: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 6)
             }
+        }
+    }
+
+    /// What the agent is asking to do, drawn as the thing you would decide on:
+    /// the file and its change, or the command itself.
+    ///
+    /// The peek is a few hundred points wide with no room to scroll, so the diff
+    /// is capped. A truncated diff is honest about being one — the count line
+    /// says how much changed in total, so a large edit reads as large rather
+    /// than as the three lines that happened to fit.
+    @ViewBuilder
+    private func permissionBody(_ request: PermissionRequest) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(request.summary)
+                    .font(.system(size: 11, weight: .medium,
+                                  design: request.isCommand ? .monospaced : .default))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(request.isCommand ? .tail : .head)
+                if let count = request.changeCount {
+                    Text(count)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+            }
+            ForEach(Array(request.previewLines.enumerated()), id: \.offset) { _, line in
+                Text(line.text.isEmpty ? " " : line.text)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(color(for: line.kind))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+                    .background(background(for: line.kind))
+            }
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private func color(for kind: PermissionRequest.DiffLine.Kind) -> Color {
+        switch kind {
+        case .added: return Color(red: 0.55, green: 0.9, blue: 0.6)
+        case .removed: return Color(red: 1.0, green: 0.55, blue: 0.55)
+        case .context: return .white.opacity(0.4)
+        }
+    }
+
+    private func background(for kind: PermissionRequest.DiffLine.Kind) -> Color {
+        switch kind {
+        case .added: return Color.green.opacity(0.14)
+        case .removed: return Color.red.opacity(0.14)
+        case .context: return .clear
         }
     }
 

@@ -313,6 +313,23 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         }
     }
 
+    /// Whether the row should draw answer buttons at all.
+    ///
+    /// Lives here rather than in the view because the height budget has to make
+    /// the identical decision — when the two disagreed, the peek reserved space
+    /// for buttons it never drew, or drew them into space it never reserved.
+    @MainActor
+    func canAnswerFromNotch(replyEnabled: Bool) -> Bool {
+        guard replyEnabled, supportsTypedAnswers else { return false }
+        // A stale question is not a live one: its answer would land somewhere
+        // that has long since moved on.
+        guard DevReadyProvider.demotingStaleWaiting(self).kind == kind else { return false }
+        // A verdict goes to a waiting hook, so there is no terminal to target
+        // and nothing to type — the one path that needs no window at all.
+        if answersByDecision { return true }
+        return TerminalReplyInjector.canTarget(self)
+    }
+
     /// The buttons to offer. Declared by the signal, else Claude Code's set.
     var answers: [AgentAnswer] {
         AgentAnswer.parse(answerSpec) ?? AgentAnswer.standardSet
@@ -323,6 +340,14 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// paste, which such a prompt routes to its text field instead.
     var answerDelivery: TerminalReplyInjector.Delivery {
         deliverySpec?.lowercased() == "paste" ? .paste : .keystrokes
+    }
+
+    /// Whether this alert is answered by handing a verdict to a blocked hook
+    /// rather than by typing into a terminal. Requires a `requestId`, because
+    /// that names the file the hook is watching — a `decision` delivery without
+    /// one would silently answer nothing.
+    var answersByDecision: Bool {
+        deliverySpec?.lowercased() == "decision" && requestId != nil
     }
 
     /// Icon of the *agent's own* app, preferred over the host terminal's: the
@@ -372,7 +397,9 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
             createdAt: epochSeconds(userInfo["createdAt"]),
             sessionId: userInfo["sessionId"] as? String,
             answerSpec: userInfo["answers"] as? String,
-            deliverySpec: userInfo["delivery"] as? String
+            deliverySpec: userInfo["delivery"] as? String,
+            requestId: userInfo["requestId"] as? String,
+            permissionPayload: userInfo["permission"] as? String
         )
     }
 }

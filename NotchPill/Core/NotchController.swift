@@ -1107,6 +1107,24 @@ final class NotchController {
         TerminalReplyInjector.log("performAnswer tapped: \(answer.label) -> "
             + "\(answer.keystroke.debugDescription) for alert=\(alert.title) "
             + "kind=\(alert.kind) bundleId=\(alert.bundleId ?? "nil")")
+        // A `PreToolUse` request is answered by handing the blocked hook a
+        // verdict, not by typing at a terminal. No focus to steal, no
+        // Accessibility grant needed, and it reaches agents that have no
+        // terminal window to type into at all.
+        if alert.answersByDecision, let requestId = alert.requestId {
+            let verdict = PermissionDecision.Verdict(answer.keystroke)
+            do {
+                try PermissionDecision(requestId: requestId, verdict: verdict,
+                                       reason: "\(answer.label) from NotchPill").write()
+                LogStore.log("permission", "\(verdict.rawValue) \(requestId)")
+            } catch {
+                // The hook times out on its own and falls back to Claude's
+                // prompt, so a failure here costs one ordinary prompt.
+                LogStore.log("permission", "could not answer: \(error)", level: .warn)
+            }
+            dismissDevReady(id: alert.id)
+            return
+        }
         // A tapped answer has no open composer; open one so an error is visible
         // and the user can retry by typing. Mirrors performReply's error surface.
         let surface: (ReplyError) -> Void = { [weak self] err in
