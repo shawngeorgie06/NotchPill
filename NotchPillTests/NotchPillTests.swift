@@ -178,6 +178,13 @@ struct ExpandedActivityBuilderTests {
         )
         #expect(items == [.clock])
     }
+
+    @Test("pinned activity moves to the front without changing the others")
+    func pinnedActivity() {
+        let items: [ExpandedActivity] = [.clock, .timer(ActiveTimer(label: "Focus", endDate: .now.addingTimeInterval(60))), .volume(40)]
+        let ordered = ExpandedActivityBuilder.prioritizing(items, pinnedKind: "timer")
+        #expect(ordered.map(\.kind) == ["timer", "clock", "volume"])
+    }
 }
 
 @Suite("NowPlaying progress")

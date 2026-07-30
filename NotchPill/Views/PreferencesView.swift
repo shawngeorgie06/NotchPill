@@ -135,6 +135,15 @@ struct PreferencesView: View {
     private var expandedSection: some View {
         SettingsPanel(title: "Expanded Pill", subtitle: "Cards when you hover the notch") {
             sizeSlider
+            Picker("Keep in focus", selection: $settings.pinnedActivityKind) {
+                Text("Automatic").tag("")
+                Text("Live agents").tag("agents")
+                Text("Recent activity").tag("recentAlerts")
+                Text("CI status").tag("ci")
+                Text("Now playing").tag("media")
+                Text("Timer").tag("timer")
+            }
+            .pickerStyle(.menu)
             Divider().padding(.vertical, 2)
             Toggle("Live agents", isOn: $settings.showExpandedAgents)
             Toggle("CI status", isOn: $settings.showExpandedCI)

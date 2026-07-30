@@ -849,6 +849,15 @@ private struct DevReadyRowButtonStyle: ButtonStyle {
 
 /// Builds the status cards shown when the pill is expanded.
 enum ExpandedActivityBuilder {
+    static func prioritizing(_ activities: [ExpandedActivity], pinnedKind: String) -> [ExpandedActivity] {
+        guard !pinnedKind.isEmpty,
+              let index = activities.firstIndex(where: { $0.kind == pinnedKind }) else { return activities }
+        var ordered = activities
+        let pinned = ordered.remove(at: index)
+        ordered.insert(pinned, at: 0)
+        return ordered
+    }
+
     static func activities(
         nowPlaying: NowPlaying?,
         nextEvent: CalendarEvent?,

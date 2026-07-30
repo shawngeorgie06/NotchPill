@@ -35,7 +35,7 @@ enum NotchContentSnapshot {
         timer: TimerStore,
         settings: AppSettings
     ) -> [ExpandedActivity] {
-        let all = ExpandedActivityBuilder.activities(
+        let all = ExpandedActivityBuilder.prioritizing(ExpandedActivityBuilder.activities(
             nowPlaying: state.nowPlaying,
             nextEvent: state.nextEvent,
             appSwitchHint: state.appSwitchHint,
@@ -61,7 +61,7 @@ enum NotchContentSnapshot {
             showAgents: settings.showExpandedAgents,
             showCI: settings.showExpandedCI,
             showRecentAlerts: settings.showExpandedRecentActivity
-        )
+        ), pinnedKind: settings.pinnedActivityKind)
         // Smaller pill, fewer cards. The builder already returns them in
         // priority order, so this drops the least important tail rather than
         // shrinking everything past the point of being readable.
