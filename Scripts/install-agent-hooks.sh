@@ -42,15 +42,21 @@ backup() {
 
 # ── Claude Code ───────────────────────────────────────────────────────────────
 # Hooks live in ~/.claude/settings.json. Stop/SubagentStop peek when a turn ends;
-# Notification peeks when Claude is blocked asking for input.
+# Notification peeks when Claude is blocked asking for input. PreToolUse carries
+# the change itself, so a permission request can be shown and answered from the
+# notch — it is registered here but stays inert until you opt in with
+# `touch ~/.notchpill/approvals-enabled`, because it makes the agent wait on you.
 claude_apply() {
   local settings="$HOME/.claude/settings.json"
   if [[ ! -d "$HOME/.claude" ]]; then skip "Claude Code not found (~/.claude)"; return; fi
   local b; b="$(backup "$settings")"
-  MODE="$MODE" HOOK="$SCRIPTS/claude-code-notify.sh" SETTINGS="$settings" /usr/bin/python3 - <<'PY'
+  MODE="$MODE" HOOK="$SCRIPTS/claude-code-notify.sh" \
+    PERMISSION_HOOK="$SCRIPTS/claude-code-permission.sh" SETTINGS="$settings" \
+    /usr/bin/python3 - <<'PY'
 import json, os, pathlib
 settings = pathlib.Path(os.environ["SETTINGS"])
 hook, mode = os.environ["HOOK"], os.environ["MODE"]
+permission_hook = os.environ["PERMISSION_HOOK"]
 data = {}
 if settings.exists():
     try: data = json.loads(settings.read_text() or "{}")
@@ -58,7 +64,7 @@ if settings.exists():
         raise SystemExit("settings.json is not valid JSON — not touching it")
 hooks = data.setdefault("hooks", {})
 changed = False
-for event in ("Stop", "SubagentStop", "Notification"):
+for event in ("Stop", "SubagentStop", "Notification", "PreToolUse"):
     groups = hooks.get(event, [])
     # Drop any previous NotchPill entry wherever it points, so re-running after
     # moving the app doesn't leave a stale hook behind next to the new one.
@@ -66,14 +72,24 @@ for event in ("Stop", "SubagentStop", "Notification"):
     for g in groups:
         kept = [h for h in g.get("hooks", [])
                 if "notchpill" not in str(h.get("command", "")).lower()
-                and "claude-code-notify" not in str(h.get("command", ""))]
+                and "claude-code-notify" not in str(h.get("command", ""))
+                and "claude-code-permission" not in str(h.get("command", ""))]
         if kept != g.get("hooks", []):
             changed = True
         if kept:
             g = dict(g, hooks=kept); cleaned.append(g)
         elif not g.get("hooks"):
             cleaned.append(g)
-    if mode == "install":
+    if mode == "install" and event == "PreToolUse":
+        # Not async: this hook's whole job is to print a verdict Claude reads
+        # back, and an async hook's stdout goes nowhere. The timeout must
+        # outlast the script's own wait, or Claude kills it mid-question.
+        cleaned.append({"matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash",
+                        "hooks": [{"type": "command",
+                                   "command": permission_hook,
+                                   "timeout": 60}]})
+        changed = True
+    elif mode == "install":
         cleaned.append({"hooks": [{"type": "command",
                                    "command": f"{hook} {event}",
                                    "timeout": 15, "async": True}]})
@@ -115,6 +131,7 @@ codex_apply() {
 import os, pathlib, re
 config = pathlib.Path(os.environ["CONFIG"])
 hook, mode = os.environ["HOOK"], os.environ["MODE"]
+permission_hook = os.environ["PERMISSION_HOOK"]
 text = config.read_text() if config.exists() else ""
 # Everything between our markers is ours to rewrite.
 text = re.sub(r"\n?# >>> NotchPill hooks >>>.*?# <<< NotchPill hooks <<<\n?",

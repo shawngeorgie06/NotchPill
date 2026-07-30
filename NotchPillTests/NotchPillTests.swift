@@ -3037,3 +3037,138 @@ struct PermissionDiffTests {
         #expect(diff.filter { $0.kind == .context }.count <= 2)
     }
 }
+
+@Suite("Permission decision")
+struct PermissionDecisionTests {
+    private func scratch() -> URL {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("notchpill-decision-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test("A written decision is what the hook reads back")
+    func roundTrip() throws {
+        let home = scratch()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let decision = PermissionDecision(requestId: "req-1", verdict: .allow)
+        try decision.write(home: home)
+
+        let data = try Data(contentsOf: PermissionDecision.file(for: "req-1", home: home))
+        #expect(PermissionDecision.parse(data) == decision)
+    }
+
+    @Test("A denial carries its reason back to the agent")
+    func denialReason() throws {
+        let home = scratch()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try PermissionDecision(requestId: "req-2", verdict: .deny,
+                               reason: "not that file").write(home: home)
+
+        let data = try Data(contentsOf: PermissionDecision.file(for: "req-2", home: home))
+        #expect(PermissionDecision.parse(data)?.reason == "not that file")
+    }
+
+    @Test("Two requests answered at once do not read each other's verdict")
+    func separateFiles() throws {
+        let home = scratch()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try PermissionDecision(requestId: "a", verdict: .allow).write(home: home)
+        try PermissionDecision(requestId: "b", verdict: .deny).write(home: home)
+
+        let a = try Data(contentsOf: PermissionDecision.file(for: "a", home: home))
+        let b = try Data(contentsOf: PermissionDecision.file(for: "b", home: home))
+        #expect(PermissionDecision.parse(a)?.verdict == .allow)
+        #expect(PermissionDecision.parse(b)?.verdict == .deny)
+    }
+
+    @Test("Answering twice replaces the earlier verdict")
+    func overwrite() throws {
+        let home = scratch()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try PermissionDecision(requestId: "c", verdict: .allow).write(home: home)
+        try PermissionDecision(requestId: "c", verdict: .deny).write(home: home)
+
+        let data = try Data(contentsOf: PermissionDecision.file(for: "c", home: home))
+        #expect(PermissionDecision.parse(data)?.verdict == .deny)
+    }
+
+    @Test("A request id cannot escape the decisions directory")
+    func traversal() {
+        let home = URL(fileURLWithPath: "/tmp/home")
+        let file = PermissionDecision.file(for: "../../etc/passwd", home: home)
+        #expect(file.deletingLastPathComponent().path.hasSuffix(".notchpill/decisions"))
+        #expect(!file.lastPathComponent.contains("/"))
+    }
+
+    @Test("An id with nothing safe in it still names a file")
+    func emptyAfterSanitize() {
+        #expect(PermissionDecision.sanitize("///") == "unnamed")
+    }
+
+    @Test("Unrecognised verdict text asks rather than allows")
+    func unknownIsAsk() {
+        #expect(PermissionDecision.Verdict("") == .ask)
+        #expect(PermissionDecision.Verdict("maybe") == .ask)
+        #expect(PermissionDecision.Verdict("ALLOW") == .allow)
+        #expect(PermissionDecision.Verdict(" n ") == .deny)
+    }
+
+    @Test("Garbage on the channel is no decision, not a wrong one")
+    func garbage() {
+        #expect(PermissionDecision.parse(Data("not json".utf8)) == nil)
+        #expect(PermissionDecision.parse(Data(#"{"verdict":"allow"}"#.utf8)) == nil)
+        #expect(PermissionDecision.parse(Data(#"{"requestId":"x"}"#.utf8)) == nil)
+    }
+}
+
+@Suite("Permission signal")
+struct PermissionSignalTests {
+    private let payload = #"{"tool_name":"Edit","tool_input":{"file_path":"/a/b/auth.ts","old_string":"x","new_string":"y"}}"#
+
+    @Test("A PreToolUse signal decodes into a drawable request")
+    func decodes() throws {
+        let json = """
+        {"id":"1","title":"repo","kind":"waiting","message":"Edit",
+         "requestId":"abc","permission":\(payload.debugDescription)}
+        """
+        let alert = try JSONDecoder().decode(DevReadyAlert.self, from: Data(json.utf8))
+        #expect(alert.requestId == "abc")
+        #expect(alert.permissionRequest?.summary == "Edit b/auth.ts")
+    }
+
+    @Test("A payload with no request id has nowhere to answer, so shows no request")
+    func requiresRequestId() {
+        let alert = DevReadyAlert(title: "repo", kind: .waiting, permissionPayload: payload)
+        #expect(alert.permissionRequest == nil)
+    }
+
+    @Test("A finished alert is never a permission request")
+    func requiresWaiting() {
+        let alert = DevReadyAlert(title: "repo", kind: .finished,
+                                  requestId: "abc", permissionPayload: payload)
+        #expect(alert.permissionRequest == nil)
+    }
+
+    @Test("An ordinary waiting peek carries no request")
+    func noPayload() {
+        let alert = DevReadyAlert(title: "repo", kind: .waiting, message: "Continue?")
+        #expect(alert.permissionRequest == nil)
+    }
+
+    @Test("A command reaching the screen is redacted first")
+    func redacts() {
+        let secret = "gh" + "p_" + String(repeating: "A", count: 36)
+        let raw = #"{"tool_name":"Bash","tool_input":{"command":"curl -H 'token: \#(secret)'"}}"#
+        let alert = DevReadyAlert(title: "repo", kind: .waiting,
+                                  requestId: "abc", permissionPayload: raw)
+        #expect(alert.permissionRequest?.summary.contains(secret) == false)
+    }
+
+    @Test("An unparseable payload degrades to no request, not a crash")
+    func garbage() {
+        let alert = DevReadyAlert(title: "repo", kind: .waiting,
+                                  requestId: "abc", permissionPayload: "{not json")
+        #expect(alert.permissionRequest == nil)
+    }
+}

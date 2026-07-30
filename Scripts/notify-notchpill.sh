@@ -35,6 +35,10 @@ MESSAGE="${7:-}"
 SESSION_ID="${8:-}"
 ANSWERS="${9:-}"
 DELIVERY="${10:-}"
+# Set by the PreToolUse hook, not passed positionally — the argument list is
+# already ten deep, and these two are specific to one caller.
+REQUEST_ID="${NOTCHPILL_REQUEST_ID:-}"
+PERMISSION_JSON="${NOTCHPILL_PERMISSION_JSON:-}"
 
 if [ "$KIND" != "waiting" ] && notchpill_should_skip_notify "$TITLE" "$SUBTITLE" "$SESSION_ID"; then
   exit 0
@@ -57,7 +61,7 @@ CREATED_AT="$(date +%s)"
 
 if pgrep -x NotchPill >/dev/null 2>&1; then
   # App is running — distributed notification only (avoids double delivery via file poll).
-  /usr/bin/swift - "${TITLE}" "${SUBTITLE}" "${SOURCE}" "${BUNDLE_ID}" "${AGENT}" "${ALERT_ID}" "${KIND}" "${MESSAGE}" "${CREATED_AT}" "${SESSION_ID}" "${ANSWERS}" "${DELIVERY}" <<'SWIFT'
+  /usr/bin/swift - "${TITLE}" "${SUBTITLE}" "${SOURCE}" "${BUNDLE_ID}" "${AGENT}" "${ALERT_ID}" "${KIND}" "${MESSAGE}" "${CREATED_AT}" "${SESSION_ID}" "${ANSWERS}" "${DELIVERY}" "${REQUEST_ID}" "${PERMISSION_JSON}" <<'SWIFT'
 import Foundation
 
 let args = CommandLine.arguments
@@ -73,6 +77,8 @@ let createdAt = args.count > 9 ? args[9] : ""
 let sessionId = args.count > 10 ? args[10] : ""
 let answers = args.count > 11 ? args[11] : ""
 let delivery = args.count > 12 ? args[12] : ""
+let requestId = args.count > 13 ? args[13] : ""
+let permission = args.count > 14 ? args[14] : ""
 
 var info: [String: Any] = ["id": id, "title": title]
 if !subtitle.isEmpty { info["subtitle"] = subtitle }
@@ -85,6 +91,8 @@ if let created = Double(createdAt), created > 0 { info["createdAt"] = created }
 if !sessionId.isEmpty { info["sessionId"] = sessionId }
 if !answers.isEmpty { info["answers"] = answers }
 if !delivery.isEmpty { info["delivery"] = delivery }
+if !requestId.isEmpty { info["requestId"] = requestId }
+if !permission.isEmpty { info["permission"] = permission }
 
 DistributedNotificationCenter.default().post(
     name: Notification.Name("com.shawngeorgie06.NotchPill.devReady"),
@@ -95,10 +103,11 @@ RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
 SWIFT
 else
   FILE="${SIGNAL_DIR}/dev-ready-$(date +%s%N).json"
-  python3 - "${TITLE}" "${SUBTITLE}" "${SOURCE}" "${BUNDLE_ID}" "${AGENT}" "${ALERT_ID}" "${FILE}" "${KIND}" "${MESSAGE}" "${CREATED_AT}" "${SESSION_ID}" "${ANSWERS}" "${DELIVERY}" <<'PY'
+  python3 - "${TITLE}" "${SUBTITLE}" "${SOURCE}" "${BUNDLE_ID}" "${AGENT}" "${ALERT_ID}" "${FILE}" "${KIND}" "${MESSAGE}" "${CREATED_AT}" "${SESSION_ID}" "${ANSWERS}" "${DELIVERY}" "${REQUEST_ID}" "${PERMISSION_JSON}" <<'PY'
 import json, pathlib, sys
 
-title, subtitle, source, bundle_id, agent, alert_id, path, kind, message, created_at, session_id, answers, delivery = sys.argv[1:14]
+(title, subtitle, source, bundle_id, agent, alert_id, path, kind, message,
+ created_at, session_id, answers, delivery, request_id, permission) = sys.argv[1:16]
 payload = {"id": alert_id, "title": title}
 if subtitle:
     payload["subtitle"] = subtitle
@@ -124,6 +133,10 @@ if answers:
     payload["answers"] = answers
 if delivery:
     payload["delivery"] = delivery
+if request_id:
+    payload["requestId"] = request_id
+if permission:
+    payload["permission"] = permission
 pathlib.Path(path).write_text(json.dumps(payload), encoding="utf-8")
 PY
 fi

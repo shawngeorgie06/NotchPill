@@ -69,6 +69,13 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// How an answer should reach the agent: `keystrokes` (default), `paste`, or
     /// `none` for an agent that cannot be answered from the notch at all.
     var deliverySpec: String?
+    /// Identifies a blocked `PreToolUse` hook waiting on a verdict. Present only
+    /// on an approval request; it names the file the hook is watching, so
+    /// without it there is nowhere to send an answer.
+    var requestId: String?
+    /// The raw `PreToolUse` payload, so the peek can show the change itself
+    /// rather than the sentence "Claude needs your permission to use Edit".
+    var permissionPayload: String?
 
     static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
 
@@ -82,6 +89,19 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         // it is the command it wants to run — which is exactly where a token
         // ends up on a command line. The peek floats above every window.
         return SecretRedactor.redact(message)
+    }
+
+    /// The change or command this alert is asking permission for, ready to draw.
+    ///
+    /// Nil unless the alert came from the `PreToolUse` hook *and* names a live
+    /// request — a payload with no `requestId` has nowhere to send a verdict,
+    /// and offering Allow/Deny that go nowhere is worse than not offering them.
+    var permissionRequest: PermissionRequest? {
+        guard kind == .waiting, requestId != nil,
+              let permissionPayload,
+              let request = PermissionRequest.parse(payload: Data(permissionPayload.utf8))
+        else { return nil }
+        return request.redacted
     }
 
     /// Title and subtitle as they should appear on screen. Both are carried
@@ -123,7 +143,9 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         createdAt: TimeInterval? = nil,
         sessionId: String? = nil,
         answerSpec: String? = nil,
-        deliverySpec: String? = nil
+        deliverySpec: String? = nil,
+        requestId: String? = nil,
+        permissionPayload: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -137,11 +159,14 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         self.sessionId = Self.normalized(sessionId)
         self.answerSpec = Self.normalized(answerSpec)
         self.deliverySpec = Self.normalized(deliverySpec)
+        self.requestId = Self.normalized(requestId)
+        self.permissionPayload = Self.normalized(permissionPayload)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, subtitle, source, agent, bundleId, kind, message, createdAt, sessionId
         case answerSpec = "answers", deliverySpec = "delivery"
+        case requestId, permissionPayload = "permission"
     }
 
     /// Blank/whitespace-only ids are the same as absent — the shell writers omit
@@ -171,6 +196,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         sessionId = Self.normalized(try? c.decode(String.self, forKey: .sessionId))
         answerSpec = Self.normalized(try? c.decode(String.self, forKey: .answerSpec))
         deliverySpec = Self.normalized(try? c.decode(String.self, forKey: .deliverySpec))
+        requestId = Self.normalized(try? c.decode(String.self, forKey: .requestId))
+        permissionPayload = Self.normalized(try? c.decode(String.self, forKey: .permissionPayload))
     }
 
     /// Normalises a JSON `createdAt` (number or numeric string) to epoch seconds.
