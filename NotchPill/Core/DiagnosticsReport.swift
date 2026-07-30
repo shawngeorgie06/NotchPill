@@ -25,6 +25,13 @@ enum DiagnosticsReport {
         var cardWeights: [String: Double]
         var logLines: String
         var home: String
+        /// One line per attached display, plus where the pill decided the notch
+        /// is. Every "it's in the wrong place" report needs this and none of
+        /// them arrive with it: the pill is centred on a notch rect derived
+        /// from the built-in screen, and on a multi-display desk that rect can
+        /// be in a coordinate space the report otherwise never mentions.
+        var displays: [String] = []
+        var notchDescription: String = "unknown"
     }
 
     /// Replaces the user's home directory with `~`. Their account name is the
@@ -53,6 +60,11 @@ enum DiagnosticsReport {
                 .map { "\($0.key)=\(String(format: "%.2f", $0.value))" }
                 .joined(separator: " ")
             out += "\nCard widths     \(weights)"
+        }
+
+        out += "\nNotch            \(f.notchDescription)"
+        if !f.displays.isEmpty {
+            out += "\n\nDisplays\n--------\n" + f.displays.joined(separator: "\n")
         }
 
         out += "\n\nLog\n---\n"
@@ -88,7 +100,29 @@ enum DiagnosticsReport {
             notchScale: settings.notchScale,
             cardWeights: settings.cardWeights,
             logLines: LogStore.shared.formatted,
-            home: NSHomeDirectory())
+            home: NSHomeDirectory(),
+            displays: NSScreen.screens.enumerated().map { index, screen in
+                let f = screen.frame
+                let v = screen.visibleFrame
+                return String(
+                    format: "[%d]%@ frame %.0f,%.0f %.0f×%.0f · visible %.0f,%.0f %.0f×%.0f "
+                        + "· scale %.1f · safeTop %.0f",
+                    index,
+                    screen == NSScreen.main ? " main" : "",
+                    f.origin.x, f.origin.y, f.width, f.height,
+                    v.origin.x, v.origin.y, v.width, v.height,
+                    screen.backingScaleFactor, screen.safeAreaInsets.top)
+            },
+            notchDescription: {
+                guard let geo = NotchGeometry.current() else {
+                    return "none found — overlay hidden"
+                }
+                let r = geo.notchRect
+                let onMain = geo.screen == NSScreen.main
+                return String(format: "%.0f,%.0f %.0f×%.0f on %@display",
+                              r.origin.x, r.origin.y, r.width, r.height,
+                              onMain ? "main " : "secondary ")
+            }())
         return build(facts)
     }
 }
