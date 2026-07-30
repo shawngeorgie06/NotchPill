@@ -65,6 +65,15 @@ final class LogStore: ObservableObject {
                              category: category, message: message)
         nextID &+= 1
         entries = Self.trim(entries + [entry], to: Self.capacity)
+        // The window is for users; this is for whoever is driving the app from
+        // a terminal and wants the same lines where `grep` can reach them.
+        // stderr, not stdout: unbuffered, so a line is readable the moment it
+        // happens rather than whenever a 4KB block fills. Chasing a timing bug
+        // through a buffer is how you conclude the wrong thing.
+        if Self.mirrorsToStdout {
+            FileHandle.standardError.write(
+                Data((entry.line(formatter: Self.lineFormatter) + "\n").utf8))
+        }
     }
 
     func clear() {
@@ -85,6 +94,9 @@ final class LogStore: ObservableObject {
         let f = Self.lineFormatter
         return entries.map { $0.line(formatter: f) }.joined(separator: "\n")
     }
+
+    nonisolated static let mirrorsToStdout =
+        ProcessInfo.processInfo.environment["NOTCHPILL_LOG_STDOUT"] == "1"
 
     nonisolated static let lineFormatter: DateFormatter = {
         let f = DateFormatter()

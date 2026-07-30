@@ -234,6 +234,11 @@ final class NotchContainerView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    /// Same reason as `PassthroughHostingView`: the first click on an
+    /// inactive accessory window must reach the control, not be spent
+    /// activating the app.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {
         let local = convert(event.locationInWindow, from: nil)
         if interactiveRectsLocal().contains(where: { $0.contains(local) }) {

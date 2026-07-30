@@ -748,8 +748,15 @@ final class NotchController {
         let mouse = NSEvent.mouseLocation
 
         // Browser tab flanks — pass through unless clicking the pill itself.
+        //
+        // "Itself" has to include a peek. A peek is far wider than the notch,
+        // so its right-hand controls — the ✕ and the reply button — sit out in
+        // the flank, and asking only the container's tracking rects (which a
+        // just-arrived peek may not be in yet) declared them click-through.
+        // That is the whole of "the ✕ doesn't work sometimes".
         if NotchGeometry.pointIsInBrowserFlank(mouse, on: geometry.screen),
-           container.isPointOnInteractivePill(mouse) == false {
+           container.isPointOnInteractivePill(mouse) == false,
+           !isPointerOverPill(mouse) {
             window.ignoresMouseEvents = true
             return
         }
@@ -881,6 +888,10 @@ final class NotchController {
     /// answered, superseded, or removed as stale. With no waiting alerts present
     /// this is byte-for-byte the v1.3.0 finished behaviour.
     private func dismissDevReady(id: String? = nil) {
+        // "The ✕ doesn't work sometimes" was invisible from outside: a
+        // click-through press and a press that landed both end with the peek
+        // gone, one on its own timer. This says which happened.
+        LogStore.log("peek", id == nil ? "dismissed (fade timer)" : "dismissed (single)")
         if let id {
             state.removeDevReady(id: id)
             if !state.devReadyAlerts.isEmpty {
@@ -922,6 +933,7 @@ final class NotchController {
     /// not focus the terminal, and unlike the fade timer it will clear a
     /// `.waiting` peek — which otherwise has no way to go away.
     private func dismissPeek(id: String) {
+        LogStore.log("peek", "dismissed by ✕")
         state.removeDevReady(id: id)
         guard state.devReadyAlerts.isEmpty else {
             if !state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
