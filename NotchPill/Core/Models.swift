@@ -220,6 +220,13 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         return now.timeIntervalSince1970 - createdAt
     }
 
+    func shortAgeText(at now: Date = Date()) -> String {
+        guard let age = age(at: now), age >= 0 else { return "Earlier" }
+        if age < 60 { return "Now" }
+        if age < 3_600 { return "\(Int(age / 60))m" }
+        return "\(Int(age / 3_600))h"
+    }
+
     /// Short label for the agent or source shown in the peek row.
     var agentLabel: String? {
         if let agent, !agent.isEmpty { return agent }

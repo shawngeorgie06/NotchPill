@@ -1032,11 +1032,17 @@ struct ExpandedActivityCard: View {
             .foregroundStyle(.white.opacity(0.45))
             ForEach(alerts) { alert in
                 Button { if let bundleId = alert.bundleId { actions.focusApp(bundleId) } } label: {
+                    HStack(alignment: .top, spacing: s(5)) {
                     VStack(alignment: .leading, spacing: 0) {
                         Text(alert.displayTitle).font(font(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
                         if let subtitle = alert.displaySubtitle, !subtitle.isEmpty {
                             Text(subtitle).font(font(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
                         }
+                    }
+                    Text(alert.shortAgeText())
+                        .font(font(size: 9, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.38))
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }
