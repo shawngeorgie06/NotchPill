@@ -117,7 +117,7 @@ actor CIStatusProvider {
     private func fetchRuns(repo: String) -> [CIRun] {
         guard let ghPath,
               let out = run(ghPath, ["run", "list", "-R", repo, "--limit", "3", "--json",
-                                     "workflowName,status,conclusion,createdAt,url,headBranch"]),
+                                     "workflowName,status,conclusion,createdAt,updatedAt,url,headBranch"]),
               let data = out.data(using: .utf8),
               let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         else { return [] }
@@ -125,6 +125,9 @@ actor CIStatusProvider {
         return items.compactMap { item in
             guard let url = item["url"] as? String else { return nil }
             let created = (item["createdAt"] as? String).flatMap { iso.date(from: $0) } ?? Date()
+            // `updatedAt` is the finish time once a run completes, and what a
+            // finished run's lifetime is measured from.
+            let updated = (item["updatedAt"] as? String).flatMap { iso.date(from: $0) }
             return CIRun(
                 id: url,
                 repo: repo,
@@ -132,7 +135,8 @@ actor CIStatusProvider {
                 branch: item["headBranch"] as? String ?? "",
                 state: CIRun.state(status: item["status"] as? String ?? "",
                                    conclusion: item["conclusion"] as? String ?? ""),
-                started: created)
+                started: created,
+                updated: updated)
         }
     }
 

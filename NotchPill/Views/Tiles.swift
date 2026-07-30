@@ -802,10 +802,21 @@ struct ExpandedActivityCard: View {
                                 Circle()
                                     .fill(color(for: run.state))
                                     .frame(width: s(5), height: s(5))
-                                Text(run.workflow)
-                                    .font(font(size: 11, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.9))
-                                    .lineLimit(1)
+                                // Repo first. The card follows whichever repos
+                                // your agents are in, so "Release — passed" on
+                                // its own says nothing about *whose* release —
+                                // someone watching a build in one project saw
+                                // another project's green tick and believed it.
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(run.repoName)
+                                        .font(font(size: 11, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.92))
+                                        .lineLimit(1)
+                                    Text(run.workflow)
+                                        .font(font(size: 9, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.45))
+                                        .lineLimit(1)
+                                }
                                 Spacer(minLength: s(4))
                                 Text(run.statusLabel)
                                     .font(font(size: 10, weight: .medium))

@@ -2520,8 +2520,8 @@ struct CIRunLifetimeTests {
     @Test("a pass stops being news")
     func passedAgesOut() {
         let now = Date()
-        let fresh = run(.passed, ageMinutes: 5, now: now)
-        let stale = run(.passed, ageMinutes: 120, now: now)
+        let fresh = run(.passed, ageMinutes: 0.5, now: now)
+        let stale = run(.passed, ageMinutes: 10, now: now)
         let kept = CIRun.current([fresh, stale], now: now)
         #expect(kept.map(\.id) == [fresh.id])
     }
@@ -2552,7 +2552,7 @@ struct CIRunLifetimeTests {
     @Test("cancelled and skipped age out like a pass")
     func otherAgesOut() {
         let now = Date()
-        #expect(CIRun.current([run(.other("cancelled"), ageMinutes: 120, now: now)],
+        #expect(CIRun.current([run(.other("cancelled"), ageMinutes: 10, now: now)],
                               now: now).isEmpty)
     }
 
@@ -2561,8 +2561,8 @@ struct CIRunLifetimeTests {
     @Test("an all-stale repo yields nothing at all")
     func emptiesCompletely() {
         let now = Date()
-        let stale = [run(.passed, ageMinutes: 200, now: now),
-                     run(.passed, ageMinutes: 300, now: now)]
+        let stale = [run(.passed, ageMinutes: 20, now: now),
+                     run(.passed, ageMinutes: 30, now: now)]
         #expect(CIRun.current(stale, now: now).isEmpty)
     }
 }
@@ -2763,5 +2763,56 @@ struct SecretRedactorTests {
     @Test("empty input is not a special case")
     func empty() {
         #expect(SecretRedactor.redact("") == "")
+    }
+}
+
+@Suite("CI row identity")
+struct CIRowIdentityTests {
+    private func run(repo: String) -> CIRun {
+        CIRun(id: "u", repo: repo, workflow: "Release", branch: "main",
+              state: .passed, started: Date())
+    }
+
+    // Reported: someone watching a build in their own project saw a green
+    // "Release — passed" and believed it. It was another repo's — the card
+    // follows whichever repos your agents are in, and the row never said which.
+    @Test("a row names its repository")
+    func namesRepo() {
+        #expect(run(repo: "someone/their-project").repoName == "their-project")
+    }
+
+    @Test("a slug without an owner still yields something")
+    func bareSlug() {
+        #expect(run(repo: "solo").repoName == "solo")
+    }
+
+    // A finished run's lifetime runs from when it finished. Measuring from the
+    // start would expire a three-minute build before it ever completed.
+    @Test("a build that took longer than the lifetime still gets shown")
+    func longBuildStillAppears() {
+        let now = Date()
+        let slow = CIRun(id: "u", repo: "o/r", workflow: "Release", branch: "main",
+                         state: .passed,
+                         started: now.addingTimeInterval(-600),   // started 10 min ago
+                         updated: now.addingTimeInterval(-10))    // finished 10s ago
+        #expect(CIRun.current([slow], now: now).count == 1)
+    }
+
+    @Test("and disappears two minutes after it finished")
+    func goesAwayAfterTwoMinutes() {
+        let now = Date()
+        let done = CIRun(id: "u", repo: "o/r", workflow: "Release", branch: "main",
+                         state: .passed,
+                         started: now.addingTimeInterval(-900),
+                         updated: now.addingTimeInterval(-150))   // finished 2.5 min ago
+        #expect(CIRun.current([done], now: now).isEmpty)
+    }
+
+    @Test("with no finish time it falls back to the start")
+    func fallsBackToStarted() {
+        let now = Date()
+        let old = CIRun(id: "u", repo: "o/r", workflow: "Release", branch: "main",
+                        state: .passed, started: now.addingTimeInterval(-600), updated: nil)
+        #expect(CIRun.current([old], now: now).isEmpty)
     }
 }

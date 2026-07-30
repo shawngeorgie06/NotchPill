@@ -18,6 +18,21 @@ struct CIRun: Equatable, Identifiable {
     var branch: String
     var state: State
     var started: Date
+    /// When the run last changed — its finish time once completed. Ageing a
+    /// finished run from `started` is wrong: a release build takes minutes, so
+    /// a short lifetime measured from the start would expire the run before it
+    /// ever finished, and it would never appear at all.
+    var updated: Date?
+
+    /// The moment a finished run stopped being in progress.
+    var finished: Date { updated ?? started }
+
+    /// Just the repository, without the owner — "notchpill", not
+    /// "shawngeorgie06/notchpill". The owner is the same for every row you are
+    /// likely to see at once, and the card has no width to spare.
+    var repoName: String {
+        repo.split(separator: "/").last.map(String.init) ?? repo
+    }
 
     /// `gh` reports an in-flight run as `queued`/`in_progress` with no
     /// conclusion, and a finished one as `completed` plus a conclusion. Reading
@@ -59,7 +74,7 @@ struct CIRun: Equatable, Identifiable {
     /// A pass is worth knowing about for as long as you might still be watching
     /// for it, and then it is over. A failure is worth keeping much longer:
     /// it is the one you have not dealt with yet.
-    static let passedLifetime: TimeInterval = 1800
+    static let passedLifetime: TimeInterval = 120
     static let failedLifetime: TimeInterval = 21600
 
     /// Drops finished runs that have stopped being news. Anything still
@@ -67,7 +82,8 @@ struct CIRun: Equatable, Identifiable {
     /// hours is exactly the one you want to see.
     static func current(_ runs: [CIRun], now: Date = Date()) -> [CIRun] {
         runs.filter { run in
-            let age = now.timeIntervalSince(run.started)
+            // From when it finished, not when it started.
+            let age = now.timeIntervalSince(run.finished)
             switch run.state {
             case .running: return true
             case .failed: return age < failedLifetime

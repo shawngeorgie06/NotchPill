@@ -815,7 +815,10 @@ final class NotchController {
         let dirs = sessions.compactMap(\.directory)
         Task { [weak self] in
             guard let self else { return }
-            let runs = await ciStatus.runs(forDirectories: dirs)
+            // Filter again on the way out. The provider only ages runs when it
+            // fetches, once every 45s, and a two-minute lifetime cannot afford
+            // to overshoot by most of a poll interval.
+            let runs = CIRun.current(await ciStatus.runs(forDirectories: dirs))
             await MainActor.run {
                 if runs.count != self.state.ciRuns.count {
                     LogStore.log("ci", "\(runs.count) run(s) from \(dirs.count) agent director"
