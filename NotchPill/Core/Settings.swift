@@ -209,6 +209,20 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(agentReplyEnabled, forKey: Keys.agentReplyEnabled) }
     }
 
+    /// Backed by `~/.notchpill/approvals-enabled` rather than UserDefaults —
+    /// the shell hook that reads it cannot read defaults. See `ApprovalGate`.
+    @Published var agentApprovalsEnabled: Bool {
+        didSet {
+            do {
+                try ApprovalGate.setEnabled(agentApprovalsEnabled)
+            } catch {
+                LogStore.log("permission",
+                             "could not turn approvals \(agentApprovalsEnabled ? "on" : "off"): \(error)",
+                             level: .warn)
+            }
+        }
+    }
+
     @Published var launchAtLogin: Bool = (SMAppService.mainApp.status == .enabled)
 
     private enum Keys {
@@ -321,6 +335,7 @@ final class AppSettings: ObservableObject {
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
         agentReplyEnabled = defaults.object(forKey: Keys.agentReplyEnabled) as? Bool ?? true
         watchAgentTranscripts = defaults.object(forKey: Keys.watchAgentTranscripts) as? Bool ?? true
+        agentApprovalsEnabled = ApprovalGate.isEnabled()
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -407,5 +422,8 @@ final class AppSettings: ObservableObject {
         autoCheckUpdates = true
         agentReplyEnabled = true
         watchAgentTranscripts = true
+        // Off is the shipped default, and unlike everything above this one
+        // reaches the filesystem: it removes ~/.notchpill/approvals-enabled.
+        agentApprovalsEnabled = false
     }
 }

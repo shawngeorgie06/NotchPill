@@ -3454,3 +3454,70 @@ struct AgentSessionAgeingTests {
         #expect(kept.map(\.id) == ["live"])
     }
 }
+
+@Suite("Approval gate")
+struct ApprovalGateTests {
+    private func scratch() -> URL {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("notchpill-gate-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test("Off when the file is not there — the shipped default")
+    func defaultsOff() {
+        let home = scratch()
+        defer { try? FileManager.default.removeItem(at: home) }
+        #expect(ApprovalGate.isEnabled(home: home) == false)
+    }
+
+    @Test("Enabling creates the file, and the directory it lives in")
+    func enableCreatesFile() throws {
+        let home = scratch()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try ApprovalGate.setEnabled(true, home: home)
+
+        #expect(FileManager.default.fileExists(atPath: ApprovalGate.file(home: home).path))
+        #expect(ApprovalGate.isEnabled(home: home))
+    }
+
+    @Test("Disabling removes it, leaving the state the app ships with")
+    func disableRemovesFile() throws {
+        let home = scratch()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try ApprovalGate.setEnabled(true, home: home)
+        try ApprovalGate.setEnabled(false, home: home)
+
+        #expect(ApprovalGate.isEnabled(home: home) == false)
+    }
+
+    /// Turning something off is the escape hatch; it must not throw because the
+    /// thing was already off. The toggle would flip back and look stuck.
+    @Test("Disabling something already off is not an error")
+    func disableIsIdempotent() throws {
+        let home = scratch()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try ApprovalGate.setEnabled(false, home: home)
+        try ApprovalGate.setEnabled(false, home: home)
+
+        #expect(ApprovalGate.isEnabled(home: home) == false)
+    }
+
+    @Test("Enabling twice is not an error")
+    func enableIsIdempotent() throws {
+        let home = scratch()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try ApprovalGate.setEnabled(true, home: home)
+        try ApprovalGate.setEnabled(true, home: home)
+
+        #expect(ApprovalGate.isEnabled(home: home))
+    }
+
+    /// The path the hook script documents. If this moves, the script's
+    /// `~/.notchpill/approvals-enabled` check silently stops matching.
+    @Test("The path is the one the hook watches")
+    func pathMatchesHook() {
+        let home = URL(fileURLWithPath: "/tmp/home")
+        #expect(ApprovalGate.file(home: home).path == "/tmp/home/.notchpill/approvals-enabled")
+    }
+}

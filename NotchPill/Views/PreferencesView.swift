@@ -215,6 +215,10 @@ struct PreferencesView: View {
             Toggle("Play a sound", isOn: $settings.devReadyPlaySound)
                 .disabled(!settings.showDevReadyPings)
             Toggle("Reply to agents from the notch", isOn: $settings.agentReplyEnabled)
+            Toggle("Ask before agents edit files", isOn: $settings.agentApprovalsEnabled)
+            Text("Pauses Claude Code on Edit, Write and Bash and waits for Allow or Deny in the notch. Requires the agent hooks to be installed. If the notch is not answered within 30 seconds, the agent asks you itself.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             HStack {
                 Text("Peek duration")
                 Spacer()
