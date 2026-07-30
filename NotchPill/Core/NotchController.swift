@@ -20,6 +20,8 @@ final class NotchController {
     // Providers.
     private let nowPlaying = NowPlayingProvider()
     private let volume = VolumeProvider()
+    private let brightness = BrightnessProvider()
+    private let microphone = MicrophoneProvider()
     private let calendar = CalendarProvider()
     private let airDrop = AirDropProvider()
     private let appSwitch = AppSwitchProvider()
@@ -261,7 +263,7 @@ final class NotchController {
         hoverMonitor.stop()
         hotZoneKeys.stop()
         nowPlaying.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
-        systemStats.stop(); battery.stop(); devReady.stop()
+        systemStats.stop(); battery.stop(); devReady.stop(); brightness.stop(); microphone.stop()
         replyHotKey.unregister()
         peekEscapeMonitors.forEach(NSEvent.removeMonitor)
         peekEscapeMonitors = []
@@ -295,6 +297,10 @@ final class NotchController {
         volume.start()
         if let level = volume.currentVolume() { state.refreshSystemVolume(level) }
         volume.onVolumeChanged = { [weak self] level in self?.state.showVolume(level) }
+        brightness.onBrightnessChanged = { [weak self] level in self?.state.showBrightness(level) }
+        microphone.onMuteChanged = { [weak self] muted in self?.state.showMicrophoneMuted(muted) }
+        brightness.start()
+        microphone.start()
         devReady.onDevReady = { [weak self] alert in self?.presentDevReady(alert, origin: "signal") }
         // Hookless finished peeks. Emits the same title/subtitle/sessionId as the
         // hooks, so DevReadyDedup collapses the pair when both are active.

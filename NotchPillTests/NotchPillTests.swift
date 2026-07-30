@@ -237,6 +237,16 @@ struct NotchActivityTests {
     }
 }
 
+@Suite("System HUD sources")
+struct SystemHUDSourceTests {
+    @Test("brightness values clamp to the HUD range")
+    func brightnessPercent() {
+        #expect(BrightnessProvider.percent(from: -0.5) == 0)
+        #expect(BrightnessProvider.percent(from: 0.625) == 63)
+        #expect(BrightnessProvider.percent(from: 1.5) == 100)
+    }
+}
+
 // MARK: - Shelf store
 
 @MainActor

@@ -30,6 +30,10 @@ final class NotchState: ObservableObject {
     @Published private(set) var systemVolume: Int?
     /// Transient volume HUD level (0–100), nil when hidden.
     @Published private(set) var volumeLevel: Int? = nil
+    /// Transient display-brightness HUD level (0–100), nil when hidden.
+    @Published private(set) var brightnessLevel: Int? = nil
+    /// Transient default-microphone mute HUD, nil when hidden.
+    @Published private(set) var microphoneMuted: Bool? = nil
     /// Active dev-ready peeks (multiple agents can finish at once).
     @Published private(set) var devReadyAlerts: [DevReadyAlert] = []
     /// Agent conversations alive right now. Distinct from `devReadyAlerts`:
@@ -54,6 +58,8 @@ final class NotchState: ObservableObject {
 
     // Pending inputs the resolver reads when it fires.
     private var volumeHideItem: DispatchWorkItem?
+    private var brightnessHideItem: DispatchWorkItem?
+    private var microphoneHideItem: DispatchWorkItem?
 
     // MARK: - Hover
 
@@ -136,6 +142,24 @@ final class NotchState: ObservableObject {
     /// Updates the stored volume without flashing the HUD.
     func refreshSystemVolume(_ level: Int) {
         systemVolume = level
+    }
+
+    /// Shows the built-in display's brightness briefly after macOS changes it.
+    func showBrightness(_ level: Int) {
+        brightnessLevel = level
+        brightnessHideItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.brightnessLevel = nil }
+        brightnessHideItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: item)
+    }
+
+    /// Shows whether the current default microphone was muted or unmuted.
+    func showMicrophoneMuted(_ muted: Bool) {
+        microphoneMuted = muted
+        microphoneHideItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.microphoneMuted = nil }
+        microphoneHideItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: item)
     }
 
     func updateSystemStats(_ stats: SystemStats?) {

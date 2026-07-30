@@ -339,6 +339,82 @@ struct VolumeHUD: View {
     }
 }
 
+/// Brief overlay shown when the built-in display brightness changes.
+struct BrightnessHUD: View {
+    let level: Int
+
+    var body: some View {
+        SystemLevelHUD(icon: "sun.max.fill", label: "Brightness", level: level)
+    }
+}
+
+/// Brief overlay shown when the default input device reports a mute change.
+struct MicrophoneHUD: View {
+    let isMuted: Bool
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: isMuted ? "mic.slash.fill" : "mic.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 22)
+            Text(isMuted ? "Microphone muted" : "Microphone on")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background { SystemHUDBackground() }
+        .shadow(color: .black.opacity(0.45), radius: 10, y: 5)
+        .offset(y: 52)
+    }
+}
+
+private struct SystemLevelHUD: View {
+    let icon: String
+    let label: String
+    let level: Int
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22)
+            Text(label)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.72))
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.18))
+                    Capsule().fill(.white).frame(width: geo.size.width * CGFloat(level) / 100)
+                }
+            }
+            .frame(height: 6)
+            Text("\(level)")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 30, alignment: .trailing)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background { SystemHUDBackground() }
+        .shadow(color: .black.opacity(0.45), radius: 10, y: 5)
+        .offset(y: 52)
+    }
+}
+
+private struct SystemHUDBackground: View {
+    var body: some View {
+        Capsule(style: .continuous)
+            .fill(Color.black)
+            .overlay {
+                Capsule(style: .continuous)
+                    .strokeBorder(NotchDesign.pillStroke, lineWidth: 0.5)
+            }
+    }
+}
+
 // MARK: - Dev ready peek
 
 /// One or more agent-ready rows when tasks finish around the same time.

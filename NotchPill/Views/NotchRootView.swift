@@ -97,9 +97,19 @@ struct NotchRootView: View {
             }
         }
         .overlay {
-            if let level = state.volumeLevel {
-                VolumeHUD(level: level)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            VStack(spacing: 8) {
+                if let level = state.volumeLevel {
+                    VolumeHUD(level: level)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+                if let level = state.brightnessLevel {
+                    BrightnessHUD(level: level)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+                if let muted = state.microphoneMuted {
+                    MicrophoneHUD(isMuted: muted)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -114,6 +124,8 @@ struct NotchRootView: View {
         .animation(expandAnimation, value: settingsFingerprint)
         .animation(contentAnimation, value: state.activity)
         .animation(contentAnimation, value: state.volumeLevel)
+        .animation(contentAnimation, value: state.brightnessLevel)
+        .animation(contentAnimation, value: state.microphoneMuted)
         .animation(expandAnimation, value: state.devReadyAlerts.map(\.id))
         .animation(expandAnimation, value: state.replyCompose != nil)
         .animation(expandAnimation, value: state.updateProgress?.phase)
