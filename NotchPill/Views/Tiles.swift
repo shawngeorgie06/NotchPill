@@ -584,6 +584,20 @@ struct DevReadyPeekRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(DevReadyRowButtonStyle())
+            // Finished notifications are informational, so a decisive left
+            // swipe can clear one without switching focus to its source app.
+            // Waiting rows intentionally ignore this gesture: an approval must
+            // always require the explicit × or Esc dismissal path.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 12).onEnded { value in
+                    guard alert.kind == .finished,
+                          DevReadyDismissSwipe.isDismissal(translation: value.translation) else { return }
+                    actions.dismissPeek(alert.id)
+                }
+            )
+            .accessibilityHint(alert.kind == .finished
+                               ? "Swipe left to dismiss, or double tap to open"
+                               : "Double tap to open")
             .background {
                 if isFocused {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1276,6 +1290,15 @@ enum MediaSwipeDirection: Equatable {
         guard abs(translation.width) >= minimumDistance,
               abs(translation.width) > abs(translation.height) else { return nil }
         return translation.width < 0 ? .next : .previous
+    }
+}
+
+/// A conservative gesture classifier for transient, already-finished peeks.
+/// It is separate from media transport because only one direction is useful:
+/// moving the notification left takes it away, like the system's own banners.
+enum DevReadyDismissSwipe {
+    static func isDismissal(translation: CGSize, minimumDistance: CGFloat = 52) -> Bool {
+        translation.width <= -minimumDistance && abs(translation.width) > abs(translation.height)
     }
 }
 

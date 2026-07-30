@@ -247,6 +247,17 @@ struct SystemHUDSourceTests {
     }
 }
 
+@Suite("Dev-ready dismiss gesture")
+struct DevReadyDismissSwipeTests {
+    @Test("only a deliberate leftward horizontal swipe dismisses")
+    func dismissalDirection() {
+        #expect(DevReadyDismissSwipe.isDismissal(translation: CGSize(width: -52, height: 2)))
+        #expect(!DevReadyDismissSwipe.isDismissal(translation: CGSize(width: 52, height: 2)))
+        #expect(!DevReadyDismissSwipe.isDismissal(translation: CGSize(width: -30, height: 1)))
+        #expect(!DevReadyDismissSwipe.isDismissal(translation: CGSize(width: -90, height: 90)))
+    }
+}
+
 // MARK: - Shelf store
 
 @MainActor
