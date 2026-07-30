@@ -114,6 +114,17 @@ struct AgentSession: Equatable, Identifiable {
         }
     }
 
+    /// The task line is phrased as an activity, so the card answers the human
+    /// question — “what is it doing?” — rather than reading like transcript
+    /// metadata. The actual task text remains the source of truth.
+    var taskLeadIn: String {
+        switch state {
+        case .working: return "Working on"
+        case .waiting: return "Needs your reply about"
+        case .idle: return "Last worked on"
+        }
+    }
+
     /// Compact enough for a notch row: "4m", "2h", never "2 hours ago".
     static func shortDuration(since: Date, now: Date = Date()) -> String {
         let s = max(0, Int(now.timeIntervalSince(since)))

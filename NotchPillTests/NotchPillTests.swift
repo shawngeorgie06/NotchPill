@@ -1420,6 +1420,23 @@ struct TranscriptTurnTests {
     }
 }
 
+@Suite("Focused activity ordering")
+struct FocusedActivityTests {
+    @Test("a blocked agent becomes the focused item ahead of completions")
+    func waitingWins() {
+        let finished = DevReadyAlert(title: "build", kind: .finished, createdAt: 20)
+        let waiting = DevReadyAlert(title: "approval", kind: .waiting, createdAt: 10)
+        #expect(DevReadyAlert.focusOrdered([finished, waiting]).first?.id == waiting.id)
+    }
+
+    @Test("the newest completion leads when nothing needs attention")
+    func newestFinishedWins() {
+        let older = DevReadyAlert(title: "older", kind: .finished, createdAt: 10)
+        let newer = DevReadyAlert(title: "newer", kind: .finished, createdAt: 20)
+        #expect(DevReadyAlert.focusOrdered([older, newer]).first?.id == newer.id)
+    }
+}
+
 @Suite("Live agent sessions")
 struct AgentSessionTests {
     private func session(_ id: String, _ state: AgentSession.State,

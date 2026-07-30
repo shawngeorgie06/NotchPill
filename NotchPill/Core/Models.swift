@@ -407,6 +407,20 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
 /// Whether an agent alert is a completed task (finished) or a pending question (waiting).
 enum AlertKind: String, Codable { case finished, waiting }
 
+extension DevReadyAlert {
+    /// Orders a burst of activity into the one thing that merits attention
+    /// first, followed by the quiet backlog. A blocked agent always outranks a
+    /// completion notification; among equal kinds, the newest event wins.
+    static func focusOrdered(_ alerts: [DevReadyAlert]) -> [DevReadyAlert] {
+        alerts.sorted { lhs, rhs in
+            let lhsPriority = lhs.kind == .waiting ? 0 : 1
+            let rhsPriority = rhs.kind == .waiting ? 0 : 1
+            if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
+            return (lhs.createdAt ?? 0) > (rhs.createdAt ?? 0)
+        }
+    }
+}
+
 extension Notification.Name {
     static let notchPillTestDevReady = Notification.Name("com.shawngeorgie06.NotchPill.testDevReady")
     static let notchPillTestMultipleDevReady = Notification.Name("com.shawngeorgie06.NotchPill.testMultipleDevReady")

@@ -349,16 +349,29 @@ struct DevReadyPeekListView: View {
     /// Drives a one-shot entrance glow so the peek catches your eye on arrival.
     @State private var pulse = false
 
+    private var orderedAlerts: [DevReadyAlert] { DevReadyAlert.focusOrdered(alerts) }
+    private var focusedAlert: DevReadyAlert? { orderedAlerts.first }
+    private var queuedCount: Int { max(0, orderedAlerts.count - 1) }
+
     var body: some View {
         VStack(spacing: 0) {
-            if alerts.count > 1 {
+            // The layout reserves this header only for a multi-item burst. A
+            // single row is already visually focused, and adding chrome above
+            // it would make its fixed-height peek clip.
+            if alerts.count > 1, let focusedAlert {
                 HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(systemName: focusedAlert.kind == .waiting
+                          ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(NotchDesign.devReadyGreen)
-                    Text("\(alerts.count) agents ready")
+                        .foregroundStyle(accent(for: focusedAlert))
+                    Text(focusedAlert.kind == .waiting ? "Needs you" : "In focus")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.55))
+                    if queuedCount > 0 {
+                        Text("· \(queuedCount) more \(queuedCount == 1 ? "activity" : "activities")")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.38))
+                    }
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 14)
@@ -389,9 +402,9 @@ struct DevReadyPeekListView: View {
 
     private var alertRows: some View {
         VStack(spacing: 0) {
-            ForEach(Array(alerts.enumerated()), id: \.element.id) { index, alert in
-                DevReadyPeekRow(alert: alert, actions: actions)
-                if index < alerts.count - 1 {
+            ForEach(Array(orderedAlerts.enumerated()), id: \.element.id) { index, alert in
+                DevReadyPeekRow(alert: alert, actions: actions, isFocused: index == 0)
+                if index < orderedAlerts.count - 1 {
                     Rectangle()
                         .fill(Color.white.opacity(0.08))
                         .frame(height: 1)
@@ -400,12 +413,17 @@ struct DevReadyPeekListView: View {
             }
         }
     }
+
+    private func accent(for alert: DevReadyAlert) -> Color {
+        alert.kind == .waiting ? .orange : NotchDesign.devReadyGreen
+    }
 }
 
 /// Single dev-ready row — tap to jump to the source app and dismiss that agent.
 struct DevReadyPeekRow: View {
     let alert: DevReadyAlert
     let actions: NotchActions
+    var isFocused = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
 
@@ -413,6 +431,10 @@ struct DevReadyPeekRow: View {
     /// budget in `NotchContentLayout` reads the same one.
     private var canAnswer: Bool {
         alert.canAnswerFromNotch(replyEnabled: AppSettings.shared.agentReplyEnabled)
+    }
+
+    private var accentColor: Color {
+        alert.kind == .waiting ? .orange : NotchDesign.devReadyGreen
     }
 
     var body: some View {
@@ -430,12 +452,12 @@ struct DevReadyPeekRow: View {
                 HStack(spacing: 10) {
                     ZStack {
                         Circle()
-                            .fill(NotchDesign.devReadyGreen.opacity(0.22))
+                            .fill(accentColor.opacity(0.22))
                             .frame(width: pulse ? 18 : 12, height: pulse ? 18 : 12)
                             .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
                                        value: pulse)
                         Circle()
-                            .fill(NotchDesign.devReadyGreen)
+                            .fill(accentColor)
                             .frame(width: 8, height: 8)
                     }
                     .frame(width: 20)
@@ -484,6 +506,12 @@ struct DevReadyPeekRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(DevReadyRowButtonStyle())
+            .background {
+                if isFocused {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(accentColor.opacity(0.08))
+                }
+            }
             .onAppear { pulse = !reduceMotion }
 
             if canAnswer {
@@ -665,7 +693,7 @@ struct DevReadyPeekRow: View {
         } else {
             Image(systemName: "sparkles")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(NotchDesign.devReadyGreen)
+                .foregroundStyle(accentColor)
                 .frame(width: 22, height: 22)
                 .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
         }
@@ -683,7 +711,7 @@ struct DevReadyPeekRow: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(
-                (prominent ? NotchDesign.devReadyGreen.opacity(0.14) : Color.white.opacity(0.08)),
+                (prominent ? accentColor.opacity(0.14) : Color.white.opacity(0.08)),
                 in: Capsule()
             )
     }
@@ -924,7 +952,7 @@ struct ExpandedActivityCard: View {
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 if let task = session.task {
-                    Text(task)
+                    Text("\(session.taskLeadIn) · \(task)")
                         .font(font(size: 10))
                         .foregroundStyle(.white.opacity(0.42))
                         .lineLimit(1)
