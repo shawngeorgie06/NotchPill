@@ -2924,3 +2924,116 @@ struct PeekIdentityTests {
         #expect(alert(agent: nil, source: "cursor").displayIdentity.lead == "cursor")
     }
 }
+
+// MARK: - Permission requests
+
+@Suite("Permission request parsing")
+struct PermissionRequestTests {
+    // The payload Claude Code sends for an Edit — the thing the peek was
+    // throwing away in favour of "Claude needs your permission to use Edit".
+    @Test("an edit becomes a diff you can read")
+    func editBecomesDiff() {
+        let req = PermissionRequest.parse(tool: "Edit", input: [
+            "file_path": "/Users/x/proj/src/auth/middleware.ts",
+            "old_string": "const verify = (token) =>\n  jwt.verify(token);",
+            "new_string": "const verify = (token) =>\n  if (!token) throw new AuthError('missing');\n  return jwt.verify(token, secret);",
+        ])
+        #expect(req?.summary == "Edit auth/middleware.ts")
+        #expect(req?.changeCount == "+2 −1")
+        guard case .edit(_, let diff)? = req?.action else { return #expect(Bool(false)) }
+        // The unchanged first line is context, not a delete-and-re-add.
+        #expect(diff.first?.kind == .context)
+        #expect(diff.contains { $0.kind == .removed && $0.text.contains("jwt.verify(token);") })
+        #expect(diff.contains { $0.kind == .added && $0.text.contains("AuthError") })
+    }
+
+    @Test("a shell command is shown as itself")
+    func bashCommand() {
+        let req = PermissionRequest.parse(tool: "Bash", input: [
+            "command": "npm test", "description": "Run the test suite",
+        ])
+        #expect(req?.summary == "npm test")
+        guard case .run(_, let note)? = req?.action else { return #expect(Bool(false)) }
+        #expect(note == "Run the test suite")
+    }
+
+    @Test("a new file says how big it is")
+    func writeFile() {
+        let req = PermissionRequest.parse(tool: "Write", input: [
+            "file_path": "/a/b/src/routes/users.ts", "content": "one\ntwo\nthree",
+        ])
+        #expect(req?.summary == "Create routes/users.ts")
+        guard case .write(_, let lines)? = req?.action else { return #expect(Bool(false)) }
+        #expect(lines == 3)
+    }
+
+    // An agent asking for something we cannot draw still has to produce a peek.
+    // Showing nothing is how someone waits on a prompt they never saw.
+    @Test("an unknown tool still names itself")
+    func unknownTool() {
+        let req = PermissionRequest.parse(tool: "WebFetch", input: ["url": "https://example.com"])
+        #expect(req?.tool == "WebFetch")
+        #expect(req?.summary.contains("WebFetch") == true)
+    }
+
+    @Test("a nameless tool is not a request at all")
+    func emptyTool() {
+        #expect(PermissionRequest.parse(tool: "  ", input: [:]) == nil)
+    }
+
+    @Test("it reads the hook's JSON directly")
+    func fromJSON() {
+        let json = #"{"tool_name":"Bash","tool_input":{"command":"rm -rf build"}}"#
+        #expect(PermissionRequest.parse(payload: Data(json.utf8))?.summary == "rm -rf build")
+    }
+
+    // A command line is the likeliest place for a credential, and this renders
+    // on an overlay above every window.
+    @Test("a token in a command never reaches the peek")
+    func redactsCommands() {
+        let secret = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+        let req = PermissionRequest.parse(tool: "Bash", input: ["command": "git push https://\(secret)@github.com/o/r"])
+        #expect(req?.redacted.summary.contains("ABCDEFGHIJ") == false)
+    }
+}
+
+@Suite("Permission diff")
+struct PermissionDiffTests {
+    @Test("a pure addition has no removals")
+    func pureAddition() {
+        let diff = PermissionRequest.diff(old: "", new: "a\nb")
+        #expect(diff.filter { $0.kind == .added }.count == 2)
+        #expect(diff.contains { $0.kind == .removed } == false)
+    }
+
+    @Test("a pure deletion has no additions")
+    func pureDeletion() {
+        let diff = PermissionRequest.diff(old: "a\nb", new: "")
+        #expect(diff.filter { $0.kind == .removed }.count == 2)
+        #expect(diff.contains { $0.kind == .added } == false)
+    }
+
+    @Test("an unchanged hunk produces no change at all")
+    func identical() {
+        let diff = PermissionRequest.diff(old: "a\nb\nc", new: "a\nb\nc")
+        #expect(diff.contains { $0.kind != .context } == false)
+    }
+
+    // Shared head and tail are context, so the change reads as a change rather
+    // than as the whole hunk being replaced.
+    @Test("shared lines top and bottom become context")
+    func sharedContext() {
+        let diff = PermissionRequest.diff(old: "head\nold\ntail", new: "head\nnew\ntail")
+        #expect(diff.filter { $0.kind == .removed }.map(\.text) == ["old"])
+        #expect(diff.filter { $0.kind == .added }.map(\.text) == ["new"])
+        #expect(diff.filter { $0.kind == .context }.map(\.text) == ["head", "tail"])
+    }
+
+    // The peek has room for a hunk, not a file.
+    @Test("context is capped so a huge file cannot flood the peek")
+    func contextCapped() {
+        let head = (1...50).map(String.init).joined(separator: "\n")
+        let diff = PermissionRequest.diff(old: head + "\nold", new: head + "\nnew")
+        #expect(diff.filter { $0.kind == .context }.count <= 2)
+    }
+}
