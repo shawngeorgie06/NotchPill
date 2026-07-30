@@ -93,6 +93,10 @@ final class NotchState: ObservableObject {
         }
     }
 
+    func clearRecentDevReady() {
+        recentDevReadyAlerts = []
+    }
+
     /// Enqueues a "waiting" peek (an agent blocked on a permission/choice prompt).
     /// A re-notification for the same *session* replaces its prior waiting peek;
     /// other sessions coexist.

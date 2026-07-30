@@ -1023,6 +1023,11 @@ struct ExpandedActivityCard: View {
                     .font(.system(size: s(9)))
                 Text("Recent")
                     .font(font(size: 10, weight: .semibold))
+                Spacer(minLength: 0)
+                Button("Clear") { actions.clearRecentActivity() }
+                    .font(font(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .buttonStyle(.plain)
             }
             .foregroundStyle(.white.opacity(0.45))
             ForEach(alerts) { alert in

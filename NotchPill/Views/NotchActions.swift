@@ -12,6 +12,7 @@ struct NotchActions {
     var beginReply: (DevReadyAlert) -> Void
     var sendReply: (DevReadyAlert, String) -> Void
     var answer: (DevReadyAlert, AgentAnswer) -> Void
+    var clearRecentActivity: () -> Void = {}
     /// Bring forward the app this agent session is running in.
     var focusAgentSession: (AgentSession) -> Void = { _ in }
     /// Open a URL (a CI run) in the default browser.
@@ -23,6 +24,7 @@ struct NotchActions {
         dismissPeek: { _ in },
         beginReply: { _ in }, sendReply: { _, _ in },
         answer: { _, _ in },
+        clearRecentActivity: {},
         focusAgentSession: { _ in },
         openURL: { _ in }
     )

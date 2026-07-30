@@ -243,6 +243,7 @@ final class NotchController {
             beginReply: { [weak self] alert in self?.state.beginReply(to: alert) },
             sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) },
             answer: { [weak self] alert, ans in self?.performAnswer(alert: alert, answer: ans) },
+            clearRecentActivity: { [weak self] in self?.state.clearRecentDevReady() },
             focusAgentSession: { [weak self] session in self?.focusAgentSession(session) },
             openURL: { url in
                 guard let u = URL(string: url) else { return }
