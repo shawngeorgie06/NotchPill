@@ -872,7 +872,7 @@ final class NotchController {
             scheduleWaitingDismiss(for: alert)
             engagePill()
             if AppSettings.shared.devReadyPlaySound {
-                NSSound(named: "Glass")?.play()
+                NSSound(named: AppSettings.shared.devReadySound)?.play()
             }
             applyWindowFrame(animated: true)
             return
@@ -896,7 +896,7 @@ final class NotchController {
         state.enqueueDevReady(batch)
         engagePill()
         if AppSettings.shared.devReadyPlaySound {
-            NSSound(named: "Glass")?.play()
+            NSSound(named: AppSettings.shared.devReadySound)?.play()
         }
         scheduleDevReadyDismiss()
     }

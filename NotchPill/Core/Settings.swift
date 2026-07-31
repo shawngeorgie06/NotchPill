@@ -1,6 +1,28 @@
 import SwiftUI
 import ServiceManagement
 
+/// Curated native alert voices. These are intentionally named by feel rather
+/// than copied from another app's sound pack; users can preview each one in
+/// Settings before it becomes their agent-completion cue.
+enum DevReadySound: String, CaseIterable, Identifiable {
+    case glass = "Glass"
+    case ping = "Ping"
+    case pop = "Pop"
+    case basso = "Basso"
+    case funk = "Funk"
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .glass: return "Glass · clear"
+        case .ping: return "Ping · light"
+        case .pop: return "Pop · quick"
+        case .basso: return "Basso · low"
+        case .funk: return "Funk · playful"
+        }
+    }
+}
+
 /// User-facing preferences, persisted in UserDefaults and observable by the UI.
 @MainActor
 final class AppSettings: ObservableObject {
@@ -174,6 +196,9 @@ final class AppSettings: ObservableObject {
     @Published var devReadyPlaySound: Bool {
         didSet { defaults.set(devReadyPlaySound, forKey: Keys.devReadyPlaySound) }
     }
+    @Published var devReadySound: String {
+        didSet { defaults.set(devReadySound, forKey: Keys.devReadySound) }
+    }
     /// Each system HUD is separately opt-in. The providers may continue to
     /// observe their public system state, but no visual interruption is shown
     /// unless the corresponding HUD is enabled.
@@ -257,6 +282,7 @@ final class AppSettings: ObservableObject {
         static let showDevReadyPings = "showDevReadyPings"
         static let devReadyDuration = "devReadyDuration"
         static let devReadyPlaySound = "devReadyPlaySound"
+        static let devReadySound = "devReadySound"
         static let showVolumeHUD = "showVolumeHUD"
         static let showBrightnessHUD = "showBrightnessHUD"
         static let showMicrophoneHUD = "showMicrophoneHUD"
@@ -296,6 +322,7 @@ final class AppSettings: ObservableObject {
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
+            Keys.devReadySound: DevReadySound.glass.rawValue,
             Keys.showVolumeHUD: true,
             Keys.showBrightnessHUD: true,
             Keys.showMicrophoneHUD: true,
@@ -332,6 +359,8 @@ final class AppSettings: ObservableObject {
         let storedDuration = defaults.double(forKey: Keys.devReadyDuration)
         devReadyDuration = storedDuration > 0 ? storedDuration : AppSettings.defaultDevReadyDuration
         devReadyPlaySound = defaults.object(forKey: Keys.devReadyPlaySound) as? Bool ?? true
+        let storedSound = defaults.string(forKey: Keys.devReadySound) ?? DevReadySound.glass.rawValue
+        devReadySound = DevReadySound(rawValue: storedSound)?.rawValue ?? DevReadySound.glass.rawValue
         showVolumeHUD = defaults.object(forKey: Keys.showVolumeHUD) as? Bool ?? true
         showBrightnessHUD = defaults.object(forKey: Keys.showBrightnessHUD) as? Bool ?? true
         showMicrophoneHUD = defaults.object(forKey: Keys.showMicrophoneHUD) as? Bool ?? true
@@ -384,6 +413,7 @@ final class AppSettings: ObservableObject {
             Keys.showDevReadyPings: true,
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
+            Keys.devReadySound: DevReadySound.glass.rawValue,
             Keys.showVolumeHUD: true,
             Keys.showBrightnessHUD: true,
             Keys.showMicrophoneHUD: true,
@@ -419,6 +449,7 @@ final class AppSettings: ObservableObject {
         showDevReadyPings = true
         devReadyDuration = AppSettings.defaultDevReadyDuration
         devReadyPlaySound = true
+        devReadySound = DevReadySound.glass.rawValue
         showVolumeHUD = true
         showBrightnessHUD = true
         showMicrophoneHUD = true
