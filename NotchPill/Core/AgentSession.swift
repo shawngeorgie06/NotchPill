@@ -85,6 +85,20 @@ struct AgentSession: Equatable, Identifiable {
         }
     }
 
+    /// The compact context beside the agent name. Generated workspaces such as
+    /// `w` identify a folder, not the work, so showing them in the notch is
+    /// actively misleading. In that case the request is the useful context;
+    /// when even that is unavailable, omit the label rather than inventing one.
+    var displayContext: String? {
+        let cleanedProject = project.trimmingCharacters(in: .whitespacesAndNewlines)
+        let generatedWorkspaceNames = ["w", "tmp", "work"]
+        if !cleanedProject.isEmpty,
+           !generatedWorkspaceNames.contains(cleanedProject.lowercased()) {
+            return cleanedProject
+        }
+        return task?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// A glyph for the vendor, because nothing else on the row reliably says
     /// which one it is.
     ///

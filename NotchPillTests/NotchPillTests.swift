@@ -246,6 +246,15 @@ struct CollapsedChipBuilderTests {
             showAgents: true, showClock: false)
         #expect(chips == [.agent(name: "Codex", state: "working", count: 1)])
     }
+
+    @Test("generated Codex workspace labels yield to the real task")
+    func generatedWorkspaceDoesNotBecomeAgentContext() {
+        let session = AgentSession(id: "s", agent: "codex", project: "w",
+                                   state: .working, lastActivity: Date(), locatorId: nil,
+                                   directory: nil, subagent: nil,
+                                   task: "Fix the expanded notch title", toolActivity: nil)
+        #expect(session.displayContext == "Fix the expanded notch title")
+    }
 }
 
 @Suite("NotchActivity priority")

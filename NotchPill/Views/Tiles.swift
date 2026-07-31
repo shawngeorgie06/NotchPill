@@ -1231,10 +1231,12 @@ struct ExpandedActivityCard: View {
                         .font(font(size: 10, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
                         .fixedSize(horizontal: true, vertical: false)
-                    Text(session.project)
-                        .font(.system(size: 9 * textScale, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.43))
-                        .lineLimit(1)
+                    if let context = session.displayContext, !context.isEmpty {
+                        Text(context)
+                            .font(.system(size: 9 * textScale, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.43))
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: s(4))
                     Text(session.statusLabel)
                         .font(font(size: 8, weight: .bold))
