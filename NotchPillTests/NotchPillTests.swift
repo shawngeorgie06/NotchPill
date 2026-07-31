@@ -1400,7 +1400,7 @@ struct TranscriptTurnTests {
         let quota = AgentSessionScanner.codexQuota(in: transcript)
         #expect(quota?.usedPercent == 42)
         #expect(quota?.resetsAt == Date(timeIntervalSince1970: 1_786_130_351))
-        #expect(quota?.creditsLabel == "$123.45 credits")
+        #expect(quota?.creditsLabel == "123.45 credit balance")
     }
 
     @Test("Codex oversized session metadata still exposes its working directory")

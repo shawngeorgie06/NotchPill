@@ -267,7 +267,7 @@ struct OpenCodeUsage: Equatable {
 struct CodexQuota: Equatable {
     var usedPercent: Int
     var resetsAt: Date?
-    /// Optional dollar balance recorded by Codex desktop for credit-backed plans.
+    /// Opaque balance recorded by Codex desktop for credit-backed plans.
     var creditBalance: Decimal?
 
     var remainingPercent: Int { max(0, 100 - usedPercent) }
@@ -283,6 +283,6 @@ struct CodexQuota: Equatable {
 
     var creditsLabel: String? {
         guard let creditBalance else { return nil }
-        return creditBalance.formatted(.currency(code: "USD")) + " credits"
+        return creditBalance.formatted(.number.precision(.fractionLength(0...2))) + " credit balance"
     }
 }
