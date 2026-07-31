@@ -71,6 +71,26 @@ struct AgentSession: Equatable, Identifiable {
         }
     }
 
+    /// A glyph for the vendor, because nothing else on the row reliably says
+    /// which one it is.
+    ///
+    /// Colour cannot: it is spoken for by state — orange is "waiting on you",
+    /// not a brand — and that is read as branding often enough to be worth
+    /// designing against. The name cannot either: `displayName` shows the
+    /// persona for a sub-agent, so "Code Reviewer" appears with the vendor
+    /// nowhere on the row at all.
+    ///
+    /// Nil for an agent we do not know, rather than a stand-in glyph: a
+    /// wrong-but-confident mark is worse than none, and the name still shows.
+    var vendorSymbol: String? {
+        switch knownAgent {
+        case .claudeCode: return "asterisk"
+        case .codex: return "chevron.left.forwardslash.chevron.right"
+        case .cursor: return "cursorarrow"
+        case nil: return nil
+        }
+    }
+
     /// Trims a prompt to something that fits one notch row.
     ///
     /// Prompts arrive with wrappers the user never typed — Claude Code brackets

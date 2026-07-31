@@ -1135,6 +1135,16 @@ struct ExpandedActivityCard: View {
                     Circle()
                         .fill(color(for: session.state))
                         .frame(width: s(5), height: s(5))
+                    if let symbol = session.vendorSymbol {
+                        Image(systemName: symbol)
+                            .font(font(size: 9, weight: .semibold))
+                            // Dimmer than the name: it answers "which tool",
+                            // which you only ask once per row, and it must not
+                            // compete with the task line for attention.
+                            .foregroundStyle(.white.opacity(0.55))
+                            .frame(width: s(9))
+                            .accessibilityLabel(session.agentName)
+                    }
                     Text(session.displayName)
                         .font(font(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))

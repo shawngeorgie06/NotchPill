@@ -3521,3 +3521,43 @@ struct ApprovalGateTests {
         #expect(ApprovalGate.file(home: home).path == "/tmp/home/.notchpill/approvals-enabled")
     }
 }
+
+@Suite("Agent vendor glyph")
+struct AgentVendorSymbolTests {
+    private func session(agent: String, subagent: String? = nil) -> AgentSession {
+        AgentSession(id: "s", agent: agent, project: "p",
+                     state: .working, lastActivity: Date(), subagent: subagent)
+    }
+
+    @Test("Each known vendor gets its own mark")
+    func knownVendors() {
+        #expect(session(agent: "claude-code").vendorSymbol == "asterisk")
+        #expect(session(agent: "codex").vendorSymbol
+                == "chevron.left.forwardslash.chevron.right")
+        #expect(session(agent: "cursor").vendorSymbol == "cursorarrow")
+    }
+
+    @Test("No mark invented for an agent we do not know")
+    func unknownVendor() {
+        #expect(session(agent: "some-new-tool").vendorSymbol == nil)
+        #expect(session(agent: "").vendorSymbol == nil)
+    }
+
+    /// The reason the glyph exists: a sub-agent row shows the persona, so
+    /// without it the vendor appears nowhere on the row.
+    @Test("A sub-agent row hides the vendor name but keeps the mark")
+    func subagentStillShowsVendor() {
+        let s = session(agent: "claude-code", subagent: "code-reviewer")
+        #expect(s.displayName == "Code Reviewer")
+        #expect(s.vendorSymbol == "asterisk")
+    }
+
+    /// Colour is state, not brand — the confusion the glyph is there to fix.
+    @Test("Two vendors waiting are the same colour and differ only by mark")
+    func colourIsStateNotBrand() {
+        let claude = session(agent: "claude-code")
+        let cursor = session(agent: "cursor")
+        #expect(claude.vendorSymbol != cursor.vendorSymbol)
+        #expect(claude.statusLabel == cursor.statusLabel)
+    }
+}
