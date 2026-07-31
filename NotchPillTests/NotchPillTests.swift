@@ -1506,6 +1506,17 @@ struct TranscriptTurnTests {
         #expect(AgentTranscriptProvider.claudeProjectName(fromDirectory: "") == nil)
     }
 
+    @Test("Codex transcript notifications never use the generated w workspace as a title")
+    func codexNotificationTitleUsesUsefulFallback() {
+        #expect(AgentTranscriptProvider.codexFinishedTitle(project: "w", task: "continue")
+            == "Codex finished")
+        #expect(AgentTranscriptProvider.codexFinishedTitle(
+            project: "w", task: "Fix the one-letter Codex notification title"
+        ) == "Fix the one-letter Codex notification title")
+        #expect(AgentTranscriptProvider.codexFinishedTitle(project: "NotchPill", task: nil)
+            == "NotchPill")
+    }
+
     // REGRESSION: a session started in the home directory peeked as the account
     // name ("shawngeorgie"), which reads like a project nobody has.
     @Test("the home directory is named Home, not the account")

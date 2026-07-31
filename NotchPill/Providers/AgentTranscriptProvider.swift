@@ -234,6 +234,18 @@ final class AgentTranscriptProvider {
         (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? nil
     }
 
+    /// The same bounded window the session scanner reads for Codex's newest
+    /// request. A notification title must never require loading an entire
+    /// multi-megabyte transcript on the main actor.
+    private func tailText(of url: URL, limit: UInt64 = 262_144) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        try? handle.seek(toOffset: size > limit ? size - limit : 0)
+        guard let data = try? handle.readToEnd() else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     /// Builds a peek matching what the hooks emit, so the two dedup against
     /// each other rather than double-peeking.
     private func alert(for url: URL) -> DevReadyAlert? {
@@ -246,7 +258,10 @@ final class AgentTranscriptProvider {
         guard let project = projectName(for: url, isCodex: isCodex) else { return nil }
         let branch = gitBranch(for: url, isCodex: isCodex)
         return DevReadyAlert(
-            title: project,
+            title: isCodex ? Self.codexFinishedTitle(
+                project: project,
+                task: tailText(of: url).flatMap(AgentSessionScanner.codexLastPrompt(in:))
+            ) : project,
             subtitle: "finished" + (branch.map { " · \($0)" } ?? ""),
             source: isCodex ? "Codex" : "Claude Code",
             agent: isCodex ? "codex" : "claude-code",
@@ -257,6 +272,29 @@ final class AgentTranscriptProvider {
             createdAt: Date().timeIntervalSince1970,
             sessionId: sessionId
         )
+    }
+
+    /// Keep the no-hook path in lockstep with `codex-notify.sh`. Codex often
+    /// runs inside a generated workspace called `w`; it is a valid directory,
+    /// but a one-letter completion title gives no useful information. A real
+    /// user request wins, then a meaningful project name, then a truthful
+    /// generic fallback.
+    nonisolated static func codexFinishedTitle(project: String, task: String?) -> String {
+        let cleanedTask = task?
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cleanedTask, cleanedTask.count >= 12, cleanedTask.contains(" ") {
+            return String(cleanedTask.prefix(140))
+        }
+
+        let cleanedProject = project.trimmingCharacters(in: .whitespacesAndNewlines)
+        let unhelpfulProjects = ["w", "tmp", "work"]
+        if cleanedProject.count >= 3,
+           !unhelpfulProjects.contains(cleanedProject.lowercased()) {
+            return cleanedProject
+        }
+        return "Codex finished"
     }
 
     /// Claude Code encodes the working directory in the *directory* name with
