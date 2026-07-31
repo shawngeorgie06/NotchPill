@@ -1,5 +1,16 @@
 import Foundation
 
+/// The latest concrete action an agent wrote to its local transcript.
+struct AgentToolActivity: Equatable {
+    var tool: String
+    var detail: String?
+
+    var displayText: String {
+        guard let detail, !detail.isEmpty else { return tool }
+        return "\(tool) · \(detail)"
+    }
+}
+
 /// One agent conversation that is alive right now.
 ///
 /// This is the "what am I actually in?" view. A peek tells you a turn *ended*;
@@ -44,6 +55,8 @@ struct AgentSession: Equatable, Identifiable {
     /// What the session was last asked to do. Nil when the source has nothing
     /// to offer — a brand-new session, or a transcript we could not read.
     var task: String?
+    /// Latest Read/Edit/Write/Bash-style action, when the transcript exposes it.
+    var toolActivity: AgentToolActivity?
 
     /// How the agent is named on the row. The raw values are wire identifiers,
     /// not labels: "claude-code" reads like a package name.

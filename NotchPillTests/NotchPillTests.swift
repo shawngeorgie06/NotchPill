@@ -1373,6 +1373,20 @@ struct TranscriptTurnTests {
                 == "Reviewing a permission request")
     }
 
+    @Test("Claude tool calls become a compact file action")
+    func claudeToolActivity() {
+        let transcript = #"{"message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"src/auth.swift"}}]}}"#
+        #expect(AgentSessionScanner.claudeToolActivity(in: transcript)
+                == AgentToolActivity(tool: "Edit", detail: "src/auth.swift"))
+    }
+
+    @Test("Codex exec calls become a compact command action")
+    func codexToolActivity() {
+        let transcript = #"{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"{\"cmd\":\"xcodebuild test\"}"}}"#
+        #expect(AgentSessionScanner.codexToolActivity(in: transcript)
+                == AgentToolActivity(tool: "Bash", detail: "xcodebuild test"))
+    }
+
     @Test("an assistant message ends the turn")
     func assistantEnds() {
         #expect(AgentTranscriptProvider.turnEnded(inTail: tail([

@@ -75,7 +75,8 @@ actor AgentSessionScanner {
                 // parent's description a sub-agent row had no task line at all
                 // — and two Explores looked identical.
                 task: AgentSession.summarize(info?.task
-                                             ?? currentTask(in: url, isCodex: isCodex)))
+                                             ?? currentTask(in: url, isCodex: isCodex)),
+                toolActivity: currentToolActivity(in: url, isCodex: isCodex))
         }
     }
 
@@ -215,6 +216,59 @@ actor AgentSessionScanner {
     private func codexLastPrompt(_ url: URL) -> String? {
         guard let text = text(of: url, tail: 262_144) else { return nil }
         return Self.codexLastPrompt(in: text)
+    }
+
+    /// The latest tool call answers “what is it doing?” more usefully than a
+    /// generic working dot. It remains a one-line local summary, never a full
+    /// transcript replay.
+    private func currentToolActivity(in url: URL, isCodex: Bool) -> AgentToolActivity? {
+        guard let text = text(of: url, tail: 262_144) else { return nil }
+        return isCodex ? Self.codexToolActivity(in: text) : Self.claudeToolActivity(in: text)
+    }
+
+    nonisolated static func claudeToolActivity(in text: String) -> AgentToolActivity? {
+        for line in text.split(separator: "\n").reversed() {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let message = obj["message"] as? [String: Any],
+                  let content = message["content"] as? [[String: Any]] else { continue }
+            for block in content.reversed() where block["type"] as? String == "tool_use" {
+                guard let name = block["name"] as? String else { continue }
+                return toolActivity(name: name, input: block["input"] as? [String: Any])
+            }
+        }
+        return nil
+    }
+
+    nonisolated static func codexToolActivity(in text: String) -> AgentToolActivity? {
+        for line in text.split(separator: "\n").reversed() {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let payload = obj["payload"] as? [String: Any],
+                  payload["type"] as? String == "custom_tool_call",
+                  let name = payload["name"] as? String else { continue }
+            let input = (payload["input"] as? String).flatMap {
+                try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+            }
+            return toolActivity(name: name, input: input)
+        }
+        return nil
+    }
+
+    nonisolated private static func toolActivity(name: String,
+                                                 input: [String: Any]?) -> AgentToolActivity {
+        let label: String
+        switch name.lowercased() {
+        case "exec", "bash", "shell", "run_command": label = "Bash"
+        case "read", "read_file": label = "Read"
+        case "edit", "apply_patch": label = "Edit"
+        case "write", "write_file": label = "Write"
+        case "glob": label = "Find"
+        case "grep", "search": label = "Search"
+        default: label = name
+        }
+        let raw = ["file_path", "path", "cmd", "command", "pattern", "query"]
+            .compactMap { input?[$0] as? String }
+            .first
+        return AgentToolActivity(tool: label, detail: AgentSession.summarize(raw, limit: 46))
     }
 
     /// Codex has used two transcript shapes for submitted requests:

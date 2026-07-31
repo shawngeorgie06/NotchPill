@@ -1189,6 +1189,13 @@ struct ExpandedActivityCard: View {
                         .foregroundStyle(color(for: session.state).opacity(0.85))
                         .fixedSize(horizontal: true, vertical: false)
                 }
+                if let activity = session.toolActivity {
+                    Text(activity.displayText)
+                        .font(font(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .lineLimit(1)
+                        .padding(.leading, s(10))
+                }
                 if let task = session.task {
                     Text("\(session.taskLeadIn) · \(task)")
                         .font(font(size: 10))
