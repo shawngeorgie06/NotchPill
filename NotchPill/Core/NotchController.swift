@@ -61,6 +61,9 @@ final class NotchController {
     private let hoverExpandDelay: TimeInterval = 0.03
 
     private var devReadyDismissItem: DispatchWorkItem?
+    /// Waiting alerts used to be permanent; each now owns a five-second timer
+    /// just like a completed ping, so a new prompt cannot leave a banner behind.
+    private var waitingDismissItems: [String: DispatchWorkItem] = [:]
     private var devReadyCoalesceItem: DispatchWorkItem?
     private var pendingDevReadyAlerts: [DevReadyAlert] = []
     private var devReadyDedup = DevReadyDedup()
@@ -859,15 +862,11 @@ final class NotchController {
         // peek is the only carrier of that fact.
         agentSessions.noteWaiting(sessionId: alert.sessionId, waiting: alert.kind == .waiting)
 
-        // Waiting alerts have their own lifecycle and must not touch the finished
-        // path: the finished fingerprint is `title|subtitle`, which for waiting
-        // alerts is project|branch — identical for every question from the same
-        // session, so the dedup window would silently drop the second question and
-        // leave the agent hanging. They also must not be batched into the
-        // auto-dismiss timer (a blocked agent stays blocked past 13s) and must not
-        // become `lastFinishedAlert`.
+        // Waiting alerts still bypass finished-event dedup and batching, because
+        // each prompt is distinct. They now receive their own short timer below.
         if alert.kind == .waiting {
             state.enqueueWaiting(alert)   // replace-per-session, no fingerprint dedup
+            scheduleWaitingDismiss(for: alert)
             engagePill()
             if AppSettings.shared.devReadyPlaySound {
                 NSSound(named: "Glass")?.play()
@@ -905,6 +904,17 @@ final class NotchController {
         devReadyDismissItem = item
         let delay = AppSettings.shared.devReadyDuration
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    /// Unlike completed pings, waiting pings cannot share one global timer: two
+    /// agents may ask seconds apart, and each should get its own full interval.
+    private func scheduleWaitingDismiss(for alert: DevReadyAlert) {
+        waitingDismissItems[alert.id]?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.dismissPeek(id: alert.id) }
+        waitingDismissItems[alert.id] = item
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + AppSettings.shared.devReadyDuration,
+            execute: item)
     }
 
     /// Auto-dismiss / explicit dismiss. Only `.finished` peeks are swept: a
@@ -957,7 +967,10 @@ final class NotchController {
     /// not focus the terminal, and unlike the fade timer it will clear a
     /// `.waiting` peek — which otherwise has no way to go away.
     private func dismissPeek(id: String) {
-        LogStore.log("peek", "dismissed by ✕")
+        waitingDismissItems[id]?.cancel()
+        waitingDismissItems[id] = nil
+        if state.replyCompose?.targetAlert.id == id { state.cancelReply() }
+        LogStore.log("peek", "dismissed (single)")
         state.removeDevReady(id: id)
         guard state.devReadyAlerts.isEmpty else {
             if !state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
@@ -983,6 +996,8 @@ final class NotchController {
     private func collapseAfterDevReady() {
         devReadyDismissItem?.cancel()
         devReadyDismissItem = nil
+        waitingDismissItems.values.forEach { $0.cancel() }
+        waitingDismissItems = [:]
 
         let mouse = NSEvent.mouseLocation
         if isPointerOverPill(mouse) || expandHoverScreenRect().insetBy(dx: -8, dy: -6).contains(mouse) {
