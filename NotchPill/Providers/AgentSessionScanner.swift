@@ -563,8 +563,7 @@ actor AgentSessionScanner {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                   let payload = object["payload"] as? [String: Any],
                   payload["type"] as? String == "token_count",
-                  let info = payload["info"] as? [String: Any],
-                  let limits = info["rate_limits"] as? [String: Any],
+                  let limits = payload["rate_limits"] as? [String: Any],
                   let primary = limits["primary"] as? [String: Any],
                   let used = primary["used_percent"] as? Double else { continue }
             let resetSeconds = (primary["resets_at"] as? Double)

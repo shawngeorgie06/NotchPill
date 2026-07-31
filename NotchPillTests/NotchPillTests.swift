@@ -1396,7 +1396,7 @@ struct TranscriptTurnTests {
 
     @Test("Codex local rate-limit record exposes a real quota and reset")
     func codexQuota() {
-        let transcript = #"{"type":"event_msg","payload":{"type":"token_count","info":{"rate_limits":{"primary":{"used_percent":42.4,"resets_at":1786130351}}}}}"#
+        let transcript = #"{"type":"event_msg","payload":{"type":"token_count","info":{},"rate_limits":{"primary":{"used_percent":42.4,"resets_at":1786130351}}}}"#
         let quota = AgentSessionScanner.codexQuota(in: transcript)
         #expect(quota?.usedPercent == 42)
         #expect(quota?.resetsAt == Date(timeIntervalSince1970: 1_786_130_351))
