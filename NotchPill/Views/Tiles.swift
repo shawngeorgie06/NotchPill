@@ -590,7 +590,10 @@ struct DevReadyPeekRow: View {
             // Waiting rows intentionally ignore this gesture: an approval must
             // always require the explicit × or Esc dismissal path.
             .offset(x: dismissOffset)
-            .opacity(1 - min(abs(dismissOffset) / 180, 0.45))
+            // Spelled out in CGFloat rather than left to inference: the
+            // literals here are ambiguous enough that some Swift versions
+            // reject the expression outright.
+            .opacity(Double(1 - min(abs(dismissOffset) / CGFloat(180), CGFloat(0.45))))
             .simultaneousGesture(dismissGesture)
             .accessibilityHint(alert.kind == .finished
                                ? "Swipe left to dismiss, or double tap to open"
