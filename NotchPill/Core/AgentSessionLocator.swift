@@ -48,6 +48,14 @@ enum AgentSessionLocator {
         let target: String? = located?.1 ?? fallbackBundleId
         guard let target, !target.isEmpty else { return false }
 
+        // Inside tmux the terminal has one tab and every pane shares it, so
+        // focusing the tab alone leaves you on whichever pane was last active.
+        // Selecting the pane first means the terminal focus below then brings
+        // the right thing forward. No-ops when this session is not in tmux.
+        if let pid = located?.0.pid, let tty = controllingTTY(for: pid) {
+            TmuxLocator.focusPane(tty: tty)
+        }
+
         // Terminal exposes each tab's TTY to AppleScript. That lets us return
         // to the exact agent pane rather than merely bringing every Terminal
         // window forward. Automation can be denied or Terminal may not own the

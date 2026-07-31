@@ -3631,3 +3631,86 @@ struct CISupersedeTests {
         #expect(CIRun.current([run("fail", .failed, minutesAgo: 60)]).count == 1)
     }
 }
+
+@Suite("tmux pane targeting")
+struct TmuxLocatorTests {
+    private let listing = """
+    /dev/ttys001\twork:0.0
+    /dev/ttys012\twork:2.1
+    /dev/ttys120\tother:0.0
+    """
+
+    @Test("Finds the pane owning the agent's TTY")
+    func findsPane() {
+        #expect(TmuxLocator.paneTarget(forTTY: "/dev/ttys012", in: listing) == "work:2.1")
+    }
+
+    /// `/dev/ttys1` is a prefix of `/dev/ttys120`. A loose match would drop
+    /// you into an unrelated pane and read as tmux misbehaving.
+    @Test("Matching is exact, never a prefix")
+    func exactMatchOnly() {
+        #expect(TmuxLocator.paneTarget(forTTY: "/dev/ttys1", in: listing) == nil)
+        #expect(TmuxLocator.paneTarget(forTTY: "/dev/ttys12", in: listing) == nil)
+    }
+
+    @Test("No pane, no answer")
+    func noMatch() {
+        #expect(TmuxLocator.paneTarget(forTTY: "/dev/ttys999", in: listing) == nil)
+        #expect(TmuxLocator.paneTarget(forTTY: "", in: listing) == nil)
+        #expect(TmuxLocator.paneTarget(forTTY: "/dev/ttys012", in: "") == nil)
+    }
+
+    @Test("Garbled lines are skipped, not fatal")
+    func toleratesJunk() {
+        let messy = "no-tab-here\n\n/dev/ttys012\twork:2.1\n"
+        #expect(TmuxLocator.paneTarget(forTTY: "/dev/ttys012", in: messy) == "work:2.1")
+    }
+
+    /// Selecting the pane without its window leaves you on the right pane of
+    /// a window you cannot see.
+    @Test("Both the window and the pane are selected")
+    func selectsWindowThenPane() {
+        let args = TmuxLocator.selectArguments(target: "work:2.1")
+        #expect(args == [["select-window", "-t", "work:2.1"],
+                         ["select-pane", "-t", "work:2.1"]])
+    }
+
+    @Test("Absent tmux is not an error, just no pane jump")
+    func missingTmuxIsSilent() {
+        #expect(TmuxLocator.executable(fileExists: { _ in false }) == nil)
+        var ran = false
+        let ok = TmuxLocator.focusPane(tty: "/dev/ttys012", tmuxPath: nil) { _, _ in
+            ran = true; return nil
+        }
+        #expect(ok == false)
+        #expect(ran == false)
+    }
+
+    /// The whole round trip against a stubbed tmux. The path is injected so
+    /// this exercises the real sequence on a machine with no tmux installed —
+    /// otherwise the test would quietly assert nothing here.
+    @Test("Drives tmux with the arguments it expects")
+    func drivesTmux() {
+        var calls: [[String]] = []
+        let listing = self.listing
+        let ok = TmuxLocator.focusPane(tty: "/dev/ttys012", tmuxPath: "/fake/tmux") { path, args in
+            #expect(path == "/fake/tmux")
+            calls.append(args)
+            return args.first == "list-panes" ? Data(listing.utf8) : Data()
+        }
+        #expect(ok)
+        #expect(calls == [TmuxLocator.listArguments] + TmuxLocator.selectArguments(target: "work:2.1"))
+    }
+
+    @Test("A TTY in no pane runs no select commands")
+    func unmatchedTTYSelectsNothing() {
+        var calls: [[String]] = []
+        let listing = self.listing
+        let ok = TmuxLocator.focusPane(tty: "/dev/ttys999", tmuxPath: "/fake/tmux") { _, args in
+            calls.append(args)
+            return Data(listing.utf8)
+        }
+        #expect(ok == false)
+        #expect(calls == [TmuxLocator.listArguments])
+    }
+}
