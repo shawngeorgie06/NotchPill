@@ -248,13 +248,14 @@ actor AgentSessionScanner {
             let input = (payload["input"] as? String).flatMap {
                 try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
             }
-            return toolActivity(name: name, input: input)
+            return toolActivity(name: name, input: input, rawInput: payload["input"] as? String)
         }
         return nil
     }
 
     nonisolated private static func toolActivity(name: String,
-                                                 input: [String: Any]?) -> AgentToolActivity {
+                                                 input: [String: Any]?,
+                                                 rawInput: String? = nil) -> AgentToolActivity {
         let label: String
         switch name.lowercased() {
         case "exec", "bash", "shell", "run_command": label = "Bash"
@@ -268,7 +269,31 @@ actor AgentSessionScanner {
         let raw = ["file_path", "path", "cmd", "command", "pattern", "query"]
             .compactMap { input?[$0] as? String }
             .first
+            ?? command(in: rawInput)
         return AgentToolActivity(tool: label, detail: AgentSession.summarize(raw, limit: 46))
+    }
+
+    /// Desktop Codex serializes custom tool calls as a JavaScript expression
+    /// (`tools.exec_command({"cmd":"…"})`), not as the JSON object used by
+    /// its CLI transcript. Recover the one named argument we render, without
+    /// trying to interpret or execute any of that expression.
+    nonisolated private static func command(in text: String?) -> String? {
+        guard let text, let key = text.range(of: "\"cmd\"") else { return nil }
+        let afterKey = text[key.upperBound...]
+        guard let colon = afterKey.firstIndex(of: ":") else { return nil }
+        let afterColon = afterKey[afterKey.index(after: colon)...]
+        guard let opening = afterColon.firstIndex(of: "\"") else { return nil }
+
+        var escaped = ""
+        var isEscaped = false
+        for character in afterColon[afterColon.index(after: opening)...] {
+            if character == "\"", !isEscaped { break }
+            escaped.append(character)
+            if character == "\\" { isEscaped.toggle() } else { isEscaped = false }
+        }
+        guard !escaped.isEmpty else { return nil }
+        let wrapped = "\"" + escaped + "\""
+        return try? JSONDecoder().decode(String.self, from: Data(wrapped.utf8))
     }
 
     /// Codex has used two transcript shapes for submitted requests:

@@ -1387,6 +1387,13 @@ struct TranscriptTurnTests {
                 == AgentToolActivity(tool: "Bash", detail: "xcodebuild test"))
     }
 
+    @Test("Codex desktop tool expressions expose their command")
+    func codexDesktopToolActivity() {
+        let transcript = #"{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"const r = await tools.exec_command({\"cmd\":\"xcodebuild test\"});"}}"#
+        #expect(AgentSessionScanner.codexToolActivity(in: transcript)
+                == AgentToolActivity(tool: "Bash", detail: "xcodebuild test"))
+    }
+
     @Test("an assistant message ends the turn")
     func assistantEnds() {
         #expect(AgentTranscriptProvider.turnEnded(inTail: tail([
