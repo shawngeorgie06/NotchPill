@@ -573,9 +573,13 @@ actor AgentSessionScanner {
             let balance = balanceText.flatMap {
                 Decimal(string: $0, locale: Locale(identifier: "en_US_POSIX"))
             }
+            let updatedAt = (object["timestamp"] as? String).flatMap {
+                ISO8601DateFormatter().date(from: $0)
+            }
             return CodexQuota(usedPercent: min(100, max(0, Int(used.rounded()))),
                               resetsAt: resetSeconds.map(Date.init(timeIntervalSince1970:)),
-                              creditBalance: balance)
+                              creditBalance: balance,
+                              updatedAt: updatedAt)
         }
         return nil
     }

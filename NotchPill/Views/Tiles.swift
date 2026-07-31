@@ -1078,7 +1078,7 @@ struct ExpandedActivityCard: View {
                         .layoutPriority(1)
                 }
             }
-            Text(quota.resetLabel)
+            Text([quota.resetLabel, quota.updatedLabel].compactMap { $0 }.joined(separator: " · "))
                 .font(font(size: 10))
                 .foregroundStyle(.white.opacity(0.5))
         }

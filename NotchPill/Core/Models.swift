@@ -537,7 +537,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .shelf(let count, _): return "shelf-\(count)"
         case .agents(let list): return "agents-" + list.map(\.id).joined(separator: ",")
         case .openCodeUsage(let usage): return "opencode-\(usage.totalTokens)-\(usage.cost)"
-        case .codexQuota(let quota): return "codex-quota-\(quota.usedPercent)-\(quota.resetsAt?.timeIntervalSince1970 ?? 0)"
+        case .codexQuota(let quota): return "codex-quota-\(quota.usedPercent)-\(quota.resetsAt?.timeIntervalSince1970 ?? 0)-\(quota.creditBalance?.description ?? "")-\(quota.updatedAt?.timeIntervalSince1970 ?? 0)"
         case .ci(let runs): return "ci-" + runs.map { $0.id + $0.statusLabel }.joined(separator: ",")
         case .recentAlerts(let alerts): return "recent-" + alerts.map(\.id).joined(separator: ",")
         }

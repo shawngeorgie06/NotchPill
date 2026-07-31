@@ -269,6 +269,7 @@ struct CodexQuota: Equatable {
     var resetsAt: Date?
     /// Opaque balance recorded by Codex desktop for credit-backed plans.
     var creditBalance: Decimal?
+    var updatedAt: Date?
 
     var remainingPercent: Int { max(0, 100 - usedPercent) }
     var usageLabel: String { "\(usedPercent)% used" }
@@ -283,13 +284,14 @@ struct CodexQuota: Equatable {
 
     var creditsLabel: String? {
         guard let creditBalance else { return nil }
-        let value = NSDecimalNumber(decimal: creditBalance).doubleValue
-        let compact: String
-        if value >= 1_000 {
-            compact = String(format: "%.1fk", value / 1_000)
-        } else {
-            compact = creditBalance.formatted(.number.precision(.fractionLength(0...2)))
-        }
-        return compact + " credits"
+        return creditBalance.formatted(.number.precision(.fractionLength(0...2))) + " credits balance"
+    }
+
+    var updatedLabel: String? {
+        guard let updatedAt else { return nil }
+        let seconds = max(0, Int(Date().timeIntervalSince(updatedAt)))
+        if seconds < 10 { return "Updated now" }
+        if seconds < 60 { return "Updated \(seconds)s ago" }
+        return "Updated \(seconds / 60)m ago"
     }
 }

@@ -435,7 +435,7 @@ enum NotchContentLayout {
         // and a truncated project name defeats the point of the card.
         case .agents: return 210
         case .openCodeUsage: return 124
-        case .codexQuota: return 124
+        case .codexQuota: return 164
         case .ci: return 150
         case .recentAlerts: return 170
         case .activeApp, .appSwitch: return 92
