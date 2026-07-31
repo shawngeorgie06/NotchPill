@@ -1394,6 +1394,14 @@ struct TranscriptTurnTests {
                 == AgentToolActivity(tool: "Bash", detail: "xcodebuild test"))
     }
 
+    @Test("Codex local rate-limit record exposes a real quota and reset")
+    func codexQuota() {
+        let transcript = #"{"type":"event_msg","payload":{"type":"token_count","info":{"rate_limits":{"primary":{"used_percent":42.4,"resets_at":1786130351}}}}}"#
+        let quota = AgentSessionScanner.codexQuota(in: transcript)
+        #expect(quota?.usedPercent == 42)
+        #expect(quota?.resetsAt == Date(timeIntervalSince1970: 1_786_130_351))
+    }
+
     @Test("Codex oversized session metadata still exposes its working directory")
     func codexOversizedMetadataHasWorkingDirectory() {
         let prefix = #"{"payload":{"cwd":"/Users/me/Project","base_instructions":""#

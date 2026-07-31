@@ -416,6 +416,7 @@ enum NotchContentLayout {
         case .media: return 78
         case .agents(let sessions): return rowsHeight(header: 18, row: 26, count: sessions.count)
         case .openCodeUsage: return 56
+        case .codexQuota: return 56
         case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)
         case .recentAlerts(let alerts): return rowsHeight(header: 18, row: 22, count: alerts.count)
         // Everything else is a label over a value.
@@ -434,6 +435,7 @@ enum NotchContentLayout {
         // and a truncated project name defeats the point of the card.
         case .agents: return 210
         case .openCodeUsage: return 124
+        case .codexQuota: return 124
         case .ci: return 150
         case .recentAlerts: return 170
         case .activeApp, .appSwitch: return 92

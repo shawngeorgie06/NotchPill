@@ -48,6 +48,7 @@ enum NotchContentSnapshot {
             shelfNames: shelf.items.prefix(3).map(\.name),
             agentSessions: state.agentSessions,
             openCodeUsage: state.openCodeUsage,
+            codexQuota: state.codexQuota,
             ciRuns: state.ciRuns,
             recentAlerts: state.recentDevReadyAlerts,
             showMedia: settings.showExpandedMedia,

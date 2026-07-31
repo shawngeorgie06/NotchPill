@@ -904,6 +904,7 @@ enum ExpandedActivityBuilder {
         shelfNames: [String],
         agentSessions: [AgentSession] = [],
         openCodeUsage: OpenCodeUsage? = nil,
+        codexQuota: CodexQuota? = nil,
         ciRuns: [CIRun] = [],
         recentAlerts: [DevReadyAlert] = [],
         showMedia: Bool,
@@ -924,6 +925,7 @@ enum ExpandedActivityBuilder {
         // running right now", and they are the reason to look at all.
         if showAgents, !agentSessions.isEmpty { items.append(.agents(agentSessions)) }
         if showAgents, let openCodeUsage { items.append(.openCodeUsage(openCodeUsage)) }
+        if showAgents, let codexQuota { items.append(.codexQuota(codexQuota)) }
         // Right after the agents: both answer "is the thing I started done yet?"
         if showCI, !ciRuns.isEmpty { items.append(.ci(ciRuns)) }
         if showRecentAlerts, !recentAlerts.isEmpty { items.append(.recentAlerts(recentAlerts)) }
@@ -989,6 +991,8 @@ struct ExpandedActivityCard: View {
                 agentsCard(sessions)
             case .openCodeUsage(let usage):
                 openCodeUsageCard(usage)
+            case .codexQuota(let quota):
+                codexQuotaCard(quota)
             case .ci(let runs):
                 ciCard(runs)
             case .recentAlerts(let alerts):
@@ -1048,6 +1052,25 @@ struct ExpandedActivityCard: View {
                 .font(font(size: 9, weight: .medium))
                 .foregroundStyle(.white.opacity(0.45))
                 .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func codexQuotaCard(_ quota: CodexQuota) -> some View {
+        VStack(alignment: .leading, spacing: s(3)) {
+            HStack(spacing: s(4)) {
+                Image(systemName: "chevron.left.forwardslash.chevron.right")
+                    .font(.system(size: s(9)))
+                Text("Codex · current window")
+                    .font(font(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.45))
+            Text(quota.usageLabel)
+                .font(font(size: 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+            Text(quota.resetLabel)
+                .font(font(size: 10))
+                .foregroundStyle(.white.opacity(0.5))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

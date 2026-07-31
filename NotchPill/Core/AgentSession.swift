@@ -261,3 +261,21 @@ struct OpenCodeUsage: Equatable {
         return "\(value)"
     }
 }
+
+/// The rate-limit signal written locally by Codex desktop. Unlike a token total,
+/// this is the provider's own current-window percentage and reset timestamp.
+struct CodexQuota: Equatable {
+    var usedPercent: Int
+    var resetsAt: Date?
+
+    var remainingPercent: Int { max(0, 100 - usedPercent) }
+    var usageLabel: String { "\(usedPercent)% used" }
+
+    var resetLabel: String {
+        guard let resetsAt else { return "Reset time unavailable" }
+        let seconds = max(0, Int(resetsAt.timeIntervalSinceNow))
+        if seconds < 3600 { return "Resets in \(max(1, seconds / 60))m" }
+        if seconds < 86_400 { return "Resets in \(seconds / 3600)h" }
+        return "Resets in \(seconds / 86_400)d"
+    }
+}

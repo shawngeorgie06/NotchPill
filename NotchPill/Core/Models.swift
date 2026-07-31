@@ -478,6 +478,7 @@ enum ExpandedActivity: Equatable, Identifiable {
     case shelf(count: Int, names: [String])
     case agents([AgentSession])
     case openCodeUsage(OpenCodeUsage)
+    case codexQuota(CodexQuota)
     case ci([CIRun])
     case recentAlerts([DevReadyAlert])
 
@@ -496,6 +497,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .shelf: return "shelf"
         case .agents: return "agents"
         case .openCodeUsage: return "openCodeUsage"
+        case .codexQuota: return "codexQuota"
         case .ci: return "ci"
         case .recentAlerts: return "recentAlerts"
         }
@@ -515,6 +517,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .shelf: return "File shelf"
         case .agents: return "Live agents"
         case .openCodeUsage: return "OpenCode usage"
+        case .codexQuota: return "Codex quota"
         case .ci: return "CI status"
         case .recentAlerts: return "Recent activity"
         }
@@ -534,6 +537,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .shelf(let count, _): return "shelf-\(count)"
         case .agents(let list): return "agents-" + list.map(\.id).joined(separator: ",")
         case .openCodeUsage(let usage): return "opencode-\(usage.totalTokens)-\(usage.cost)"
+        case .codexQuota(let quota): return "codex-quota-\(quota.usedPercent)-\(quota.resetsAt?.timeIntervalSince1970 ?? 0)"
         case .ci(let runs): return "ci-" + runs.map { $0.id + $0.statusLabel }.joined(separator: ",")
         case .recentAlerts(let alerts): return "recent-" + alerts.map(\.id).joined(separator: ",")
         }

@@ -15,12 +15,14 @@ import Foundation
 final class AgentSessionsProvider {
     var onUpdate: (([AgentSession]) -> Void)?
     var onOpenCodeUsageUpdate: ((OpenCodeUsage?) -> Void)?
+    var onCodexQuotaUpdate: ((CodexQuota?) -> Void)?
 
     private let pollInterval: TimeInterval = 3
     private var timer: Timer?
     private var lastPublished: [AgentSession] = []
     private var lastLabels: [String] = []
     private var lastOpenCodeUsage: OpenCodeUsage?
+    private var lastCodexQuota: CodexQuota?
     private let scanner = AgentSessionScanner()
     private var scanning = false
     /// Invalidates results from scans started before the last stop.
@@ -50,6 +52,7 @@ final class AgentSessionsProvider {
         blockedSessions.removeAll()
         lastLabels = []
         lastOpenCodeUsage = nil
+        lastCodexQuota = nil
         // A scan already in flight would publish after this, putting the card
         // back on screen moments after it was told to go away. Bump the
         // generation so its result is discarded.
@@ -60,6 +63,7 @@ final class AgentSessionsProvider {
         // screen when we stopped, forever.
         onUpdate?([])
         onOpenCodeUsageUpdate?(nil)
+        onCodexQuotaUpdate?(nil)
     }
 
     /// Called when a peek says a session is blocked (or has stopped being).
@@ -72,6 +76,7 @@ final class AgentSessionsProvider {
         guard AppSettings.shared.showExpandedAgents else {
             if !lastPublished.isEmpty { lastPublished = []; onUpdate?([]) }
             if lastOpenCodeUsage != nil { lastOpenCodeUsage = nil; onOpenCodeUsageUpdate?(nil) }
+            if lastCodexQuota != nil { lastCodexQuota = nil; onCodexQuotaUpdate?(nil) }
             return
         }
         // One scan at a time. A slow disk must not queue up overlapping walks
@@ -88,7 +93,8 @@ final class AgentSessionsProvider {
             guard let self else { return }
             let sessions = await scanner.sessions(now: now, blocked: blocked)
             let usage = await scanner.openCodeUsage(since: Calendar.current.startOfDay(for: now))
-            await MainActor.run { self.publish(sessions, usage: usage, from: issued) }
+            let quota = await scanner.codexQuota(now: now)
+            await MainActor.run { self.publish(sessions, usage: usage, quota: quota, from: issued) }
         }
     }
 
@@ -127,12 +133,16 @@ final class AgentSessionsProvider {
         }
     }
 
-    private func publish(_ ordered: [AgentSession], usage: OpenCodeUsage?, from issued: Int) {
+    private func publish(_ ordered: [AgentSession], usage: OpenCodeUsage?, quota: CodexQuota?, from issued: Int) {
         guard issued == generation else { return }   // stopped mid-scan
         scanning = false
         if usage != lastOpenCodeUsage {
             lastOpenCodeUsage = usage
             onOpenCodeUsageUpdate?(usage)
+        }
+        if quota != lastCodexQuota {
+            lastCodexQuota = quota
+            onCodexQuotaUpdate?(quota)
         }
         // An idle row is value-identical between polls, so suppressing the
         // publish froze its age on screen: "idle 4m" while ten minutes passed.

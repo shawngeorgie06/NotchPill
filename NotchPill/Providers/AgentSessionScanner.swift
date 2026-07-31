@@ -543,6 +543,38 @@ actor AgentSessionScanner {
         return usage.hasActivity ? usage : nil
     }
 
+    /// Codex desktop writes its provider-reported window usage into every
+    /// `token_count` event. Read the newest available value locally; no account
+    /// API, browser session, or made-up quota is involved.
+    func codexQuota(now: Date) -> CodexQuota? {
+        let files = transcripts(now: now)
+            .filter { $0.path.contains("/.codex/") }
+            .sorted { (modified($0) ?? .distantPast) > (modified($1) ?? .distantPast) }
+        for file in files {
+            if let text = text(of: file, tail: 262_144), let quota = Self.codexQuota(in: text) {
+                return quota
+            }
+        }
+        return nil
+    }
+
+    nonisolated static func codexQuota(in text: String) -> CodexQuota? {
+        for line in text.split(separator: "\n").reversed() {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let payload = object["payload"] as? [String: Any],
+                  payload["type"] as? String == "token_count",
+                  let info = payload["info"] as? [String: Any],
+                  let limits = info["rate_limits"] as? [String: Any],
+                  let primary = limits["primary"] as? [String: Any],
+                  let used = primary["used_percent"] as? Double else { continue }
+            let resetSeconds = (primary["resets_at"] as? Double)
+                ?? (primary["resets_at"] as? NSNumber)?.doubleValue
+            return CodexQuota(usedPercent: min(100, max(0, Int(used.rounded()))),
+                              resetsAt: resetSeconds.map(Date.init(timeIntervalSince1970:)))
+        }
+        return nil
+    }
+
     private func openCodeSessions(now: Date) -> [AgentSession] {
         guard FileManager.default.fileExists(atPath: openCodeDB.path) else { return [] }
         var db: OpaquePointer?
