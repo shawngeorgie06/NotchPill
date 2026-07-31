@@ -138,6 +138,7 @@ final class NotchController {
             TimerStore.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher(),
             state.$devReadyAlerts.map { _ in () }.eraseToAnyPublisher(),
             state.$agentSessions.map { _ in () }.eraseToAnyPublisher(),
+            state.$openCodeUsage.map { _ in () }.eraseToAnyPublisher(),
             state.$ciRuns.map { _ in () }.eraseToAnyPublisher(),
             state.$updateProgress.map { _ in () }.eraseToAnyPublisher(),
             state.$replyCompose.map { _ in () }.eraseToAnyPublisher()
@@ -314,6 +315,9 @@ final class NotchController {
         agentSessions.onUpdate = { [weak self] sessions in
             self?.state.agentSessions = sessions
             self?.refreshCI(for: sessions)
+        }
+        agentSessions.onOpenCodeUsageUpdate = { [weak self] usage in
+            self?.state.openCodeUsage = usage
         }
         agentSessions.start()
         devReady.start()

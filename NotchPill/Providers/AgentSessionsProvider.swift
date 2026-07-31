@@ -14,11 +14,13 @@ import Foundation
 @MainActor
 final class AgentSessionsProvider {
     var onUpdate: (([AgentSession]) -> Void)?
+    var onOpenCodeUsageUpdate: ((OpenCodeUsage?) -> Void)?
 
     private let pollInterval: TimeInterval = 3
     private var timer: Timer?
     private var lastPublished: [AgentSession] = []
     private var lastLabels: [String] = []
+    private var lastOpenCodeUsage: OpenCodeUsage?
     private let scanner = AgentSessionScanner()
     private var scanning = false
     /// Invalidates results from scans started before the last stop.
@@ -47,6 +49,7 @@ final class AgentSessionsProvider {
         lastPublished = []
         blockedSessions.removeAll()
         lastLabels = []
+        lastOpenCodeUsage = nil
         // A scan already in flight would publish after this, putting the card
         // back on screen moments after it was told to go away. Bump the
         // generation so its result is discarded.
@@ -56,6 +59,7 @@ final class AgentSessionsProvider {
         // Publish the empty list, or the card keeps showing whatever was on
         // screen when we stopped, forever.
         onUpdate?([])
+        onOpenCodeUsageUpdate?(nil)
     }
 
     /// Called when a peek says a session is blocked (or has stopped being).
@@ -67,6 +71,7 @@ final class AgentSessionsProvider {
     private func scan() {
         guard AppSettings.shared.showExpandedAgents else {
             if !lastPublished.isEmpty { lastPublished = []; onUpdate?([]) }
+            if lastOpenCodeUsage != nil { lastOpenCodeUsage = nil; onOpenCodeUsageUpdate?(nil) }
             return
         }
         // One scan at a time. A slow disk must not queue up overlapping walks
@@ -82,7 +87,8 @@ final class AgentSessionsProvider {
         Task { [weak self] in
             guard let self else { return }
             let sessions = await scanner.sessions(now: now, blocked: blocked)
-            await MainActor.run { self.publish(sessions, from: issued) }
+            let usage = await scanner.openCodeUsage(since: Calendar.current.startOfDay(for: now))
+            await MainActor.run { self.publish(sessions, usage: usage, from: issued) }
         }
     }
 
@@ -121,9 +127,13 @@ final class AgentSessionsProvider {
         }
     }
 
-    private func publish(_ ordered: [AgentSession], from issued: Int) {
+    private func publish(_ ordered: [AgentSession], usage: OpenCodeUsage?, from issued: Int) {
         guard issued == generation else { return }   // stopped mid-scan
         scanning = false
+        if usage != lastOpenCodeUsage {
+            lastOpenCodeUsage = usage
+            onOpenCodeUsageUpdate?(usage)
+        }
         // An idle row is value-identical between polls, so suppressing the
         // publish froze its age on screen: "idle 4m" while ten minutes passed.
         // Compare the rendered labels too, so a row republishes exactly when

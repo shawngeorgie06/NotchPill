@@ -217,3 +217,34 @@ struct AgentSession: Equatable, Identifiable {
         }
     }
 }
+
+/// OpenCode's locally recorded activity for the current day.
+///
+/// This is intentionally usage, not a quota estimate: the database records
+/// tokens and cost per session but carries no provider allowance or reset time.
+struct OpenCodeUsage: Equatable {
+    var inputTokens: Int64
+    var outputTokens: Int64
+    var reasoningTokens: Int64
+    var cacheReadTokens: Int64
+    var cacheWriteTokens: Int64
+    var cost: Double
+
+    var totalTokens: Int64 {
+        inputTokens + outputTokens + reasoningTokens + cacheReadTokens + cacheWriteTokens
+    }
+
+    var hasActivity: Bool { totalTokens > 0 || cost > 0 }
+
+    var tokenLabel: String { Self.compact(totalTokens) + " tokens" }
+
+    var costLabel: String {
+        cost == 0 ? "No cost" : cost.formatted(.currency(code: "USD"))
+    }
+
+    private static func compact(_ value: Int64) -> String {
+        if value >= 1_000_000 { return String(format: "%.1fM", Double(value) / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.1fk", Double(value) / 1_000) }
+        return "\(value)"
+    }
+}

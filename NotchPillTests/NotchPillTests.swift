@@ -1588,6 +1588,21 @@ struct AgentSessionTests {
         #expect(items.first?.id.hasPrefix("agents-") == true)
     }
 
+    @Test("OpenCode usage follows live agents and is not presented as a quota")
+    func openCodeUsageFollowsAgents() {
+        let usage = OpenCodeUsage(inputTokens: 900, outputTokens: 100, reasoningTokens: 0,
+                                  cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0)
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            shelfCount: 0, shelfNames: [],
+            agentSessions: [session("a", .working, at: Date())], openCodeUsage: usage,
+            showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: true)
+        #expect(items.map(\.kind) == ["agents", "openCodeUsage"])
+    }
+
     @Test("the toggle actually suppresses the card")
     func toggleOffHidesCard() {
         let items = ExpandedActivityBuilder.activities(
@@ -3750,6 +3765,26 @@ struct OpenCodeAgentTests {
         #expect(sql.contains("time_archived IS NULL"))
         #expect(sql.contains("time_updated > ?"))
         #expect(sql.contains("LIMIT"))
+    }
+
+    @Test("Usage query is local, bounded to active sessions, and never claims a quota")
+    func usageQueryShape() {
+        let sql = AgentSessionScanner.openCodeUsageSQL
+        #expect(sql.contains("time_updated >= ?"))
+        #expect(sql.contains("time_archived IS NULL"))
+        #expect(!sql.localizedCaseInsensitiveContains("quota"))
+    }
+
+    @Test("Usage hides when OpenCode has recorded no tokens or cost")
+    func usageNeedsActivity() {
+        let empty = OpenCodeUsage(inputTokens: 0, outputTokens: 0, reasoningTokens: 0,
+                                  cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0)
+        let active = OpenCodeUsage(inputTokens: 1_200, outputTokens: 80, reasoningTokens: 0,
+                                   cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0)
+        #expect(!empty.hasActivity)
+        #expect(active.hasActivity)
+        #expect(active.tokenLabel == "1.3k tokens")
+        #expect(active.costLabel == "No cost")
     }
 
     /// Nothing in the schema says which session is blocked — the permission

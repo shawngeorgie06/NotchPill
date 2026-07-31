@@ -903,6 +903,7 @@ enum ExpandedActivityBuilder {
         shelfCount: Int,
         shelfNames: [String],
         agentSessions: [AgentSession] = [],
+        openCodeUsage: OpenCodeUsage? = nil,
         ciRuns: [CIRun] = [],
         recentAlerts: [DevReadyAlert] = [],
         showMedia: Bool,
@@ -922,6 +923,7 @@ enum ExpandedActivityBuilder {
         // Live agents lead: they are the only card that answers "what is
         // running right now", and they are the reason to look at all.
         if showAgents, !agentSessions.isEmpty { items.append(.agents(agentSessions)) }
+        if showAgents, let openCodeUsage { items.append(.openCodeUsage(openCodeUsage)) }
         // Right after the agents: both answer "is the thing I started done yet?"
         if showCI, !ciRuns.isEmpty { items.append(.ci(ciRuns)) }
         if showRecentAlerts, !recentAlerts.isEmpty { items.append(.recentAlerts(recentAlerts)) }
@@ -985,6 +987,8 @@ struct ExpandedActivityCard: View {
                 shelfCard(count: count, names: names)
             case .agents(let sessions):
                 agentsCard(sessions)
+            case .openCodeUsage(let usage):
+                openCodeUsageCard(usage)
             case .ci(let runs):
                 ciCard(runs)
             case .recentAlerts(let alerts):
@@ -1021,6 +1025,29 @@ struct ExpandedActivityCard: View {
                 }
             }
             .scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A local total, intentionally not an account quota or reset estimate.
+    private func openCodeUsageCard(_ usage: OpenCodeUsage) -> some View {
+        VStack(alignment: .leading, spacing: s(3)) {
+            HStack(spacing: s(4)) {
+                Image(systemName: "curlybraces")
+                    .font(.system(size: s(9)))
+                Text("OpenCode · today")
+                    .font(font(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.45))
+
+            Text(usage.tokenLabel)
+                .font(font(size: 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+            Text(usage.costLabel + " local session cost")
+                .font(font(size: 9, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

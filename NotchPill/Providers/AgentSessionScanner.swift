@@ -393,6 +393,39 @@ actor AgentSessionScanner {
     ORDER BY time_updated DESC LIMIT 10
     """
 
+    /// The only durable usage OpenCode keeps locally. It deliberately does not
+    /// attempt to infer an account quota or reset time from these values.
+    static let openCodeUsageSQL = """
+    SELECT COALESCE(SUM(tokens_input), 0), COALESCE(SUM(tokens_output), 0),
+           COALESCE(SUM(tokens_reasoning), 0), COALESCE(SUM(tokens_cache_read), 0),
+           COALESCE(SUM(tokens_cache_write), 0), COALESCE(SUM(cost), 0)
+    FROM session
+    WHERE time_updated >= ? AND time_archived IS NULL
+    """
+
+    func openCodeUsage(since: Date) -> OpenCodeUsage? {
+        guard FileManager.default.fileExists(atPath: openCodeDB.path) else { return nil }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(openCodeDB.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            sqlite3_close(db); return nil
+        }
+        defer { sqlite3_close(db) }
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, Self.openCodeUsageSQL, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, Int64(since.timeIntervalSince1970 * 1000))
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        let usage = OpenCodeUsage(
+            inputTokens: sqlite3_column_int64(stmt, 0),
+            outputTokens: sqlite3_column_int64(stmt, 1),
+            reasoningTokens: sqlite3_column_int64(stmt, 2),
+            cacheReadTokens: sqlite3_column_int64(stmt, 3),
+            cacheWriteTokens: sqlite3_column_int64(stmt, 4),
+            cost: sqlite3_column_double(stmt, 5))
+        return usage.hasActivity ? usage : nil
+    }
+
     private func openCodeSessions(now: Date) -> [AgentSession] {
         guard FileManager.default.fileExists(atPath: openCodeDB.path) else { return [] }
         var db: OpaquePointer?
