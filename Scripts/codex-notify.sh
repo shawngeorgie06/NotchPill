@@ -10,8 +10,8 @@
 #   command = "…/Scripts/codex-notify.sh PermissionRequest"
 #   (same for Stop and SubagentStop)
 #
-# Stop/SubagentStop: peek labelled with the PROJECT folder name, git branch and
-# the host app, so you can tell which of several Codex sessions just finished.
+# Stop/SubagentStop: peek labelled with the active task when it can be recovered
+# from the local transcript, falling back to the project folder and host app.
 #
 # PermissionRequest: Codex is blocked asking to approve something; sends a
 # kind=waiting peek carrying the request text.
@@ -60,6 +60,78 @@ BRANCH="$(git -C "$CWD" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 # Same field name Claude Code uses, verified against a live Codex payload — so
 # NotchPill's one-waiting-peek-per-session rule works identically here.
 SESSION_ID="$(json_field session_id)"
+
+# A generated Codex workspace is often just `w`, which is technically the
+# project folder but says nothing about the work that needs attention. The
+# session transcript already contains the newest user request, so recover that
+# locally without contacting any service. The hook remains fast: it reads only
+# the last 256 KB of its own session file, and only after validating the id
+# before it becomes part of a filename pattern.
+codex_task() {
+  [[ "$SESSION_ID" =~ ^[A-Za-z0-9-]{8,128}$ ]] || return 0
+  local file
+  file="$(find "$HOME/.codex/sessions" -type f -name "*-${SESSION_ID}.jsonl" -print -quit 2>/dev/null || true)"
+  [[ -r "$file" ]] || return 0
+  /usr/bin/python3 - "$file" <<'PY' 2>/dev/null
+import json, sys
+
+try:
+    with open(sys.argv[1], "rb") as f:
+        f.seek(0, 2)
+        f.seek(max(0, f.tell() - 262_144))
+        text = f.read().decode("utf-8", "replace")
+except OSError:
+    raise SystemExit
+
+handoff = "The following is the Codex agent history "
+for line in reversed(text.splitlines()):
+    try:
+        payload = json.loads(line).get("payload", {})
+    except (json.JSONDecodeError, AttributeError):
+        continue
+    if payload.get("type") == "user_message":
+        message = payload.get("message")
+    elif payload.get("role") == "user":
+        message = " ".join(item.get("text", "") for item in payload.get("content", [])
+                           if item.get("type") == "input_text")
+    else:
+        continue
+    if not isinstance(message, str):
+        continue
+    message = " ".join(message.split()).strip()
+    if not message or message.startswith(handoff):
+        continue
+    print(message[:140])
+    break
+PY
+}
+
+TASK="$(codex_task)"
+
+# “continue”, “yes”, and similarly short follow-ups are real requests but make
+# terrible notification titles. Prefer the task only when it can stand on its
+# own, otherwise use an honest, specific status instead of a one-character
+# generated workspace name.
+task_is_useful() {
+  [[ ${#TASK} -ge 12 && "$TASK" == *" "* ]]
+}
+
+project_is_useful() {
+  [[ ${#PROJECT} -ge 3 && "$PROJECT" != "w" && "$PROJECT" != "tmp" && "$PROJECT" != "work" ]]
+}
+
+finished_title() {
+  if task_is_useful; then printf '%s' "$TASK"
+  elif project_is_useful; then printf '%s' "$PROJECT"
+  else printf '%s' "Codex finished"
+  fi
+}
+
+waiting_title() {
+  if task_is_useful; then printf '%s' "$TASK"
+  else printf '%s' "Codex needs your approval"
+  fi
+}
 
 # Host app → friendly name + bundle id, so tapping the peek focuses it. macOS
 # sets __CFBundleIdentifier to the app that launched the process: the Codex
@@ -144,15 +216,15 @@ case "$EVENT" in
     # desktop app there is no TUI to type into at all — so say so in the signal
     # rather than leaving NotchPill to infer it from the agent name. The peek
     # still shows the question and focuses the session on tap.
-    notify "$PROJECT" "waiting${BRANCH:+ · $BRANCH}" "$HOST_NAME" "$HOST_BUNDLE" \
+    notify "$(waiting_title)" "waiting${BRANCH:+ · $BRANCH}" "$HOST_NAME" "$HOST_BUNDLE" \
            "codex" "waiting" "$MESSAGE" "$SESSION_ID" "" "none"
     ;;
   SubagentStop)
-    notify "$PROJECT" "subagent finished${BRANCH:+ · $BRANCH}" "$HOST_NAME" "$HOST_BUNDLE" \
+    notify "$(finished_title)" "subagent finished${BRANCH:+ · $BRANCH}" "$HOST_NAME" "$HOST_BUNDLE" \
            "codex" "finished" "" "$SESSION_ID"
     ;;
   *)
-    notify "$PROJECT" "finished${BRANCH:+ · $BRANCH}" "$HOST_NAME" "$HOST_BUNDLE" \
+    notify "$(finished_title)" "finished${BRANCH:+ · $BRANCH}" "$HOST_NAME" "$HOST_BUNDLE" \
            "codex" "finished" "" "$SESSION_ID"
     ;;
 esac

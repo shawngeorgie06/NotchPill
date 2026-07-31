@@ -1347,6 +1347,17 @@ struct TranscriptTurnTests {
                 == "Fix the Codex live-agent text")
     }
 
+    @Test("Codex current transcript shape names its newest user request")
+    func codexUsesResponseItemPrompt() {
+        let transcript = tail([
+            #"{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"Make the title meaningful"}]}}"#,
+            #"{"type":"event_msg","payload":{"type":"agent_message","message":"I will do that"}}"#,
+            #"{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"Fix the one-letter Codex title"}]}}"#
+        ])
+        #expect(AgentSessionScanner.codexLastPrompt(in: transcript)
+                == "Fix the one-letter Codex title")
+    }
+
     @Test("Codex approval handoffs use an activity label, not protocol text")
     func codexApprovalHandoff() {
         let handoff = "The following is the Codex agent history added since your last approval assessment."

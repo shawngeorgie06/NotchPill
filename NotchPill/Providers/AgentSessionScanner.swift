@@ -217,16 +217,16 @@ actor AgentSessionScanner {
         return Self.codexLastPrompt(in: text)
     }
 
-    /// Codex records every submitted request as a nested `user_message` event.
-    /// Scan backwards so the live-agents card names the current request rather
-    /// than the prompt that originally created a long-running session.
+    /// Codex has used two transcript shapes for submitted requests:
+    /// `event_msg.user_message` and `response_item` with `role=user`. Scan
+    /// backwards so the live-agents card names the current request rather than
+    /// the prompt that originally created a long-running session.
     nonisolated static func codexLastPrompt(in text: String) -> String? {
         var sawApprovalHandoff = false
         for line in text.split(separator: "\n").reversed() {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                   let payload = obj["payload"] as? [String: Any],
-                  payload["type"] as? String == "user_message",
-                  let message = payload["message"] as? String, !message.isEmpty else { continue }
+                  let message = codexUserMessage(from: payload), !message.isEmpty else { continue }
             // The desktop app's approval reviewer is itself an agent session.
             // It receives a synthetic user_message containing the transcript
             // delta for every approval check; that is protocol plumbing, not a
@@ -241,6 +241,20 @@ actor AgentSessionScanner {
         // Give its row truthful, stable language instead of exposing the internal
         // handoff text. A normal Codex session never reaches this fallback.
         return sawApprovalHandoff ? "Reviewing a permission request" : nil
+    }
+
+    nonisolated private static func codexUserMessage(from payload: [String: Any]) -> String? {
+        if payload["type"] as? String == "user_message" {
+            return payload["message"] as? String
+        }
+        guard payload["role"] as? String == "user",
+              let content = payload["content"] as? [[String: Any]] else { return nil }
+        let pieces = content.compactMap { item -> String? in
+            guard item["type"] as? String == "input_text" else { return nil }
+            return item["text"] as? String
+        }
+        let message = pieces.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        return message.isEmpty ? nil : message
     }
 
     nonisolated private static func isCodexApprovalHandoff(_ message: String) -> Bool {
