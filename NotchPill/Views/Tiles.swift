@@ -1160,8 +1160,15 @@ struct ExpandedActivityCard: View {
             HStack(spacing: s(4)) {
                 Image(systemName: "bell.badge")
                     .font(.system(size: s(9)))
-                Text("Recent activity")
+                Text("Notifications")
                     .font(font(size: 10, weight: .semibold))
+                if alerts.count > 3 {
+                    Text("\(alerts.count)")
+                        .font(font(size: 9, weight: .semibold).monospacedDigit())
+                        .padding(.horizontal, s(4))
+                        .padding(.vertical, s(1))
+                        .background(.white.opacity(0.12), in: Capsule())
+                }
                 Spacer(minLength: 0)
                 Button("Clear") { actions.clearRecentActivity() }
                     .font(font(size: 9, weight: .medium))
@@ -1169,30 +1176,36 @@ struct ExpandedActivityCard: View {
                     .buttonStyle(.plain)
             }
             .foregroundStyle(.white.opacity(0.45))
-            ForEach(alerts) { alert in
-                Button { if let bundleId = alert.bundleId { actions.focusApp(bundleId) } } label: {
-                    HStack(alignment: .top, spacing: s(6)) {
-                        VStack(alignment: .leading, spacing: s(1)) {
-                            Text(alert.displayTitle)
-                                .font(font(size: 11, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.92))
-                                .lineLimit(1)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: s(3)) {
+                    ForEach(alerts) { alert in
+                        Button { if let bundleId = alert.bundleId { actions.focusApp(bundleId) } } label: {
+                            HStack(alignment: .top, spacing: s(6)) {
+                                VStack(alignment: .leading, spacing: s(1)) {
+                                    Text(alert.displayTitle)
+                                        .font(font(size: 11, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.92))
+                                        .lineLimit(1)
                         if let subtitle = alert.displaySubtitle, !subtitle.isEmpty {
                             Text(subtitle)
                                 .font(font(size: 9, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.48))
                                 .lineLimit(1)
                         }
+                                }
+                                Text(alert.shortAgeText())
+                                    .font(font(size: 9, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.38))
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }
-                    Text(alert.shortAgeText())
-                        .font(font(size: 9, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.38))
-                        .fixedSize(horizontal: true, vertical: false)
+                        .buttonStyle(.plain)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
             }
+            .frame(maxHeight: s(66))
+            .scrollBounceBehavior(.basedOnSize)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

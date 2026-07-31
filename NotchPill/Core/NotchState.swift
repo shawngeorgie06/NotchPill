@@ -8,6 +8,11 @@ import Combine
 /// double-render.
 @MainActor
 final class NotchState: ObservableObject {
+    /// Finished notifications are useful after their five-second peek fades,
+    /// but a local history must not retain a raw permission payload or answer
+    /// specification. The persisted form is intentionally presentation-only.
+    static let notificationHistoryLimit = 12
+    private static let notificationHistoryKey = "recentDevReadyNotificationHistory"
     // Hover expansion.
     @Published private(set) var isExpanded = false
 
@@ -66,6 +71,15 @@ final class NotchState: ObservableObject {
     private var brightnessHideItem: DispatchWorkItem?
     private var microphoneHideItem: DispatchWorkItem?
 
+    init() {
+        guard let data = UserDefaults.standard.data(forKey: Self.notificationHistoryKey),
+              let stored = try? JSONDecoder().decode([DevReadyAlert].self, from: data)
+        else { return }
+        recentDevReadyAlerts = Array(stored.filter { $0.kind == .finished }
+            .sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
+            .prefix(Self.notificationHistoryLimit))
+    }
+
     // MARK: - Hover
 
     func setExpanded(_ expanded: Bool) {
@@ -78,8 +92,9 @@ final class NotchState: ObservableObject {
         for alert in alerts {
             if alert.kind == .finished {
                 recentDevReadyAlerts.removeAll { $0.id == alert.id }
-                recentDevReadyAlerts.insert(alert, at: 0)
-                recentDevReadyAlerts = Array(recentDevReadyAlerts.prefix(3))
+                recentDevReadyAlerts.insert(Self.historyEntry(for: alert), at: 0)
+                recentDevReadyAlerts = Array(recentDevReadyAlerts.prefix(Self.notificationHistoryLimit))
+                persistNotificationHistory()
             }
             // A finished ping means that session is no longer blocked, so it
             // supersedes that session's waiting peek. Without this, waiting peeks
@@ -99,6 +114,27 @@ final class NotchState: ObservableObject {
 
     func clearRecentDevReady() {
         recentDevReadyAlerts = []
+        UserDefaults.standard.removeObject(forKey: Self.notificationHistoryKey)
+    }
+
+    /// Removes fields that could invoke or describe a past agent prompt before
+    /// saving it. A history entry can only reopen its source app.
+    nonisolated static func historyEntry(for alert: DevReadyAlert) -> DevReadyAlert {
+        DevReadyAlert(
+            id: alert.id,
+            title: alert.displayTitle,
+            subtitle: alert.displaySubtitle,
+            source: alert.source,
+            agent: alert.agent,
+            bundleId: alert.bundleId,
+            kind: .finished,
+            createdAt: alert.createdAt
+        )
+    }
+
+    private func persistNotificationHistory() {
+        guard let data = try? JSONEncoder().encode(recentDevReadyAlerts) else { return }
+        UserDefaults.standard.set(data, forKey: Self.notificationHistoryKey)
     }
 
     /// Enqueues a "waiting" peek (an agent blocked on a permission/choice prompt).

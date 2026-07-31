@@ -1555,6 +1555,16 @@ struct TranscriptTurnTests {
 
 @Suite("Focused activity ordering")
 struct FocusedActivityTests {
+    @Test("notification history strips a past approval payload")
+    func notificationHistoryIsPresentationOnly() {
+        let alert = DevReadyAlert(title: "Ship", subtitle: "Done", kind: .waiting,
+                                  requestId: "request-123", permissionPayload: "sensitive")
+        let history = NotchState.historyEntry(for: alert)
+        #expect(history.kind == .finished)
+        #expect(history.requestId == nil)
+        #expect(history.permissionPayload == nil)
+    }
+
     @Test("Focus timer carries its focused presentation state")
     func focusTimerState() {
         let focus = ActiveTimer(label: "Focus", endDate: .now.addingTimeInterval(60))
