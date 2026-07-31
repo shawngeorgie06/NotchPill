@@ -154,6 +154,10 @@ final class AppSettings: ObservableObject {
     /// and the type compensation plus the wider hover slack mean 75% is no
     /// harder to read or to hit.
     nonisolated static let defaultNotchScale: Double = 0.75
+    /// A completed-agent ping should be glanceable, not a lingering banner.
+    /// Waiting approval prompts deliberately use a separate, non-dismissing
+    /// lifecycle so an agent cannot be stranded after this interval.
+    nonisolated static let defaultDevReadyDuration: Double = 5.0
     nonisolated static let notchScaleRange: ClosedRange<Double> = 0.7...1.3
     /// `nonisolated` so the clamp can be tested without hopping to the main actor.
     nonisolated static func clampNotchScale(_ value: Double) -> Double {
@@ -290,7 +294,7 @@ final class AppSettings: ObservableObject {
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
-            Keys.devReadyDuration: 13.0,
+            Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
             Keys.showVolumeHUD: true,
             Keys.showBrightnessHUD: true,
@@ -326,7 +330,7 @@ final class AppSettings: ObservableObject {
         notchScale = AppSettings.clampNotchScale(defaults.double(forKey: Keys.notchScale))
         showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
         let storedDuration = defaults.double(forKey: Keys.devReadyDuration)
-        devReadyDuration = storedDuration > 0 ? storedDuration : 13.0
+        devReadyDuration = storedDuration > 0 ? storedDuration : AppSettings.defaultDevReadyDuration
         devReadyPlaySound = defaults.object(forKey: Keys.devReadyPlaySound) as? Bool ?? true
         showVolumeHUD = defaults.object(forKey: Keys.showVolumeHUD) as? Bool ?? true
         showBrightnessHUD = defaults.object(forKey: Keys.showBrightnessHUD) as? Bool ?? true
@@ -378,7 +382,7 @@ final class AppSettings: ObservableObject {
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
-            Keys.devReadyDuration: 13.0,
+            Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
             Keys.showVolumeHUD: true,
             Keys.showBrightnessHUD: true,
@@ -413,7 +417,7 @@ final class AppSettings: ObservableObject {
         cardWeights = [:]
         notchScale = AppSettings.defaultNotchScale
         showDevReadyPings = true
-        devReadyDuration = 13.0
+        devReadyDuration = AppSettings.defaultDevReadyDuration
         devReadyPlaySound = true
         showVolumeHUD = true
         showBrightnessHUD = true
