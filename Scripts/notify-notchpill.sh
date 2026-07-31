@@ -40,6 +40,22 @@ DELIVERY="${10:-}"
 REQUEST_ID="${NOTCHPILL_REQUEST_ID:-}"
 PERMISSION_JSON="${NOTCHPILL_PERMISSION_JSON:-}"
 
+# A generated Codex workspace frequently has the deliberately short name `w`.
+# That label is useful to a filesystem, but not to a person glancing at the
+# notch. Keep this final guard here as well as in codex-notify.sh: hooks can be
+# updated independently, and a stale hook must not be able to resurrect the
+# one-letter title.
+AGENT_LOWER="$(printf '%s' "$AGENT" | tr '[:upper:]' '[:lower:]')"
+case "$AGENT_LOWER:$TITLE" in
+  codex:w|codex:W|openai-codex:w|openai-codex:W)
+    if [ "$KIND" = "waiting" ]; then
+      TITLE="Codex needs your approval"
+    else
+      TITLE="Codex finished"
+    fi
+    ;;
+esac
+
 if [ "$KIND" != "waiting" ] && notchpill_should_skip_notify "$TITLE" "$SUBTITLE" "$SESSION_ID"; then
   exit 0
 fi
