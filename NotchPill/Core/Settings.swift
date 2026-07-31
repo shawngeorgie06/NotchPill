@@ -59,6 +59,9 @@ final class AppSettings: ObservableObject {
     @Published var showCollapsedClock: Bool {
         didSet { defaults.set(showCollapsedClock, forKey: Keys.showCollapsedClock) }
     }
+    @Published var showCollapsedAgents: Bool {
+        didSet { defaults.set(showCollapsedAgents, forKey: Keys.showCollapsedAgents) }
+    }
 
     // MARK: - Expanded status cards
 
@@ -264,6 +267,7 @@ final class AppSettings: ObservableObject {
         static let showCollapsedSystemStats = "showCollapsedSystemStats"
         static let showCollapsedBattery = "showCollapsedBattery"
         static let showCollapsedClock = "showCollapsedClock"
+        static let showCollapsedAgents = "showCollapsedAgents"
         static let showExpandedMedia = "showExpandedMedia"
         static let showExpandedActiveApp = "showExpandedActiveApp"
         static let showExpandedVolume = "showExpandedVolume"
@@ -305,6 +309,7 @@ final class AppSettings: ObservableObject {
             Keys.showCollapsedSystemStats: false,
             Keys.showCollapsedBattery: false,
             Keys.showCollapsedClock: true,
+            Keys.showCollapsedAgents: true,
             Keys.showExpandedMedia: true,
             Keys.showExpandedActiveApp: true,
             Keys.showExpandedVolume: true,
@@ -340,6 +345,7 @@ final class AppSettings: ObservableObject {
         showCollapsedSystemStats = defaults.bool(forKey: Keys.showCollapsedSystemStats)
         showCollapsedBattery = defaults.bool(forKey: Keys.showCollapsedBattery)
         showCollapsedClock = defaults.bool(forKey: Keys.showCollapsedClock)
+        showCollapsedAgents = defaults.object(forKey: Keys.showCollapsedAgents) as? Bool ?? true
         showExpandedMedia = defaults.bool(forKey: Keys.showExpandedMedia)
         showExpandedActiveApp = defaults.bool(forKey: Keys.showExpandedActiveApp)
         showExpandedVolume = defaults.bool(forKey: Keys.showExpandedVolume)
@@ -396,6 +402,7 @@ final class AppSettings: ObservableObject {
             Keys.showCollapsedSystemStats: false,
             Keys.showCollapsedBattery: false,
             Keys.showCollapsedClock: true,
+            Keys.showCollapsedAgents: true,
             Keys.showExpandedMedia: true,
             Keys.showExpandedActiveApp: true,
             Keys.showExpandedVolume: true,
@@ -431,6 +438,7 @@ final class AppSettings: ObservableObject {
         showCollapsedSystemStats = false
         showCollapsedBattery = false
         showCollapsedClock = true
+        showCollapsedAgents = true
         showExpandedMedia = true
         showExpandedActiveApp = true
         showExpandedVolume = true

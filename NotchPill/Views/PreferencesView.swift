@@ -36,6 +36,7 @@ struct PreferencesView: View {
                 Toggle("Media", isOn: $settings.showCollapsedMedia)
                 Toggle("Timer", isOn: $settings.showCollapsedTimer)
                 Toggle("Live clock", isOn: $settings.showCollapsedClock)
+                Toggle("Active agent", isOn: $settings.showCollapsedAgents)
                 Toggle("App switch banner", isOn: $settings.showCollapsedAppSwitch)
                 Toggle("Next calendar event", isOn: $settings.showCalendar)
                 Toggle("File shelf count", isOn: $settings.showFileShelf)

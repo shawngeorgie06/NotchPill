@@ -232,6 +232,20 @@ struct CollapsedChipBuilderTests {
         )
         #expect(chips.count == 3)
     }
+
+    @Test("surfaces the active agent before expansion")
+    func activeAgent() {
+        let session = AgentSession(id: "s", agent: "codex", project: "NotchPill",
+                                   state: .working, lastActivity: Date(), locatorId: nil,
+                                   directory: nil, subagent: nil, task: nil, toolActivity: nil)
+        let chips = CollapsedChipBuilder.chips(
+            nowPlaying: nil, nextEvent: nil, shelfCount: 0, appSwitchHint: nil,
+            timer: nil, systemStats: nil, battery: nil, agentSessions: [session],
+            showMedia: false, showCalendar: false, showShelf: false, showAppSwitch: false,
+            showTimer: false, showSystemStats: false, showBattery: false,
+            showAgents: true, showClock: false)
+        #expect(chips == [.agent(name: "Codex", state: "working", count: 1)])
+    }
 }
 
 @Suite("NotchActivity priority")

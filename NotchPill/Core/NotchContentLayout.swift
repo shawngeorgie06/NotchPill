@@ -372,6 +372,7 @@ enum NotchContentLayout {
         case .shelf: return 52
         case .appSwitch: return 72
         case .battery: return 44
+        case .agent: return 118
         case .clock: return 72
         }
     }

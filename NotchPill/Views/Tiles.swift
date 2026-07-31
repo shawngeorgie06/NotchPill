@@ -1537,6 +1537,7 @@ enum CollapsedChipBuilder {
         timer: ActiveTimer?,
         systemStats: SystemStats?,
         battery: BatteryStatus?,
+        agentSessions: [AgentSession] = [],
         showMedia: Bool,
         showCalendar: Bool,
         showShelf: Bool,
@@ -1544,6 +1545,7 @@ enum CollapsedChipBuilder {
         showTimer: Bool,
         showSystemStats: Bool,
         showBattery: Bool,
+        showAgents: Bool = true,
         showClock: Bool
     ) -> [CollapsedChip] {
         var chips: [CollapsedChip] = []
@@ -1554,6 +1556,12 @@ enum CollapsedChipBuilder {
         if showShelf, shelfCount > 0 { chips.append(.shelf(count: shelfCount)) }
         if showSystemStats, let stats = systemStats { chips.append(.systemStats(stats)) }
         if showBattery, let battery { chips.append(.battery(battery)) }
+        if showAgents, let agent = agentSessions.first(where: {
+            if case .idle = $0.state { return false }
+            return true
+        }) {
+            chips.append(.agent(name: agent.displayName, state: agent.statusLabel, count: agentSessions.count))
+        }
         if showClock { chips.append(.clock) }
         return chips
     }
@@ -1704,6 +1712,10 @@ struct CollapsedChipView: View {
             Image(systemName: status.isCharging ? "battery.100.bolt" : "battery.100")
                 .font(.system(size: s(10)))
                 .foregroundStyle(status.level <= 20 ? .red : .green)
+        case .agent:
+            Image(systemName: "circle.fill")
+                .font(.system(size: s(7)))
+                .foregroundStyle(NotchDesign.devReadyGreen)
         case .clock:
             EmptyView()
         }
@@ -1718,6 +1730,8 @@ struct CollapsedChipView: View {
         case .timer: return ""
         case .systemStats(let stats): return "CPU \(stats.cpuPercent)% · RAM \(stats.memoryPercent)%"
         case .battery(let status): return "\(status.level)%"
+        case .agent(let name, let state, let count):
+            return count > 1 ? "\(name) · \(state) · \(count) agents" : "\(name) · \(state)"
         case .clock: return ""
         }
     }

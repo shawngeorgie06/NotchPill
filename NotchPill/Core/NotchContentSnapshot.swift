@@ -18,6 +18,7 @@ enum NotchContentSnapshot {
             timer: timer.active,
             systemStats: state.systemStats,
             battery: state.battery,
+            agentSessions: state.agentSessions,
             showMedia: settings.showCollapsedMedia,
             showCalendar: settings.showCalendar,
             showShelf: settings.showFileShelf,
@@ -25,6 +26,7 @@ enum NotchContentSnapshot {
             showTimer: settings.showCollapsedTimer,
             showSystemStats: settings.showCollapsedSystemStats,
             showBattery: settings.showCollapsedBattery,
+            showAgents: settings.showCollapsedAgents,
             showClock: settings.showCollapsedClock
         )
     }

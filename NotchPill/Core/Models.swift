@@ -448,6 +448,7 @@ enum CollapsedChip: Equatable, Identifiable {
     case timer(ActiveTimer)
     case systemStats(SystemStats)
     case battery(BatteryStatus)
+    case agent(name: String, state: String, count: Int)
     case clock
 
     var id: String {
@@ -459,6 +460,7 @@ enum CollapsedChip: Equatable, Identifiable {
         case .timer(let t): return "timer-\(t.endDate.timeIntervalSince1970)"
         case .systemStats(let s): return "stats-\(s.cpuPercent)-\(s.memoryPercent)"
         case .battery(let b): return "battery-\(b.level)-\(b.isCharging)"
+        case .agent(let name, let state, let count): return "agent-\(name)-\(state)-\(count)"
         case .clock: return "clock"
         }
     }
