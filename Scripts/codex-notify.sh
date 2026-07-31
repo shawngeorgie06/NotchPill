@@ -169,7 +169,9 @@ case "$EVENT" in
     # no human to ask). Try the plausible carriers in order and fall back to a
     # generic line, so the peek is still correct and actionable if none match.
     MESSAGE=""
-    for k in message permission_request reason tool_name command description; do
+    # The action is what a person needs to approve. `tool_name` is merely the
+    # generic transport label (usually "Bash"), so it must be a last resort.
+    for k in command argv message permission_request reason description tool_name; do
       MESSAGE="$(json_field "$k")"
       [[ -n "$MESSAGE" ]] && break
     done
@@ -181,8 +183,8 @@ case "$EVENT" in
       MESSAGE="$(printf '%s' "$INPUT" | jq -r '
         [ .. | objects
           | to_entries[]
-          | select(.key | IN("message","permission_request","reason","tool_name",
-                             "command","description","explanation","call"))
+          | select(.key | IN("command","argv","message","permission_request",
+                             "reason","description","explanation","call","tool_name"))
           | .value | select(type == "string") | select(length > 0) ]
         | first // empty' 2>/dev/null || true)"
     fi
