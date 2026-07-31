@@ -393,13 +393,13 @@ enum NotchContentLayout {
     /// look.
     ///
     /// Row-based cards grow with what they hold, capped at the rows they show
-    /// before their own `ScrollView` takes over. The clamp is the range the
-    /// pill has always lived in: never taller than a media row needs, never so
-    /// short that a row of one-line chips becomes a letterbox.
+    /// before their own `ScrollView` takes over. Agent rows deliberately earn
+    /// a little more vertical room than the small utility cards: the expanded
+    /// notch is where you read the work, rather than merely count sessions.
     static func expandedContentBaseHeight(_ activities: [ExpandedActivity]) -> CGFloat {
         guard !activities.isEmpty else { return 66 }
         let tallest = activities.map(expandedCardBaseHeight).max() ?? 66
-        return min(96, max(48, tallest))
+        return min(112, max(48, tallest))
     }
 
     /// Rows a card renders before it starts scrolling. Beyond this the card's
@@ -416,7 +416,10 @@ enum NotchContentLayout {
         // the reason the old rule keyed off it — but it wants ~78, not the 96
         // the whole row was being sized to.
         case .media: return 78
-        case .agents(let sessions): return rowsHeight(header: 18, row: 26, count: sessions.count)
+        // Agent rows have a title/status line and one terminal-style activity
+        // line. Two are visible; a third and later session scrolls instead of
+        // turning the notch into a full-height panel.
+        case .agents(let sessions): return rowsHeight(header: 18, row: 45, count: sessions.count)
         case .openCodeUsage: return 56
         case .codexQuota: return 56
         case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)

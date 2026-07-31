@@ -2655,7 +2655,7 @@ struct ExpandedHeightTests {
         #expect(NotchContentLayout.expandedContentBaseHeight([agents(3), .clock]) == tall)
     }
 
-    @Test("every combination stays inside the range the pill has always used")
+    @Test("every combination stays inside the expanded-notch height budget")
     func clamped() {
         let rows: [[ExpandedActivity]] = [
             [], [.clock], [media], [agents(1)], [agents(10), ci(10), media],
@@ -2663,7 +2663,7 @@ struct ExpandedHeightTests {
         ]
         for row in rows {
             let h = NotchContentLayout.expandedContentBaseHeight(row)
-            #expect(h >= 48 && h <= 96)
+            #expect(h >= 48 && h <= 112)
         }
     }
 

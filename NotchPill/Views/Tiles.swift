@@ -1009,14 +1009,30 @@ struct ExpandedActivityCard: View {
         .layoutPriority(expandToFill ? 1 : 0)
     }
 
-    /// The live-agents card: one row per running conversation, scrolling.
+    /// The live-agents card is the expanded notch's work surface. It is
+    /// intentionally console-like: the name/status establishes who is active,
+    /// while the line below answers what they are doing right now.
     private func agentsCard(_ sessions: [AgentSession]) -> some View {
-        VStack(alignment: .leading, spacing: s(3)) {
-            HStack(spacing: s(4)) {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .font(.system(size: s(9)))
-                Text(sessions.count == 1 ? "1 agent" : "\(sessions.count) agents")
-                    .font(font(size: 10, weight: .semibold))
+        VStack(alignment: .leading, spacing: s(4)) {
+            HStack(spacing: s(5)) {
+                ZStack {
+                    Circle()
+                        .fill(Color.green.opacity(0.16))
+                        .frame(width: s(13), height: s(13))
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: s(5), height: s(5))
+                }
+                Text("LIVE AGENTS")
+                    .font(font(size: 9, weight: .bold))
+                    .tracking(0.7 * textScale)
+                Text(sessions.count == 1 ? "1 active" : "\(sessions.count) active")
+                    .font(font(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.38))
+                Spacer(minLength: s(2))
+                Text("tap to jump")
+                    .font(font(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.28))
             }
             .foregroundStyle(.white.opacity(0.45))
 
@@ -1024,7 +1040,7 @@ struct ExpandedActivityCard: View {
             // so silently showing three of four made the card contradict
             // itself — and there was no way to reach the rest.
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: s(3)) {
+                VStack(alignment: .leading, spacing: s(4)) {
                     ForEach(sessions) { session in
                         agentRow(session)
                     }
@@ -1196,7 +1212,7 @@ struct ExpandedActivityCard: View {
         Button {
             actions.focusAgentSession(session)
         } label: {
-            VStack(alignment: .leading, spacing: s(1)) {
+            VStack(alignment: .leading, spacing: s(3)) {
                 HStack(spacing: s(5)) {
                     Circle()
                         .fill(color(for: session.state))
@@ -1212,48 +1228,73 @@ struct ExpandedActivityCard: View {
                             .accessibilityLabel(session.agentName)
                     }
                     Text(session.displayName)
-                        .font(font(size: 11, weight: .semibold))
+                        .font(font(size: 10, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
                         .fixedSize(horizontal: true, vertical: false)
                     Text(session.project)
-                        .font(font(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .font(.system(size: 9 * textScale, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.43))
                         .lineLimit(1)
                     Spacer(minLength: s(4))
                     Text(session.statusLabel)
-                        .font(font(size: 10, weight: .medium))
-                        .foregroundStyle(color(for: session.state).opacity(0.85))
+                        .font(font(size: 8, weight: .bold))
+                        .foregroundStyle(color(for: session.state).opacity(0.95))
+                        .padding(.horizontal, s(5))
+                        .padding(.vertical, s(2))
+                        .background(color(for: session.state).opacity(0.14), in: Capsule())
                         .fixedSize(horizontal: true, vertical: false)
                 }
-                if let activity = session.toolActivity {
-                    HStack(spacing: s(4)) {
-                        Text(activity.tool)
-                            .font(font(size: 10, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.62))
-                            .fixedSize(horizontal: true, vertical: false)
-                        if let detail = activity.detail, !detail.isEmpty {
-                            Text(detail)
-                                .font(.system(size: 9 * textScale, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.78))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .layoutPriority(1)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, s(10))
-                }
-                if let task = session.task {
-                    Text("\(session.taskLeadIn) · \(task)")
-                        .font(font(size: 10))
-                        .foregroundStyle(.white.opacity(0.42))
-                        .lineLimit(1)
-                        .padding(.leading, s(10))
-                }
+                agentActivityLine(session)
+            }
+            .padding(.horizontal, s(7))
+            .padding(.vertical, s(5))
+            .background(color(for: session.state).opacity(session.state == .waiting ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: s(7), style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: s(7), style: .continuous)
+                    .stroke(color(for: session.state).opacity(session.state == .waiting ? 0.48 : 0.16), lineWidth: 0.75)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func agentActivityLine(_ session: AgentSession) -> some View {
+        if let activity = session.toolActivity {
+            HStack(spacing: s(5)) {
+                Text("$")
+                    .font(.system(size: 9 * textScale, weight: .bold, design: .monospaced))
+                    .foregroundStyle(color(for: session.state).opacity(0.9))
+                Text(activity.tool)
+                    .font(.system(size: 9 * textScale, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .fixedSize(horizontal: true, vertical: false)
+                if let detail = activity.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 9 * textScale, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.58))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(1)
+                }
+            }
+        } else if let task = session.task {
+            HStack(spacing: s(5)) {
+                Text("›")
+                    .font(font(size: 12, weight: .bold))
+                    .foregroundStyle(color(for: session.state).opacity(0.9))
+                Text("\(session.taskLeadIn) · \(task)")
+                    .font(font(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(1)
+            }
+        } else {
+            Text(session.state == .waiting ? "Needs your attention" : "Monitoring this session")
+                .font(font(size: 9, weight: .medium))
+                .foregroundStyle(.white.opacity(0.42))
+                .lineLimit(1)
+                .padding(.leading, s(12))
+        }
     }
 
     /// Waiting is the only state worth interrupting for, so it is the only one
