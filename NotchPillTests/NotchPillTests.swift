@@ -3583,3 +3583,51 @@ struct AgentVendorSymbolTests {
         #expect(claude.statusLabel == cursor.statusLabel)
     }
 }
+
+@Suite("CI supersedes")
+struct CISupersedeTests {
+    private func run(_ id: String, _ state: CIRun.State, minutesAgo: Double,
+                     branch: String = "main", workflow: String = "Release") -> CIRun {
+        let t = Date().addingTimeInterval(-minutesAgo * 60)
+        return CIRun(id: id, repo: "o/r", workflow: workflow, branch: branch,
+                     state: state, started: t, updated: t)
+    }
+
+    /// The bug: a failure lives six hours, a pass two minutes, so a fixed
+    /// build kept reading "failed" long after the green re-run aged off.
+    @Test("A passing re-run replaces the failure it fixed")
+    func passSupersedesFailure() {
+        let runs = [run("fail", .failed, minutesAgo: 30),
+                    run("pass", .passed, minutesAgo: 29)]
+        let kept = CIRun.current(runs)
+        #expect(kept.map(\.id) == ["pass"] || kept.isEmpty)
+        #expect(!kept.contains { $0.state == .failed })
+    }
+
+    @Test("A retry still running also replaces the failure")
+    func runningSupersedesFailure() {
+        let kept = CIRun.current([run("fail", .failed, minutesAgo: 10),
+                                  run("retry", .running, minutesAgo: 1)])
+        #expect(kept.map(\.id) == ["retry"])
+    }
+
+    @Test("An older run never replaces a newer one")
+    func olderDoesNotSupersede() {
+        let kept = CIRun.current([run("new", .running, minutesAgo: 1),
+                                  run("old", .failed, minutesAgo: 90)])
+        #expect(kept.map(\.id) == ["new"])
+    }
+
+    @Test("Different branches and workflows are separate targets")
+    func targetsAreIndependent() {
+        let runs = [run("a", .failed, minutesAgo: 10, branch: "main"),
+                    run("b", .failed, minutesAgo: 9, branch: "dev"),
+                    run("c", .failed, minutesAgo: 8, workflow: "Test")]
+        #expect(CIRun.current(runs).count == 3)
+    }
+
+    @Test("A lone failure still survives, as before")
+    func failureStillLives() {
+        #expect(CIRun.current([run("fail", .failed, minutesAgo: 60)]).count == 1)
+    }
+}

@@ -77,11 +77,36 @@ struct CIRun: Equatable, Identifiable {
     static let passedLifetime: TimeInterval = 120
     static let failedLifetime: TimeInterval = 21600
 
+    /// What a run is the status *of*: one workflow, on one branch, in one repo.
+    /// Re-running a build produces a new run with the same target.
+    private var target: String { "\(repo)\u{0}\(workflow)\u{0}\(branch)" }
+
+    /// Keeps only the newest run per target.
+    ///
+    /// Without this the card lies after a re-run. A failure lives for six hours
+    /// and a pass for two minutes, so a build that failed and was immediately
+    /// fixed shows "failed" for the rest of the afternoon while the green run
+    /// that replaced it has already aged off. Those lifetimes are right on
+    /// their own — an unresolved failure *should* outlive a pass — but they
+    /// only make sense between runs that are still telling you something, and
+    /// a superseded run is not.
+    ///
+    /// Newest wins outright, including when the newer run is still going: a
+    /// retry in progress is the live answer to "did that failure get fixed".
+    static func latest(_ runs: [CIRun]) -> [CIRun] {
+        var newest: [String: CIRun] = [:]
+        for run in runs {
+            if let seen = newest[run.target], seen.started >= run.started { continue }
+            newest[run.target] = run
+        }
+        return Array(newest.values)
+    }
+
     /// Drops finished runs that have stopped being news. Anything still
     /// running stays regardless of age — a build that has been going for two
     /// hours is exactly the one you want to see.
     static func current(_ runs: [CIRun], now: Date = Date()) -> [CIRun] {
-        runs.filter { run in
+        latest(runs).filter { run in
             // From when it finished, not when it started.
             let age = now.timeIntervalSince(run.finished)
             switch run.state {
