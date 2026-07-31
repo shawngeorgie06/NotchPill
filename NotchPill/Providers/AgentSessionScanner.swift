@@ -597,11 +597,17 @@ actor AgentSessionScanner {
                 (usage[key] as? NSNumber)?.int64Value ?? 0
             }
             let updatedAt = (object["timestamp"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
-            return ClaudeCodeUsage(inputTokens: tokens("input_tokens"),
-                                   outputTokens: tokens("output_tokens"),
-                                   cacheReadTokens: tokens("cache_read_input_tokens"),
-                                   cacheCreationTokens: tokens("cache_creation_input_tokens"),
-                                   updatedAt: updatedAt)
+            let result = ClaudeCodeUsage(inputTokens: tokens("input_tokens"),
+                                         outputTokens: tokens("output_tokens"),
+                                         cacheReadTokens: tokens("cache_read_input_tokens"),
+                                         cacheCreationTokens: tokens("cache_creation_input_tokens"),
+                                         updatedAt: updatedAt)
+            // Claude appends zeroed bookkeeping events after some completed
+            // responses. They describe no model work, so keep scanning back to
+            // the latest record that actually carries usage.
+            guard result.inputTokens > 0 || result.outputTokens > 0
+                    || result.cacheReadTokens > 0 || result.cacheCreationTokens > 0 else { continue }
+            return result
         }
         return nil
     }
