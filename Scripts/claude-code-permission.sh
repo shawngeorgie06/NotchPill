@@ -72,6 +72,43 @@ case "$TOOL" in
   *) exit 0 ;;
 esac
 
+# Only intervene where Claude was going to ask you anyway.
+#
+# This hook fires on every matching tool call, whether or not a prompt was
+# coming. Under bypassPermissions — or acceptEdits for an edit — Claude asks
+# nothing, so a peek here is not relaying a question, it is inventing one: you
+# get an Allow/Deny for something you never had to decide, with nothing in the
+# terminal to explain it, and the agent stalls until you answer.
+#
+# The mode travels on the payload. When it does not, fall back to the setting
+# that decides it, and treat unknown as "asks" — being wrong that way costs a
+# spurious peek, while the other way silently drops a real question.
+PERMISSION_MODE="$(json permission_mode)"
+if [[ -z "$PERMISSION_MODE" ]]; then
+  PERMISSION_MODE="$(/usr/bin/python3 -c '
+import json, os, sys
+for name in ("settings.local.json", "settings.json"):
+    path = os.path.expanduser("~/.claude/" + name)
+    try:
+        mode = json.load(open(path)).get("permissions", {}).get("defaultMode")
+    except Exception:
+        continue
+    if mode:
+        print(mode); break
+' 2>/dev/null || true)"
+fi
+
+case "$PERMISSION_MODE" in
+  # Nothing is asked in these modes.
+  bypassPermissions|plan) exit 0 ;;
+  # Edits are auto-accepted; commands are still asked about.
+  acceptEdits)
+    case "$TOOL" in
+      Edit|MultiEdit|Write|NotebookEdit) exit 0 ;;
+    esac
+    ;;
+esac
+
 CWD="$(json cwd)"
 [[ -n "$CWD" ]] || CWD="${CLAUDE_PROJECT_DIR:-$PWD}"
 PROJECT="$(basename "$CWD" 2>/dev/null || true)"
