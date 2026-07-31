@@ -162,16 +162,21 @@ struct PreferencesView: View {
     }
 
     private var timerSection: some View {
-        SettingsPanel(title: "Timer", subtitle: "Quick countdowns in the notch") {
+        SettingsPanel(title: "Focus & Timer", subtitle: "Keep a work block visible in the notch") {
             if let active = timer.active, active.isActive {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     HStack {
-                        Text(StatusFormatting.countdown(active.remaining(at: context.date)))
-                            .font(.system(size: 28, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(NotchDesign.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(active.isFocusSession ? "Focus session" : active.label)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(StatusFormatting.countdown(active.remaining(at: context.date)))
+                                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(NotchDesign.accent)
+                        }
                         Spacer()
-                        Button("Cancel") { timer.cancel() }
+                        Button(active.isFocusSession ? "End focus" : "Cancel") { timer.cancel() }
                             .buttonStyle(.bordered)
                     }
                 }
@@ -181,7 +186,13 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
-                ForEach([5, 10, 15, 25], id: \.self) { minutes in
+                ForEach([25, 50], id: \.self) { minutes in
+                    Button("Focus \(minutes)m") { timer.startFocus(minutes: minutes) }
+                        .buttonStyle(TimerPillButtonStyle())
+                }
+            }
+            HStack(spacing: 8) {
+                ForEach([5, 10, 15], id: \.self) { minutes in
                     Button("\(minutes)m") { timer.start(minutes: minutes) }
                         .buttonStyle(TimerPillButtonStyle())
                 }

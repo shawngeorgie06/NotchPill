@@ -1555,6 +1555,14 @@ struct TranscriptTurnTests {
 
 @Suite("Focused activity ordering")
 struct FocusedActivityTests {
+    @Test("Focus timer carries its focused presentation state")
+    func focusTimerState() {
+        let focus = ActiveTimer(label: "Focus", endDate: .now.addingTimeInterval(60))
+        let regular = ActiveTimer(label: "Timer", endDate: .now.addingTimeInterval(60))
+        #expect(focus.isFocusSession)
+        #expect(!regular.isFocusSession)
+    }
+
     @Test("a blocked agent becomes the focused item ahead of completions")
     func waitingWins() {
         let finished = DevReadyAlert(title: "build", kind: .finished, createdAt: 20)

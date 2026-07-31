@@ -19,6 +19,13 @@ final class TimerStore: ObservableObject {
         startTicking()
     }
 
+    /// Starts an intentional work block. This is deliberately local to
+    /// NotchPill: it does not change the user's macOS Focus mode or mute
+    /// important agent approval requests.
+    func startFocus(minutes: Int) {
+        start(minutes: minutes, label: "Focus")
+    }
+
     func cancel() {
         active = nil
         tickTimer?.invalidate()

@@ -1424,13 +1424,14 @@ struct ExpandedActivityCard: View {
     private func timerCard(_ timer: ActiveTimer) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(alignment: .leading, spacing: s(6)) {
-                Label(timer.label, systemImage: "timer")
+                Label(timer.isFocusSession ? "Focus session" : timer.label,
+                      systemImage: timer.isFocusSession ? "moon.stars.fill" : "timer")
                     .font(font(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(timer.isFocusSession ? NotchDesign.accent : .white.opacity(0.45))
                 Text(StatusFormatting.countdown(timer.remaining(at: context.date)))
                     .font(font(size: 22, weight: .semibold).monospacedDigit())
                     .foregroundStyle(.white)
-                Button("Cancel", action: onCancelTimer)
+                Button(timer.isFocusSession ? "End focus" : "Cancel", action: onCancelTimer)
                     .font(font(size: 11, weight: .medium))
                     .buttonStyle(.plain)
                     .foregroundStyle(.white.opacity(0.55))
