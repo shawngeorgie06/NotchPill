@@ -222,7 +222,8 @@ enum NotchContentLayout {
         // four diff lines — in place of the one-line question.
         let messageExtra: CGFloat
         if let request = alert.permissionRequest {
-            messageExtra = 18 + CGFloat(request.previewLines.count) * 14 + 6
+            let lines = request.isPlan ? request.planPreview.count : request.previewLines.count
+            messageExtra = 18 + CGFloat(lines) * 14 + 6
         } else {
             messageExtra = alert.questionText != nil ? 30 : 0
         }

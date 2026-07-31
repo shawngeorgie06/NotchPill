@@ -3191,7 +3191,8 @@ struct PermissionRequestTests {
         ])
         #expect(request?.isPlan == true)
         #expect(request?.summary == "Review plan")
-        #expect(request?.planPreviewLines == ["# Approach", "1. Inspect the model", "2. Make the change"])
+        #expect(request?.planPreviewLines == ["Approach", "1. Inspect the model", "2. Make the change"])
+        #expect(request?.planPreview.first?.style == .heading)
     }
 
     // A command line is the likeliest place for a credential, and this renders

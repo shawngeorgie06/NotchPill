@@ -10,6 +10,15 @@ import Foundation
 /// Everything here is derived, pure and tested, because it renders on an
 /// overlay above every window and gets approved with one keystroke.
 struct PermissionRequest: Equatable {
+    /// A compact, safe Markdown-derived line for the notch. Plans remain text
+    /// (never HTML), but their hierarchy should survive the trip from the
+    /// agent's proposal to a glanceable approval surface.
+    struct PlanPreviewLine: Equatable, Identifiable {
+        enum Style: Equatable { case heading, bullet, numbered, checkbox, body }
+        var style: Style
+        var text: String
+        var id: String { "\(style)-\(text)" }
+    }
     enum Action: Equatable {
         /// An edit to an existing file, with the change itself.
         case edit(path: String, diff: [DiffLine])
@@ -68,12 +77,38 @@ struct PermissionRequest: Equatable {
 
     /// Markdown is intentionally rendered as text, not HTML: the plan came
     /// from an agent and the notch needs a safe, glanceable review surface.
-    var planPreviewLines: [String] {
+    var planPreview: [PlanPreviewLine] {
         guard case .plan(let markdown) = action else { return [] }
-        let lines = markdown.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return Array(lines.prefix(4))
+        return Array(markdown.components(separatedBy: .newlines)
+            .compactMap(Self.planPreviewLine)
+            .prefix(4))
+    }
+
+    /// Backward-compatible text-only view used by non-visual callers/tests.
+    var planPreviewLines: [String] {
+        planPreview.map(\.text)
+    }
+
+    private static func planPreviewLine(_ raw: String) -> PlanPreviewLine? {
+        var line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty else { return nil }
+        line = line.replacingOccurrences(of: #"^#{1,6}\s+"#, with: "", options: .regularExpression)
+        if raw.trimmingCharacters(in: .whitespaces).hasPrefix("#") {
+            return PlanPreviewLine(style: .heading, text: line)
+        }
+        if line.hasPrefix("- [ ] ") || line.hasPrefix("* [ ] ") {
+            return PlanPreviewLine(style: .checkbox, text: "☐ " + String(line.dropFirst(6)))
+        }
+        if line.hasPrefix("- [x] ") || line.hasPrefix("- [X] ") || line.hasPrefix("* [x] ") || line.hasPrefix("* [X] ") {
+            return PlanPreviewLine(style: .checkbox, text: "☑ " + String(line.dropFirst(6)))
+        }
+        if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") {
+            return PlanPreviewLine(style: .bullet, text: "• " + String(line.dropFirst(2)))
+        }
+        if line.range(of: #"^\d+[.)]\s+"#, options: .regularExpression) != nil {
+            return PlanPreviewLine(style: .numbered, text: line)
+        }
+        return PlanPreviewLine(style: .body, text: line)
     }
 
     /// How many diff lines the peek has room for. The peek does not scroll, and

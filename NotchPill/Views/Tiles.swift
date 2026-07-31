@@ -762,10 +762,12 @@ struct DevReadyPeekRow: View {
                 }
             }
             if request.isPlan {
-                ForEach(Array(request.planPreviewLines.enumerated()), id: \.offset) { _, line in
-                    Text(line)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.72))
+                ForEach(request.planPreview) { line in
+                    Text(line.text)
+                        .font(.system(size: line.style == .heading ? 11 : 10,
+                                      weight: line.style == .heading ? .semibold : .regular,
+                                      design: line.style == .numbered ? .monospaced : .default))
+                        .foregroundStyle(line.style == .heading ? .white.opacity(0.9) : .white.opacity(0.72))
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
