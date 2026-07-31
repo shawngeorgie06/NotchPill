@@ -905,6 +905,7 @@ enum ExpandedActivityBuilder {
         agentSessions: [AgentSession] = [],
         openCodeUsage: OpenCodeUsage? = nil,
         codexQuota: CodexQuota? = nil,
+        claudeCodeUsage: ClaudeCodeUsage? = nil,
         ciRuns: [CIRun] = [],
         recentAlerts: [DevReadyAlert] = [],
         showMedia: Bool,
@@ -926,6 +927,7 @@ enum ExpandedActivityBuilder {
         if showAgents, !agentSessions.isEmpty { items.append(.agents(agentSessions)) }
         if showAgents, let openCodeUsage { items.append(.openCodeUsage(openCodeUsage)) }
         if showAgents, let codexQuota { items.append(.codexQuota(codexQuota)) }
+        if showAgents, let claudeCodeUsage { items.append(.claudeCodeUsage(claudeCodeUsage)) }
         // Right after the agents: both answer "is the thing I started done yet?"
         if showCI, !ciRuns.isEmpty { items.append(.ci(ciRuns)) }
         if showRecentAlerts, !recentAlerts.isEmpty { items.append(.recentAlerts(recentAlerts)) }
@@ -993,6 +995,8 @@ struct ExpandedActivityCard: View {
                 openCodeUsageCard(usage)
             case .codexQuota(let quota):
                 codexQuotaCard(quota)
+            case .claudeCodeUsage(let usage):
+                claudeCodeUsageCard(usage)
             case .ci(let runs):
                 ciCard(runs)
             case .recentAlerts(let alerts):
@@ -1081,6 +1085,29 @@ struct ExpandedActivityCard: View {
             Text([quota.resetLabel, quota.updatedLabel].compactMap { $0 }.joined(separator: " · "))
                 .font(font(size: 10))
                 .foregroundStyle(.white.opacity(0.5))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Claude exposes a response measurement locally, not account credits or a
+    /// resettable allowance, so the card is deliberately named that way.
+    private func claudeCodeUsageCard(_ usage: ClaudeCodeUsage) -> some View {
+        VStack(alignment: .leading, spacing: s(3)) {
+            HStack(spacing: s(4)) {
+                Image(systemName: "asterisk")
+                    .font(.system(size: s(9)))
+                Text("Claude · latest response")
+                    .font(font(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.45))
+            Text(usage.responseLabel)
+                .font(font(size: 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+            Text([usage.cacheLabel, usage.updatedLabel].compactMap { $0 }.joined(separator: " · "))
+                .font(font(size: 10))
+                .foregroundStyle(.white.opacity(0.5))
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

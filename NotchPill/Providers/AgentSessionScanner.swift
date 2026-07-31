@@ -425,10 +425,24 @@ actor AgentSessionScanner {
         }
         let escapedKey = NSRegularExpression.escapedPattern(for: key)
         let pattern = #"\"# + escapedKey + #"\"\s*:\s*\"([^\"]+)\""#
-        guard let expression = try? NSRegularExpression(pattern: pattern),
-              let match = expression.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let range = Range(match.range(at: 1), in: text) else { return nil }
-        return String(text[range])
+        if let expression = try? NSRegularExpression(pattern: pattern),
+           let match = expression.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+           let range = Range(match.range(at: 1), in: text) {
+            return String(text[range])
+        }
+        // A partial first record can end inside a huge instruction field. Keep
+        // a tiny structured fallback for the simple metadata string fields
+        // this method requests, rather than rejecting the whole record.
+        let quotedKey = "\"\(key)\""
+        guard let keyRange = text.range(of: quotedKey) else { return nil }
+        let afterKey = text[keyRange.upperBound...]
+        guard let colon = afterKey.firstIndex(of: ":") else { return nil }
+        let afterColon = afterKey[afterKey.index(after: colon)...]
+        guard let opening = afterColon.firstIndex(of: "\"") else { return nil }
+        let valueStart = afterColon.index(after: opening)
+        guard let closing = afterColon[valueStart...].firstIndex(of: "\"") else { return nil }
+        let value = String(afterColon[valueStart..<closing])
+        return value.isEmpty ? nil : value
     }
 
     // MARK: - Cursor
@@ -554,6 +568,40 @@ actor AgentSessionScanner {
             if let text = text(of: file, tail: 262_144), let quota = Self.codexQuota(in: text) {
                 return quota
             }
+        }
+        return nil
+    }
+
+    /// Return one response, not a sum: Claude's transcript can repeat a tool
+    /// loop snapshot and summing those would invent a session total.
+    func claudeCodeUsage(now: Date) -> ClaudeCodeUsage? {
+        let files = transcripts(now: now)
+            .filter { !$0.path.contains("/.codex/") }
+            .sorted { (modified($0) ?? .distantPast) > (modified($1) ?? .distantPast) }
+        for file in files {
+            if let text = text(of: file, tail: 262_144), let usage = Self.claudeCodeUsage(in: text) {
+                return usage
+            }
+        }
+        return nil
+    }
+
+    nonisolated static func claudeCodeUsage(in text: String) -> ClaudeCodeUsage? {
+        for line in text.split(separator: "\n").reversed() {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  object["type"] as? String == "assistant",
+                  let message = object["message"] as? [String: Any],
+                  let usage = message["usage"] as? [String: Any]
+            else { continue }
+            func tokens(_ key: String) -> Int64 {
+                (usage[key] as? NSNumber)?.int64Value ?? 0
+            }
+            let updatedAt = (object["timestamp"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
+            return ClaudeCodeUsage(inputTokens: tokens("input_tokens"),
+                                   outputTokens: tokens("output_tokens"),
+                                   cacheReadTokens: tokens("cache_read_input_tokens"),
+                                   cacheCreationTokens: tokens("cache_creation_input_tokens"),
+                                   updatedAt: updatedAt)
         }
         return nil
     }

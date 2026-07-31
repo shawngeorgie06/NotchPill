@@ -49,6 +49,7 @@ enum NotchContentSnapshot {
             agentSessions: state.agentSessions,
             openCodeUsage: state.openCodeUsage,
             codexQuota: state.codexQuota,
+            claudeCodeUsage: state.claudeCodeUsage,
             ciRuns: state.ciRuns,
             recentAlerts: state.recentDevReadyAlerts,
             showMedia: settings.showExpandedMedia,

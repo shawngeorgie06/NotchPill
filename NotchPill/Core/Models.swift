@@ -479,6 +479,7 @@ enum ExpandedActivity: Equatable, Identifiable {
     case agents([AgentSession])
     case openCodeUsage(OpenCodeUsage)
     case codexQuota(CodexQuota)
+    case claudeCodeUsage(ClaudeCodeUsage)
     case ci([CIRun])
     case recentAlerts([DevReadyAlert])
 
@@ -498,6 +499,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .agents: return "agents"
         case .openCodeUsage: return "openCodeUsage"
         case .codexQuota: return "codexQuota"
+        case .claudeCodeUsage: return "claudeCodeUsage"
         case .ci: return "ci"
         case .recentAlerts: return "recentAlerts"
         }
@@ -518,6 +520,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .agents: return "Live agents"
         case .openCodeUsage: return "OpenCode usage"
         case .codexQuota: return "Codex quota"
+        case .claudeCodeUsage: return "Claude Code usage"
         case .ci: return "CI status"
         case .recentAlerts: return "Recent activity"
         }
@@ -538,6 +541,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .agents(let list): return "agents-" + list.map(\.id).joined(separator: ",")
         case .openCodeUsage(let usage): return "opencode-\(usage.totalTokens)-\(usage.cost)"
         case .codexQuota(let quota): return "codex-quota-\(quota.usedPercent)-\(quota.resetsAt?.timeIntervalSince1970 ?? 0)-\(quota.creditBalance?.description ?? "")-\(quota.updatedAt?.timeIntervalSince1970 ?? 0)"
+        case .claudeCodeUsage(let usage): return "claude-usage-\(usage.inputTokens)-\(usage.outputTokens)-\(usage.cacheReadTokens)-\(usage.cacheCreationTokens)-\(usage.updatedAt?.timeIntervalSince1970 ?? 0)"
         case .ci(let runs): return "ci-" + runs.map { $0.id + $0.statusLabel }.joined(separator: ",")
         case .recentAlerts(let alerts): return "recent-" + alerts.map(\.id).joined(separator: ",")
         }

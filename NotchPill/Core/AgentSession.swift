@@ -295,3 +295,34 @@ struct CodexQuota: Equatable {
         return "Updated \(seconds / 60)m ago"
     }
 }
+
+/// The most recent response usage Claude Code recorded in its local transcript.
+/// Claude Code does not write plan allowance, credits, or a reset time locally.
+struct ClaudeCodeUsage: Equatable {
+    var inputTokens: Int64
+    var outputTokens: Int64
+    var cacheReadTokens: Int64
+    var cacheCreationTokens: Int64
+    var updatedAt: Date?
+
+    private func compact(_ value: Int64) -> String {
+        if value >= 1_000 { return String(format: "%.1fK", Double(value) / 1_000) }
+        return "\(value)"
+    }
+
+    var responseLabel: String { "\(compact(outputTokens)) out · \(compact(inputTokens)) in" }
+
+    var cacheLabel: String? {
+        let total = cacheReadTokens + cacheCreationTokens
+        guard total > 0 else { return nil }
+        return "\(compact(total)) cache"
+    }
+
+    var updatedLabel: String? {
+        guard let updatedAt else { return nil }
+        let seconds = max(0, Int(Date().timeIntervalSince(updatedAt)))
+        if seconds < 10 { return "Updated now" }
+        if seconds < 60 { return "Updated \(seconds)s ago" }
+        return "Updated \(seconds / 60)m ago"
+    }
+}
