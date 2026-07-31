@@ -1190,11 +1190,22 @@ struct ExpandedActivityCard: View {
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 if let activity = session.toolActivity {
-                    Text(activity.displayText)
-                        .font(font(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .lineLimit(1)
-                        .padding(.leading, s(10))
+                    HStack(spacing: s(4)) {
+                        Text(activity.tool)
+                            .font(font(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .fixedSize(horizontal: true, vertical: false)
+                        if let detail = activity.detail, !detail.isEmpty {
+                            Text(detail)
+                                .font(.system(size: 9 * textScale, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.78))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .layoutPriority(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, s(10))
                 }
                 if let task = session.task {
                     Text("\(session.taskLeadIn) · \(task)")
