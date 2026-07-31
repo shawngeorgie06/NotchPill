@@ -807,7 +807,8 @@ final class NotchController {
     private func focusAgentSession(_ session: AgentSession) {
         let fallback = session.knownAgent == .cursor ? "com.todesktop.230313mzl4w4u92" : nil
         AgentSessionLocator.focus(sessionId: session.locatorId ?? session.id,
-                                  fallbackBundleId: fallback)
+                                  fallbackBundleId: fallback,
+                                  directory: session.directory)
         pillEngaged = false
         state.setExpanded(false)
     }

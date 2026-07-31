@@ -37,7 +37,9 @@ enum AgentSessionLocator {
     /// Brings that app forward. Returns false when the session could not be
     /// placed, so the caller can decide whether to say so.
     @discardableResult
-    static func focus(sessionId: String?, fallbackBundleId: String?) -> Bool {
+    static func focus(sessionId: String?,
+                      fallbackBundleId: String?,
+                      directory: String? = nil) -> Bool {
         let table = processTable()
         let candidateEntries: [Entry] = sessionId.map { candidates(forSessionId: $0, in: table) } ?? []
         let located = candidateEntries.lazy.compactMap { entry in
@@ -62,6 +64,15 @@ enum AgentSessionLocator {
            let pid = located?.0.pid,
            let tty = controllingTTY(for: pid),
            focusITermSession(tty: tty) {
+            return true
+        }
+
+        // cmux exposes each terminal's working directory but not its TTY, so
+        // the session is matched by directory instead. Ambiguity is declined
+        // rather than guessed at — see `cmuxFocusScript`.
+        if target == "com.cmuxterm.app",
+           let directory, !directory.isEmpty,
+           runAppleScript(cmuxFocusScript(directory: directory)) {
             return true
         }
 
@@ -159,6 +170,38 @@ enum AgentSessionLocator {
                     end if
                 end repeat
             end repeat
+            return false
+        end tell
+        """
+    }
+
+    /// Exposed for a pure test. cmux is matched on working directory because
+    /// its scripting dictionary exposes one and no TTY.
+    ///
+    /// Two tabs open on the same directory are indistinguishable this way, so
+    /// the script counts matches first and focuses nothing unless there is
+    /// exactly one. Landing you in the wrong tab is worse than landing you in
+    /// the right app: the caller falls through to plain activation, which is
+    /// the same thing an unscriptable terminal gets.
+    static func cmuxFocusScript(directory: String) -> String {
+        let escaped = escapedAppleScriptString(directory)
+        return """
+        tell application "cmux"
+            set matches to {}
+            repeat with cmuxWindow in windows
+                repeat with cmuxTab in tabs of cmuxWindow
+                    try
+                        set cmuxTerminal to focused terminal of cmuxTab
+                        if working directory of cmuxTerminal is "\(escaped)" then
+                            set end of matches to cmuxTerminal
+                        end if
+                    end try
+                end repeat
+            end repeat
+            if (count of matches) is 1 then
+                focus (item 1 of matches)
+                return true
+            end if
             return false
         end tell
         """

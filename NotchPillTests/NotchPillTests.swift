@@ -1841,6 +1841,28 @@ struct LocatorChoiceTests {
         #expect(script.contains("set selected tab of terminalWindow to terminalTab"))
     }
 
+    @Test("cmux script matches on the working directory it was given")
+    func cmuxScriptUsesDirectory() {
+        let script = AgentSessionLocator.cmuxFocusScript(directory: "/Users/me/proj")
+        #expect(script.contains(#"working directory of cmuxTerminal is "/Users/me/proj""#))
+        #expect(script.contains("focus (item 1 of matches)"))
+    }
+
+    /// Two tabs on one directory are indistinguishable, and focusing the wrong
+    /// one is worse than focusing the app — so the script declines to choose.
+    @Test("cmux script refuses to guess between duplicate matches")
+    func cmuxScriptRefusesAmbiguity() {
+        let script = AgentSessionLocator.cmuxFocusScript(directory: "/tmp")
+        #expect(script.contains("if (count of matches) is 1 then"))
+        #expect(script.contains("return false"))
+    }
+
+    @Test("cmux script escapes a directory containing a quote")
+    func cmuxScriptEscapesDirectory() {
+        let script = AgentSessionLocator.cmuxFocusScript(directory: #"/tmp/a"b"#)
+        #expect(script.contains(#"is "/tmp/a\"b""#))
+    }
+
     @Test("iTerm script selects the exact split-pane session")
     func iTermSessionScriptUsesTTY() {
         let script = AgentSessionLocator.iTermFocusScript(tty: "/dev/ttys012")
