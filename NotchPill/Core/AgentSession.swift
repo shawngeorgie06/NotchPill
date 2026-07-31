@@ -267,6 +267,8 @@ struct OpenCodeUsage: Equatable {
 struct CodexQuota: Equatable {
     var usedPercent: Int
     var resetsAt: Date?
+    /// Optional dollar balance recorded by Codex desktop for credit-backed plans.
+    var creditBalance: Decimal?
 
     var remainingPercent: Int { max(0, 100 - usedPercent) }
     var usageLabel: String { "\(usedPercent)% used" }
@@ -277,5 +279,10 @@ struct CodexQuota: Equatable {
         if seconds < 3600 { return "Resets in \(max(1, seconds / 60))m" }
         if seconds < 86_400 { return "Resets in \(seconds / 3600)h" }
         return "Resets in \(seconds / 86_400)d"
+    }
+
+    var creditsLabel: String? {
+        guard let creditBalance else { return nil }
+        return creditBalance.formatted(.currency(code: "USD")) + " credits"
     }
 }

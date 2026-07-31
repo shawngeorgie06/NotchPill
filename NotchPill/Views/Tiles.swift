@@ -1071,6 +1071,11 @@ struct ExpandedActivityCard: View {
             Text(quota.resetLabel)
                 .font(font(size: 10))
                 .foregroundStyle(.white.opacity(0.5))
+            if let credits = quota.creditsLabel {
+                Text(credits)
+                    .font(font(size: 10))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

@@ -568,8 +568,14 @@ actor AgentSessionScanner {
                   let used = primary["used_percent"] as? Double else { continue }
             let resetSeconds = (primary["resets_at"] as? Double)
                 ?? (primary["resets_at"] as? NSNumber)?.doubleValue
+            let credits = limits["credits"] as? [String: Any]
+            let balanceText = credits?["balance"] as? String
+            let balance = balanceText.flatMap {
+                Decimal(string: $0, locale: Locale(identifier: "en_US_POSIX"))
+            }
             return CodexQuota(usedPercent: min(100, max(0, Int(used.rounded()))),
-                              resetsAt: resetSeconds.map(Date.init(timeIntervalSince1970:)))
+                              resetsAt: resetSeconds.map(Date.init(timeIntervalSince1970:)),
+                              creditBalance: balance)
         }
         return nil
     }
