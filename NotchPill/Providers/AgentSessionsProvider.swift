@@ -16,7 +16,6 @@ final class AgentSessionsProvider {
     var onUpdate: (([AgentSession]) -> Void)?
     var onOpenCodeUsageUpdate: ((OpenCodeUsage?) -> Void)?
     var onCodexQuotaUpdate: ((CodexQuota?) -> Void)?
-    var onClaudeCodeUsageUpdate: ((ClaudeCodeUsage?) -> Void)?
 
     private let pollInterval: TimeInterval = 3
     private var timer: Timer?
@@ -24,7 +23,6 @@ final class AgentSessionsProvider {
     private var lastLabels: [String] = []
     private var lastOpenCodeUsage: OpenCodeUsage?
     private var lastCodexQuota: CodexQuota?
-    private var lastClaudeCodeUsage: ClaudeCodeUsage?
     private let scanner = AgentSessionScanner()
     private var scanning = false
     /// Invalidates results from scans started before the last stop.
@@ -55,7 +53,6 @@ final class AgentSessionsProvider {
         lastLabels = []
         lastOpenCodeUsage = nil
         lastCodexQuota = nil
-        lastClaudeCodeUsage = nil
         // A scan already in flight would publish after this, putting the card
         // back on screen moments after it was told to go away. Bump the
         // generation so its result is discarded.
@@ -67,7 +64,6 @@ final class AgentSessionsProvider {
         onUpdate?([])
         onOpenCodeUsageUpdate?(nil)
         onCodexQuotaUpdate?(nil)
-        onClaudeCodeUsageUpdate?(nil)
     }
 
     /// Called when a peek says a session is blocked (or has stopped being).
@@ -81,7 +77,6 @@ final class AgentSessionsProvider {
             if !lastPublished.isEmpty { lastPublished = []; onUpdate?([]) }
             if lastOpenCodeUsage != nil { lastOpenCodeUsage = nil; onOpenCodeUsageUpdate?(nil) }
             if lastCodexQuota != nil { lastCodexQuota = nil; onCodexQuotaUpdate?(nil) }
-            if lastClaudeCodeUsage != nil { lastClaudeCodeUsage = nil; onClaudeCodeUsageUpdate?(nil) }
             return
         }
         // One scan at a time. A slow disk must not queue up overlapping walks
@@ -99,8 +94,7 @@ final class AgentSessionsProvider {
             let sessions = await scanner.sessions(now: now, blocked: blocked)
             let usage = await scanner.openCodeUsage(since: Calendar.current.startOfDay(for: now))
             let quota = await scanner.codexQuota(now: now)
-            let claudeUsage = await scanner.claudeCodeUsage(now: now)
-            await MainActor.run { self.publish(sessions, usage: usage, quota: quota, claudeUsage: claudeUsage, from: issued) }
+            await MainActor.run { self.publish(sessions, usage: usage, quota: quota, from: issued) }
         }
     }
 
@@ -139,7 +133,7 @@ final class AgentSessionsProvider {
         }
     }
 
-    private func publish(_ ordered: [AgentSession], usage: OpenCodeUsage?, quota: CodexQuota?, claudeUsage: ClaudeCodeUsage?, from issued: Int) {
+    private func publish(_ ordered: [AgentSession], usage: OpenCodeUsage?, quota: CodexQuota?, from issued: Int) {
         guard issued == generation else { return }   // stopped mid-scan
         scanning = false
         if usage != lastOpenCodeUsage {
@@ -149,10 +143,6 @@ final class AgentSessionsProvider {
         if quota != lastCodexQuota {
             lastCodexQuota = quota
             onCodexQuotaUpdate?(quota)
-        }
-        if claudeUsage != lastClaudeCodeUsage {
-            lastClaudeCodeUsage = claudeUsage
-            onClaudeCodeUsageUpdate?(claudeUsage)
         }
         // An idle row is value-identical between polls, so suppressing the
         // publish froze its age on screen: "idle 4m" while ten minutes passed.

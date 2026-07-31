@@ -1404,24 +1404,6 @@ struct TranscriptTurnTests {
         #expect(quota?.updatedAt == ISO8601DateFormatter().date(from: "2026-07-31T17:00:00Z"))
     }
 
-    @Test("Claude response usage remains a response measurement, not a quota")
-    func claudeCodeUsage() {
-        let transcript = #"{"timestamp":"2026-07-31T17:00:00Z","type":"assistant","message":{"usage":{"input_tokens":12,"output_tokens":3456,"cache_read_input_tokens":7890,"cache_creation_input_tokens":100}}}"#
-        let usage = AgentSessionScanner.claudeCodeUsage(in: transcript)
-        #expect(usage?.responseLabel == "3.5K out · 12 in")
-        #expect(usage?.cacheLabel == "8.0K cache")
-        #expect(usage?.updatedAt == ISO8601DateFormatter().date(from: "2026-07-31T17:00:00Z"))
-    }
-
-    @Test("Claude zero-token bookkeeping does not replace real response usage")
-    func claudeCodeUsageSkipsEmptyRecord() {
-        let response = #"{"timestamp":"2026-07-31T17:00:00Z","type":"assistant","message":{"usage":{"input_tokens":2,"output_tokens":625,"cache_read_input_tokens":10,"cache_creation_input_tokens":0}}}"#
-        let bookkeeping = #"{"timestamp":"2026-07-31T17:01:00Z","type":"assistant","message":{"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#
-        let usage = AgentSessionScanner.claudeCodeUsage(in: response + "\n" + bookkeeping)
-        #expect(usage?.responseLabel == "625 out · 2 in")
-        #expect(usage?.updatedAt == ISO8601DateFormatter().date(from: "2026-07-31T17:00:00Z"))
-    }
-
     @Test("Codex oversized session metadata still exposes its working directory")
     func codexOversizedMetadataHasWorkingDirectory() {
         let prefix = #"{"payload":{"cwd":"/Users/me/Project","base_instructions":""#

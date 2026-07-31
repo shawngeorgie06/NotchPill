@@ -572,46 +572,6 @@ actor AgentSessionScanner {
         return nil
     }
 
-    /// Return one response, not a sum: Claude's transcript can repeat a tool
-    /// loop snapshot and summing those would invent a session total.
-    func claudeCodeUsage(now: Date) -> ClaudeCodeUsage? {
-        let files = transcripts(now: now)
-            .filter { !$0.path.contains("/.codex/") }
-            .sorted { (modified($0) ?? .distantPast) > (modified($1) ?? .distantPast) }
-        for file in files {
-            if let text = text(of: file, tail: 262_144), let usage = Self.claudeCodeUsage(in: text) {
-                return usage
-            }
-        }
-        return nil
-    }
-
-    nonisolated static func claudeCodeUsage(in text: String) -> ClaudeCodeUsage? {
-        for line in text.split(separator: "\n").reversed() {
-            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-                  object["type"] as? String == "assistant",
-                  let message = object["message"] as? [String: Any],
-                  let usage = message["usage"] as? [String: Any]
-            else { continue }
-            func tokens(_ key: String) -> Int64 {
-                (usage[key] as? NSNumber)?.int64Value ?? 0
-            }
-            let updatedAt = (object["timestamp"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
-            let result = ClaudeCodeUsage(inputTokens: tokens("input_tokens"),
-                                         outputTokens: tokens("output_tokens"),
-                                         cacheReadTokens: tokens("cache_read_input_tokens"),
-                                         cacheCreationTokens: tokens("cache_creation_input_tokens"),
-                                         updatedAt: updatedAt)
-            // Claude appends zeroed bookkeeping events after some completed
-            // responses. They describe no model work, so keep scanning back to
-            // the latest record that actually carries usage.
-            guard result.inputTokens > 0 || result.outputTokens > 0
-                    || result.cacheReadTokens > 0 || result.cacheCreationTokens > 0 else { continue }
-            return result
-        }
-        return nil
-    }
-
     nonisolated static func codexQuota(in text: String) -> CodexQuota? {
         for line in text.split(separator: "\n").reversed() {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
