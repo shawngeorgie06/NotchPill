@@ -131,7 +131,6 @@ codex_apply() {
 import os, pathlib, re
 config = pathlib.Path(os.environ["CONFIG"])
 hook, mode = os.environ["HOOK"], os.environ["MODE"]
-permission_hook = os.environ["PERMISSION_HOOK"]
 text = config.read_text() if config.exists() else ""
 # Everything between our markers is ours to rewrite.
 text = re.sub(r"\n?# >>> NotchPill hooks >>>.*?# <<< NotchPill hooks <<<\n?",
