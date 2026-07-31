@@ -35,6 +35,7 @@ actor AgentSessionScanner {
         blockedSessions = blocked
         var found = transcriptSessions(now: now)
         found.append(contentsOf: cursorSessions(now: now))
+        found.append(contentsOf: openCodeSessions(now: now))
         // Keyed by path and otherwise unbounded: a long session would
         // accumulate an entry for every transcript that ever went live.
         let live = Set(found.map(\.id))
@@ -372,6 +373,68 @@ actor AgentSessionScanner {
     }
 
     /// The folder a Cursor conversation belongs to.
+    // MARK: - OpenCode
+
+    /// OpenCode keeps its sessions in SQLite, like Cursor and unlike the
+    /// transcript-file agents, so it is read the same read-only way.
+    private var openCodeDB: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/share/opencode/opencode.db")
+    }
+
+    /// Rows OpenCode is showing you right now.
+    ///
+    /// `time_archived` is the user putting a session away deliberately, which
+    /// is a stronger signal than age — an archived session should not come back
+    /// just because something touched it.
+    static let openCodeSQL = """
+    SELECT id, title, directory, parent_id, time_updated FROM session
+    WHERE time_updated > ? AND time_archived IS NULL
+    ORDER BY time_updated DESC LIMIT 10
+    """
+
+    private func openCodeSessions(now: Date) -> [AgentSession] {
+        guard FileManager.default.fileExists(atPath: openCodeDB.path) else { return [] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(openCodeDB.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            sqlite3_close(db); return []
+        }
+        defer { sqlite3_close(db) }
+
+        let cutoff = Int64(now.addingTimeInterval(-AgentSession.liveWindow).timeIntervalSince1970 * 1000)
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, Self.openCodeSQL, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, cutoff)
+
+        var out: [AgentSession] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let idC = sqlite3_column_text(stmt, 0) else { continue }
+            let id = String(cString: idC)
+            let title = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+            let directory = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
+            let parent = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
+            let updated = Date(timeIntervalSince1970: Double(sqlite3_column_int64(stmt, 4)) / 1000)
+            out.append(AgentSession(
+                id: id,
+                agent: "opencode",
+                project: directory.flatMap { AgentTranscriptProvider.displayName(forPath: $0) }
+                    ?? "OpenCode",
+                // Nothing in the schema says "blocked on you" — the permission
+                // table is scoped to a project, not a session, so it cannot
+                // tell you *which* session is waiting. Claiming waiting on that
+                // basis would put a false Allow/Deny row on the card.
+                state: AgentSession.state(lastWrite: updated, blocked: false, now: now),
+                lastActivity: updated,
+                directory: directory,
+                // A child session is OpenCode's sub-agent. Naming it that way
+                // makes it read like every other sub-agent row on the card.
+                subagent: parent == nil ? nil : "subagent",
+                task: AgentSession.summarize(title)))
+        }
+        return out
+    }
+
     private func cursorWorkspaceFolder(_ workspaceId: String) -> String? {
         let url = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Cursor/User/workspaceStorage")

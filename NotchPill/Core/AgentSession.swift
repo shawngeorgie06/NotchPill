@@ -27,7 +27,7 @@ struct AgentSession: Equatable, Identifiable {
     }
 
     var id: String
-    var agent: String          // "claude-code" | "codex" | "cursor"
+    var agent: String          // "claude-code" | "codex" | "cursor" | "opencode"
     var project: String
     var state: State
     var lastActivity: Date
@@ -67,6 +67,7 @@ struct AgentSession: Equatable, Identifiable {
         case .claudeCode: return "Claude"
         case .codex: return "Codex"
         case .cursor: return "Cursor"
+        case .openCode: return "OpenCode"
         case nil: return agent.isEmpty ? "Agent" : agent
         }
     }
@@ -87,6 +88,7 @@ struct AgentSession: Equatable, Identifiable {
         case .claudeCode: return "asterisk"
         case .codex: return "chevron.left.forwardslash.chevron.right"
         case .cursor: return "cursorarrow"
+        case .openCode: return "curlybraces"
         case nil: return nil
         }
     }

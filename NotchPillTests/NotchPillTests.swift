@@ -3714,3 +3714,50 @@ struct TmuxLocatorTests {
         #expect(calls == [TmuxLocator.listArguments])
     }
 }
+
+@Suite("OpenCode sessions")
+struct OpenCodeAgentTests {
+    private func session(subagent: String? = nil) -> AgentSession {
+        AgentSession(id: "ses_1", agent: "opencode", project: "p",
+                     state: .working, lastActivity: Date(), subagent: subagent)
+    }
+
+    @Test("Recognised as its own vendor, not an unknown agent")
+    func recognised() {
+        let s = session()
+        #expect(s.knownAgent == .openCode)
+        #expect(s.agentName == "OpenCode")
+        #expect(s.vendorSymbol == "curlybraces")
+    }
+
+    @Test("The wire name is not shown raw")
+    func doesNotLeakWireName() {
+        #expect(session().displayName != "opencode")
+    }
+
+    /// A child session is OpenCode's sub-agent, and should read like every
+    /// other sub-agent row rather than like a second top-level agent.
+    @Test("A child session reads as a sub-agent")
+    func childIsSubagent() {
+        #expect(session(subagent: "subagent").displayName == "Subagent")
+    }
+
+    /// Archiving is the user putting a session away on purpose — a stronger
+    /// signal than age, and it must not come back because something touched it.
+    @Test("The query excludes archived sessions and is bounded")
+    func queryShape() {
+        let sql = AgentSessionScanner.openCodeSQL
+        #expect(sql.contains("time_archived IS NULL"))
+        #expect(sql.contains("time_updated > ?"))
+        #expect(sql.contains("LIMIT"))
+    }
+
+    /// Nothing in the schema says which session is blocked — the permission
+    /// table is per project. Inventing "waiting" would put a false Allow/Deny
+    /// row on the card.
+    @Test("Never claims to be waiting on you")
+    func neverFakesWaiting() {
+        let s = AgentSession.state(lastWrite: Date(), blocked: false)
+        #expect(s == .working)
+    }
+}

@@ -243,12 +243,13 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     }
 
     /// Which agent this alert came from, when it is one we recognise.
-    enum KnownAgent { case claudeCode, codex, cursor }
+    enum KnownAgent { case claudeCode, codex, cursor, openCode }
     var knownAgent: KnownAgent? {
         switch (agent ?? source ?? "").lowercased() {
         case "claude-code", "claude", "claude code": return .claudeCode
         case "codex", "openai-codex": return .codex
         case "cursor", "composer": return .cursor
+        case "opencode", "open-code": return .openCode
         default: return nil
         }
     }
@@ -316,7 +317,11 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         if AgentAnswer.parse(answerSpec) != nil { return true }
         switch knownAgent {
         case .claudeCode, nil: return true
-        case .codex, .cursor: return false
+        // OpenCode's prompt format is unknown to us, and buttons that send the
+        // wrong keys are worse than no buttons — the same reason Codex and
+        // Cursor are excluded. A signal that declares its own answers still
+        // wins above.
+        case .codex, .cursor, .openCode: return false
         }
     }
 
@@ -369,7 +374,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         case .codex: candidates = ["com.openai.codex", "com.openai.chat"]
         // Cursor pings already carry Cursor's own bundle id, so `appIcon` covers
         // it — no need to look the app up a second time here.
-        case .cursor, nil: return nil
+        // OpenCode is a CLI with no app bundle to look up.
+        case .cursor, .openCode, nil: return nil
         }
         for id in candidates {
             if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
