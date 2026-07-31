@@ -1065,17 +1065,22 @@ struct ExpandedActivityCard: View {
                     .font(font(size: 10, weight: .semibold))
             }
             .foregroundStyle(.white.opacity(0.45))
-            Text(quota.usageLabel)
-                .font(font(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
+            HStack(spacing: s(5)) {
+                Text(quota.usageLabel)
+                    .font(font(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .fixedSize(horizontal: true, vertical: false)
+                if let credits = quota.creditsLabel {
+                    Text("· " + credits)
+                        .font(font(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.58))
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+            }
             Text(quota.resetLabel)
                 .font(font(size: 10))
                 .foregroundStyle(.white.opacity(0.5))
-            if let credits = quota.creditsLabel {
-                Text(credits)
-                    .font(font(size: 10))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

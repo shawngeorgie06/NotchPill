@@ -283,6 +283,13 @@ struct CodexQuota: Equatable {
 
     var creditsLabel: String? {
         guard let creditBalance else { return nil }
-        return creditBalance.formatted(.number.precision(.fractionLength(0...2))) + " credit balance"
+        let value = NSDecimalNumber(decimal: creditBalance).doubleValue
+        let compact: String
+        if value >= 1_000 {
+            compact = String(format: "%.1fk", value / 1_000)
+        } else {
+            compact = creditBalance.formatted(.number.precision(.fractionLength(0...2)))
+        }
+        return compact + " credits"
     }
 }
