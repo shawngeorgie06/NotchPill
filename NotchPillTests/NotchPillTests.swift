@@ -1394,6 +1394,13 @@ struct TranscriptTurnTests {
                 == AgentToolActivity(tool: "Bash", detail: "xcodebuild test"))
     }
 
+    @Test("Codex oversized session metadata still exposes its working directory")
+    func codexOversizedMetadataHasWorkingDirectory() {
+        let prefix = #"{"payload":{"cwd":"/Users/me/Project","base_instructions":""#
+        let text = prefix + String(repeating: "x", count: 40_000)
+        #expect(AgentSessionScanner.firstValue(in: text, key: "cwd") == "/Users/me/Project")
+    }
+
     @Test("an assistant message ends the turn")
     func assistantEnds() {
         #expect(AgentTranscriptProvider.turnEnded(inTail: tail([

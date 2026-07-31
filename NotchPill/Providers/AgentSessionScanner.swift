@@ -407,6 +407,15 @@ actor AgentSessionScanner {
         defer { try? handle.close() }
         guard let data = try? handle.read(upToCount: 32_768),
               let text = String(data: data, encoding: .utf8) else { return nil }
+        return Self.firstValue(in: text, key: key)
+    }
+
+    /// Desktop Codex puts its large base instructions in the first JSONL
+    /// record. That record can exceed the metadata read window, so JSON line
+    /// decoding alone never sees a complete object even though `cwd` is near
+    /// the beginning. Keep the normal structured path, then recover a simple
+    /// string field from that partial record.
+    nonisolated static func firstValue(in text: String, key: String) -> String? {
         for line in text.split(separator: "\n") {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
             else { continue }
@@ -414,7 +423,12 @@ actor AgentSessionScanner {
             if let payload = obj["payload"] as? [String: Any],
                let v = payload[key] as? String, !v.isEmpty { return v }
         }
-        return nil
+        let escapedKey = NSRegularExpression.escapedPattern(for: key)
+        let pattern = #"\"# + escapedKey + #"\"\s*:\s*\"([^\"]+)\""#
+        guard let expression = try? NSRegularExpression(pattern: pattern),
+              let match = expression.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let range = Range(match.range(at: 1), in: text) else { return nil }
+        return String(text[range])
     }
 
     // MARK: - Cursor
