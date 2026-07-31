@@ -55,6 +55,11 @@ actor AgentSessionScanner {
             guard let mod = modified(url) else { return nil }
             let sessionId = url.deletingPathExtension().lastPathComponent
             guard let project = projectName(for: url, isCodex: isCodex) else { return nil }
+            // The desktop app starts an internal Codex reviewer for every
+            // escalation. It is protocol machinery, not a conversation the
+            // user is working with; it also writes more recently than the
+            // actual task and could push that useful row below the fold.
+            if isCodex, codexIsApprovalReviewer(url) { return nil }
             let sidechain = Self.subagentId(from: url)
             let info = sidechain.flatMap { subagentInfo(for: $0, sidechain: url) }
             return AgentSession(
@@ -216,6 +221,11 @@ actor AgentSessionScanner {
     private func codexLastPrompt(_ url: URL) -> String? {
         guard let text = text(of: url, tail: 262_144) else { return nil }
         return Self.codexLastPrompt(in: text)
+    }
+
+    private func codexIsApprovalReviewer(_ url: URL) -> Bool {
+        guard let text = text(of: url, tail: 262_144) else { return false }
+        return Self.codexLastPrompt(in: text) == "Reviewing a permission request"
     }
 
     /// The latest tool call answers “what is it doing?” more usefully than a
