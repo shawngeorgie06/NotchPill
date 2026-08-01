@@ -6,6 +6,9 @@ struct NotchActions {
     var next: () -> Void
     var previous: () -> Void
     var focusApp: (String) -> Void
+    /// Foreground an alert's actual host, with safe app-specific fallbacks for
+    /// old hooks that did not carry a bundle identifier.
+    var focusAlert: (DevReadyAlert) -> Void = { _ in }
     var dismissDevReady: (String) -> Void
     /// Explicit dismissal that also clears `.waiting` peeks, which never time out.
     var dismissPeek: (String) -> Void
@@ -24,7 +27,7 @@ struct NotchActions {
 
     static let noop = NotchActions(
         togglePlayPause: {}, next: {}, previous: {},
-        focusApp: { _ in }, dismissDevReady: { _ in },
+        focusApp: { _ in }, focusAlert: { _ in }, dismissDevReady: { _ in },
         dismissPeek: { _ in },
         beginReply: { _ in }, sendReply: { _, _ in },
         beginPlanRevision: { _ in }, submitPlanRevision: { _, _ in },

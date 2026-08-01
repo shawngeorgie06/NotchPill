@@ -242,6 +242,7 @@ final class NotchController {
             next: { [weak self] in self?.nowPlaying.next() },
             previous: { [weak self] in self?.nowPlaying.previous() },
             focusApp: { [weak self] bundleId in self?.focusSourceApp(bundleId: bundleId) },
+            focusAlert: { [weak self] alert in self?.focusSourceApp(alert: alert) },
             dismissDevReady: { [weak self] id in self?.dismissDevReady(id: id) },
             dismissPeek: { [weak self] id in self?.dismissPeek(id: id) },
             beginReply: { [weak self] alert in self?.state.beginReply(to: alert) },
@@ -1087,9 +1088,29 @@ final class NotchController {
     }
 
     private func focusSourceApp(bundleId: String) {
-        NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
-            .first?
-            .activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first,
+           app.activate(options: [.activateIgnoringOtherApps, .activateAllWindows]) {
+            return
+        }
+        // A sandboxed or recently relaunched app may not be in the running-app
+        // list yet. Opening its registered bundle brings it forward (or starts
+        // it) instead of turning the tap into a silent no-op.
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: .init()) { _, _ in }
+    }
+
+    private func focusSourceApp(alert: DevReadyAlert) {
+        for bundleId in alert.jumpTargetBundleIds {
+            if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first,
+               app.activate(options: [.activateIgnoringOtherApps, .activateAllWindows]) {
+                return
+            }
+        }
+        // No target is running. Only open the first verified application; do
+        // not launch every fallback candidate in sequence.
+        if let bundleId = alert.jumpTargetBundleIds.first {
+            focusSourceApp(bundleId: bundleId)
+        }
     }
 
     /// Renders a `ReplyError` into the composer's error line. The two call sites

@@ -242,6 +242,40 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         return NSWorkspace.shared.icon(forFile: url.path)
     }
 
+    /// Ordered applications that can safely receive a tap-to-jump request.
+    /// The hook-provided bundle wins: a Codex CLI notification belongs back in
+    /// its terminal, not in ChatGPT. When a hook has no host (or an older hook
+    /// sent a stale host), fall back only to apps whose identity is certain.
+    var jumpTargetBundleIds: [String] {
+        var targets: [String] = []
+        func append(_ value: String?) {
+            guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty, !targets.contains(value) else { return }
+            targets.append(value)
+        }
+        append(bundleId)
+
+        let sourceName = source?.lowercased() ?? ""
+        switch sourceName {
+        case let value where value.contains("cmux"): append("com.cmuxterm.app")
+        case let value where value.contains("cursor"): append("com.todesktop.230313mzl4w4u92")
+        case let value where value.contains("iterm"): append("com.googlecode.iterm2")
+        case let value where value.contains("terminal"): append("com.apple.Terminal")
+        case let value where value.contains("ghostty"): append("com.mitchellh.ghostty")
+        case let value where value.contains("warp"): append("dev.warp.Warp-Stable")
+        default: break
+        }
+
+        switch knownAgent {
+        case .codex: append("com.openai.codex") // ChatGPT desktop's bundle id.
+        case .cursor: append("com.todesktop.230313mzl4w4u92")
+        default: break
+        }
+        return targets
+    }
+
+    var canJumpToSource: Bool { !jumpTargetBundleIds.isEmpty }
+
     /// Which agent this alert came from, when it is one we recognise.
     enum KnownAgent { case claudeCode, codex, cursor, openCode }
     var knownAgent: KnownAgent? {

@@ -1555,6 +1555,16 @@ struct TranscriptTurnTests {
 
 @Suite("Focused activity ordering")
 struct FocusedActivityTests {
+    @Test("known agents retain a jump target when an old hook omits its host")
+    func knownAgentJumpFallbacks() {
+        let codex = DevReadyAlert(title: "Done", agent: "codex")
+        let cursor = DevReadyAlert(title: "Done", agent: "cursor")
+        let claudeInCmux = DevReadyAlert(title: "Done", source: "cmux", agent: "claude-code")
+        #expect(codex.jumpTargetBundleIds == ["com.openai.codex"])
+        #expect(cursor.jumpTargetBundleIds == ["com.todesktop.230313mzl4w4u92"])
+        #expect(claudeInCmux.jumpTargetBundleIds == ["com.cmuxterm.app"])
+    }
+
     @Test("notification history strips a past approval payload")
     func notificationHistoryIsPresentationOnly() {
         let alert = DevReadyAlert(title: "Ship", subtitle: "Done", kind: .waiting,

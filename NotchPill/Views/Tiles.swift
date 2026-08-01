@@ -564,7 +564,7 @@ struct DevReadyPeekRow: View {
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.5))
                                     .lineLimit(1)
-                            } else if alert.bundleId != nil {
+                            } else if alert.canJumpToSource {
                                 Text("Tap to open")
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.38))
@@ -862,9 +862,7 @@ struct DevReadyPeekRow: View {
     }
 
     private func handleTap() {
-        if let bundleId = alert.bundleId {
-            actions.focusApp(bundleId)
-        }
+        actions.focusAlert(alert)
         actions.dismissDevReady(alert.id)
     }
 }
@@ -1179,7 +1177,7 @@ struct ExpandedActivityCard: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: s(3)) {
                     ForEach(alerts) { alert in
-                        Button { if let bundleId = alert.bundleId { actions.focusApp(bundleId) } } label: {
+                        Button { actions.focusAlert(alert) } label: {
                             HStack(alignment: .top, spacing: s(6)) {
                                 VStack(alignment: .leading, spacing: s(1)) {
                                     Text(alert.displayTitle)
