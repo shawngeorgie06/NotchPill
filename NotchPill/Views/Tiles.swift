@@ -1249,18 +1249,6 @@ struct ExpandedActivityCard: View {
                             .foregroundStyle(.white.opacity(0.43))
                             .lineLimit(1)
                     }
-                    if let model = session.modelLabel {
-                        // Last of the leading group and first to be squeezed:
-                        // which model is running matters less than what the
-                        // session is, so it yields width before the project
-                        // does rather than pushing it out.
-                        Text(model)
-                            .font(font(size: 8, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.38))
-                            .lineLimit(1)
-                            .layoutPriority(-1)
-                            .accessibilityLabel("Model \(model)")
-                    }
                     Spacer(minLength: s(4))
                     Text(session.statusLabel)
                         .font(font(size: 8, weight: .bold))
@@ -1284,6 +1272,26 @@ struct ExpandedActivityCard: View {
         .buttonStyle(.plain)
     }
 
+    /// The model, trailing the activity line.
+    ///
+    /// It started on the title line and was invisible there. That line already
+    /// carries the name, the project and the status pill inside a 210pt card,
+    /// so the model — added last and deliberately lowest priority — was
+    /// squeezed to nothing before it ever drew. Down here it trails a line
+    /// whose content is usually short, and it is pushed to the edge so it
+    /// never competes with the tool detail for the middle of the row.
+    @ViewBuilder
+    private func agentModelTag(_ session: AgentSession) -> some View {
+        if let model = session.modelLabel {
+            Text(model)
+                .font(.system(size: 8 * textScale, weight: .medium))
+                .foregroundStyle(.white.opacity(0.42))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityLabel("Model \(model)")
+        }
+    }
+
     @ViewBuilder
     private func agentActivityLine(_ session: AgentSession) -> some View {
         if let activity = session.toolActivity {
@@ -1303,6 +1311,8 @@ struct ExpandedActivityCard: View {
                         .truncationMode(.tail)
                         .layoutPriority(1)
                 }
+                Spacer(minLength: s(4))
+                agentModelTag(session)
             }
         } else if let task = session.task {
             HStack(spacing: s(5)) {
@@ -1313,13 +1323,19 @@ struct ExpandedActivityCard: View {
                     .font(font(size: 9, weight: .medium))
                     .foregroundStyle(.white.opacity(0.58))
                     .lineLimit(1)
+                Spacer(minLength: s(4))
+                agentModelTag(session)
             }
         } else {
-            Text(session.state == .waiting ? "Needs your attention" : "Monitoring this session")
-                .font(font(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(0.42))
-                .lineLimit(1)
-                .padding(.leading, s(12))
+            HStack(spacing: s(5)) {
+                Text(session.state == .waiting ? "Needs your attention" : "Monitoring this session")
+                    .font(font(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .lineLimit(1)
+                    .padding(.leading, s(12))
+                Spacer(minLength: s(4))
+                agentModelTag(session)
+            }
         }
     }
 
