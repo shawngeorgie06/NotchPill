@@ -243,6 +243,12 @@ final class AppSettings: ObservableObject {
 
     /// Backed by `~/.notchpill/approvals-enabled` rather than UserDefaults —
     /// the shell hook that reads it cannot read defaults. See `ApprovalGate`.
+    /// Hold peeks and sounds while the Mac is locked or another user is on
+    /// the console. On by default: a peek nobody can see is spent for nothing.
+    @Published var quietWhenLocked: Bool {
+        didSet { defaults.set(quietWhenLocked, forKey: Keys.quietWhenLocked) }
+    }
+
     /// One nudge about a request you never answered. Off by default: it is an
     /// extra interruption, and the peek already had its turn.
     @Published var followUpReminders: Bool {
@@ -294,6 +300,7 @@ final class AppSettings: ObservableObject {
         static let devReadyPlaySound = "devReadyPlaySound"
         static let devReadySound = "devReadySound"
         static let followUpReminders = "followUpReminders"
+        static let quietWhenLocked = "quietWhenLocked"
         static let showVolumeHUD = "showVolumeHUD"
         static let showBrightnessHUD = "showBrightnessHUD"
         static let showMicrophoneHUD = "showMicrophoneHUD"
@@ -382,6 +389,7 @@ final class AppSettings: ObservableObject {
         agentReplyEnabled = defaults.object(forKey: Keys.agentReplyEnabled) as? Bool ?? true
         watchAgentTranscripts = defaults.object(forKey: Keys.watchAgentTranscripts) as? Bool ?? true
         followUpReminders = defaults.object(forKey: Keys.followUpReminders) as? Bool ?? false
+        quietWhenLocked = defaults.object(forKey: Keys.quietWhenLocked) as? Bool ?? true
         agentApprovalsEnabled = ApprovalGate.isEnabled()
     }
 
@@ -476,6 +484,7 @@ final class AppSettings: ObservableObject {
         // Off is the shipped default, and unlike everything above this one
         // reaches the filesystem: it removes ~/.notchpill/approvals-enabled.
         followUpReminders = false
+        quietWhenLocked = true
         agentApprovalsEnabled = false
     }
 }

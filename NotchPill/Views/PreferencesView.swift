@@ -241,6 +241,7 @@ struct PreferencesView: View {
                 .disabled(!settings.showDevReadyPings || !settings.devReadyPlaySound)
             }
             Toggle("Reply to agents from the notch", isOn: $settings.agentReplyEnabled)
+            Toggle("Stay quiet while the Mac is locked", isOn: $settings.quietWhenLocked)
             Toggle("Remind me about what I missed", isOn: $settings.followUpReminders)
             Text("If a peek times out without you touching it, you get one reminder five minutes later — never a second. Dismissing a peek counts as dealing with it.")
                 .font(.caption)

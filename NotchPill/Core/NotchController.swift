@@ -860,6 +860,14 @@ final class NotchController {
             LogStore.log("peek", "suppressed (peeks are switched off) from=\(origin)", level: .warn)
             return
         }
+        // Locked, or another user is on the console: a peek here burns its few
+        // seconds on a screen nobody is watching. Recording it as unattended
+        // hands it to the follow-up reminder instead of dropping it.
+        if QuietScene.shouldStayQuiet(enabled: AppSettings.shared.quietWhenLocked) {
+            LogStore.log("peek", "held (screen locked or session inactive) from=\(origin)")
+            noteUnattended(alert)
+            return
+        }
         Self.logPeek(alert, origin: origin)
         // Branding, not content: which agent it claims to be and whether we
         // recognised it is what every mislabelled-peek report has turned on.

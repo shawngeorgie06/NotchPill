@@ -4072,3 +4072,53 @@ struct FollowUpReminderTests {
         #expect(FollowUpReminder.title(for: .finished) != FollowUpReminder.title(for: .waiting))
     }
 }
+
+@Suite("Quiet scenes")
+struct QuietSceneTests {
+    private func session(locked: Any? = nil, onConsole: Any? = nil) -> () -> [String: Any]? {
+        var d: [String: Any] = [:]
+        if let locked { d["CGSSessionScreenIsLocked"] = locked }
+        if let onConsole { d["kCGSSessionOnConsoleKey"] = onConsole }
+        return { d }
+    }
+
+    @Test("Locked reads as locked, either spelling")
+    func readsLockState() {
+        #expect(QuietScene.screenIsLocked(session: session(locked: true)))
+        #expect(QuietScene.screenIsLocked(session: session(locked: 1)))
+        #expect(!QuietScene.screenIsLocked(session: session(locked: false)))
+        #expect(!QuietScene.screenIsLocked(session: session(locked: 0)))
+    }
+
+    /// The failure that matters is going silent when we should not have, so an
+    /// unreadable session errs towards speaking.
+    @Test("An unreadable session speaks rather than going quiet")
+    func unknownSpeaks() {
+        #expect(!QuietScene.screenIsLocked(session: { nil }))
+        #expect(!QuietScene.screenIsLocked(session: session()))
+        #expect(QuietScene.onConsole(session: { nil }))
+        #expect(!QuietScene.shouldStayQuiet(enabled: true, session: { nil }))
+    }
+
+    /// Fast user switching leaves us running behind somebody else's session,
+    /// where a peek is invisible at best and over their screen at worst.
+    @Test("Another user on the console also means quiet")
+    func offConsoleIsQuiet() {
+        #expect(QuietScene.shouldStayQuiet(enabled: true,
+                                           session: session(locked: false, onConsole: false)))
+        #expect(!QuietScene.shouldStayQuiet(enabled: true,
+                                            session: session(locked: false, onConsole: true)))
+    }
+
+    @Test("Switched off, nothing is ever held back")
+    func disabledNeverQuiet() {
+        #expect(!QuietScene.shouldStayQuiet(enabled: false,
+                                            session: session(locked: true, onConsole: false)))
+    }
+
+    @Test("Locked means quiet")
+    func lockedIsQuiet() {
+        #expect(QuietScene.shouldStayQuiet(enabled: true,
+                                           session: session(locked: true, onConsole: true)))
+    }
+}
