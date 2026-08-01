@@ -241,6 +241,10 @@ struct PreferencesView: View {
                 .disabled(!settings.showDevReadyPings || !settings.devReadyPlaySound)
             }
             Toggle("Reply to agents from the notch", isOn: $settings.agentReplyEnabled)
+            Toggle("Remind me about what I missed", isOn: $settings.followUpReminders)
+            Text("If a peek times out without you touching it, you get one reminder five minutes later — never a second. Dismissing a peek counts as dealing with it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Toggle("Ask before agents edit files", isOn: $settings.agentApprovalsEnabled)
             Text("Pauses Claude Code on Edit, Write and Bash and waits for Allow or Deny in the notch. Requires the agent hooks to be installed. If the notch is not answered within 30 seconds, the agent asks you itself.")
                 .font(.caption)

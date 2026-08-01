@@ -243,6 +243,12 @@ final class AppSettings: ObservableObject {
 
     /// Backed by `~/.notchpill/approvals-enabled` rather than UserDefaults —
     /// the shell hook that reads it cannot read defaults. See `ApprovalGate`.
+    /// One nudge about a request you never answered. Off by default: it is an
+    /// extra interruption, and the peek already had its turn.
+    @Published var followUpReminders: Bool {
+        didSet { defaults.set(followUpReminders, forKey: Keys.followUpReminders) }
+    }
+
     @Published var agentApprovalsEnabled: Bool {
         didSet {
             do {
@@ -287,6 +293,7 @@ final class AppSettings: ObservableObject {
         static let devReadyDuration = "devReadyDuration"
         static let devReadyPlaySound = "devReadyPlaySound"
         static let devReadySound = "devReadySound"
+        static let followUpReminders = "followUpReminders"
         static let showVolumeHUD = "showVolumeHUD"
         static let showBrightnessHUD = "showBrightnessHUD"
         static let showMicrophoneHUD = "showMicrophoneHUD"
@@ -374,6 +381,7 @@ final class AppSettings: ObservableObject {
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
         agentReplyEnabled = defaults.object(forKey: Keys.agentReplyEnabled) as? Bool ?? true
         watchAgentTranscripts = defaults.object(forKey: Keys.watchAgentTranscripts) as? Bool ?? true
+        followUpReminders = defaults.object(forKey: Keys.followUpReminders) as? Bool ?? false
         agentApprovalsEnabled = ApprovalGate.isEnabled()
     }
 
@@ -467,6 +475,7 @@ final class AppSettings: ObservableObject {
         watchAgentTranscripts = true
         // Off is the shipped default, and unlike everything above this one
         // reaches the filesystem: it removes ~/.notchpill/approvals-enabled.
+        followUpReminders = false
         agentApprovalsEnabled = false
     }
 }

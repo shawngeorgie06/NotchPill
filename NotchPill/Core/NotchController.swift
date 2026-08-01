@@ -67,6 +67,11 @@ final class NotchController {
     private var devReadyCoalesceItem: DispatchWorkItem?
     private var pendingDevReadyAlerts: [DevReadyAlert] = []
     private var devReadyDedup = DevReadyDedup()
+    /// One nudge about peeks that timed out without you touching them.
+    private var followUps = FollowUpReminder()
+    private var followUpTimer: Timer?
+    /// The alerts behind pending reminders, so one can be re-shown as it was.
+    private var unattendedAlerts: [String: DevReadyAlert] = [:]
     /// Escape-key monitors, installed only while a peek is showing.
     private var peekEscapeMonitors: [Any] = []
     /// Ages out on-screen waiting peeks; runs only while one is up.
@@ -902,9 +907,67 @@ final class NotchController {
         scheduleDevReadyDismiss()
     }
 
+    /// A peek left the screen on its timer. Recorded only when reminders are
+    /// on, so turning the setting off costs nothing at all.
+    private func noteUnattended(_ alert: DevReadyAlert) {
+        guard AppSettings.shared.followUpReminders else { return }
+        followUps.recordUnattended(id: alert.id, kind: alert.kind, at: Date())
+        unattendedAlerts[alert.id] = alert
+        startFollowUpTimerIfNeeded()
+    }
+
+    /// The user did something about it — answered, dismissed, or opened it.
+    /// Dismissing counts: you looked and decided it was not for you, and
+    /// arguing with that is exactly how a reminder becomes a nag.
+    private func noteAttended(id: String) {
+        followUps.attended(id: id)
+        unattendedAlerts[id] = nil
+    }
+
+    /// Polls rather than scheduling per alert: one timer that stops when the
+    /// list empties is easier to reason about than a dozen live work items,
+    /// and a reminder is not something that needs to land to the second.
+    private func startFollowUpTimerIfNeeded() {
+        guard followUpTimer == nil else { return }
+        let timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.fireDueFollowUps() }
+        }
+        followUpTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func fireDueFollowUps() {
+        followUps.expire(now: Date())
+        let due = followUps.due(now: Date())
+        for item in due {
+            guard let original = unattendedAlerts[item.id] else { continue }
+            unattendedAlerts[item.id] = nil
+            // A waiting prompt answered in the terminal leaves no trace here,
+            // so the session list is the check: if it is no longer waiting,
+            // the reminder would be stating something false.
+            if item.kind == .waiting,
+               !state.agentSessions.contains(where: { $0.state == .waiting }) { continue }
+            var reminder = original
+            reminder.id = "followup-" + original.id
+            reminder.title = FollowUpReminder.title(for: item.kind)
+            LogStore.log("peek", "follow-up reminder for \(original.id)")
+            presentDevReady(reminder)
+        }
+        if followUps.pending.isEmpty {
+            followUpTimer?.invalidate()
+            followUpTimer = nil
+        }
+    }
+
     private func scheduleDevReadyDismiss() {
         devReadyDismissItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in self?.dismissDevReady() }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            for alert in self.state.devReadyAlerts where alert.kind == .finished {
+                self.noteUnattended(alert)
+            }
+            self.dismissDevReady()
+        }
         devReadyDismissItem = item
         let delay = AppSettings.shared.devReadyDuration
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
@@ -914,7 +977,11 @@ final class NotchController {
     /// agents may ask seconds apart, and each should get its own full interval.
     private func scheduleWaitingDismiss(for alert: DevReadyAlert) {
         waitingDismissItems[alert.id]?.cancel()
-        let item = DispatchWorkItem { [weak self] in self?.dismissPeek(id: alert.id) }
+        let item = DispatchWorkItem { [weak self] in
+            // Timed out rather than answered — the one case worth a reminder.
+            self?.noteUnattended(alert)
+            self?.dismissPeek(id: alert.id)
+        }
         waitingDismissItems[alert.id] = item
         DispatchQueue.main.asyncAfter(
             deadline: .now() + AppSettings.shared.devReadyDuration,
@@ -971,6 +1038,7 @@ final class NotchController {
     /// not focus the terminal, and unlike the fade timer it will clear a
     /// `.waiting` peek — which otherwise has no way to go away.
     private func dismissPeek(id: String) {
+        noteAttended(id: id)
         waitingDismissItems[id]?.cancel()
         waitingDismissItems[id] = nil
         if state.replyCompose?.targetAlert.id == id { state.cancelReply() }
@@ -1157,6 +1225,7 @@ final class NotchController {
     }
 
     private func performAnswer(alert: DevReadyAlert, answer: AgentAnswer) {
+        noteAttended(id: alert.id)
         TerminalReplyInjector.log("performAnswer tapped: \(answer.label) -> "
             + "\(answer.keystroke.debugDescription) for alert=\(alert.title) "
             + "kind=\(alert.kind) bundleId=\(alert.bundleId ?? "nil")")

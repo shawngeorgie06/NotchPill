@@ -4000,3 +4000,75 @@ struct AgentModelLabelTests {
         #expect(AgentSessionScanner.claudeModel(in: text).model == "claude-opus-5")
     }
 }
+
+@Suite("Follow-up reminders")
+struct FollowUpReminderTests {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    @Test("Nothing is due before the delay")
+    func notDueYet() {
+        var r = FollowUpReminder()
+        r.recordUnattended(id: "a", kind: .waiting, at: t0)
+        #expect(r.due(now: t0.addingTimeInterval(299)).isEmpty)
+        #expect(r.due(now: t0.addingTimeInterval(300)).map(\.id) == ["a"])
+    }
+
+    /// The whole point: one nudge. Something that pings until you deal with it
+    /// gets ignored wholesale, which costs the peeks worth reading.
+    @Test("A reminder never fires twice")
+    func remindsOnce() {
+        var r = FollowUpReminder()
+        r.recordUnattended(id: "a", kind: .waiting, at: t0)
+        let later = t0.addingTimeInterval(600)
+        #expect(r.due(now: later).count == 1)
+        #expect(r.due(now: later.addingTimeInterval(600)).isEmpty)
+        // Nor by re-recording the same id.
+        r.recordUnattended(id: "a", kind: .waiting, at: later)
+        #expect(r.due(now: later.addingTimeInterval(1200)).isEmpty)
+    }
+
+    /// Dismissing is attending: you looked and decided it was not for you.
+    @Test("Attending to something cancels its reminder")
+    func attendedCancels() {
+        var r = FollowUpReminder()
+        r.recordUnattended(id: "a", kind: .finished, at: t0)
+        r.attended(id: "a")
+        #expect(r.due(now: t0.addingTimeInterval(600)).isEmpty)
+        #expect(r.pending.isEmpty)
+    }
+
+    @Test("Recording the same peek twice queues one reminder")
+    func noDuplicates() {
+        var r = FollowUpReminder()
+        r.recordUnattended(id: "a", kind: .waiting, at: t0)
+        r.recordUnattended(id: "a", kind: .waiting, at: t0.addingTimeInterval(5))
+        #expect(r.pending.count == 1)
+    }
+
+    /// A prompt from hours ago has almost certainly been answered in the
+    /// terminal; raising it would state something false.
+    @Test("Stale items expire instead of being raised")
+    func expires() {
+        var r = FollowUpReminder()
+        r.recordUnattended(id: "old", kind: .waiting, at: t0)
+        r.expire(now: t0.addingTimeInterval(AgentSession.liveWindow + 1))
+        #expect(r.pending.isEmpty)
+        #expect(r.due(now: t0.addingTimeInterval(99_999)).isEmpty)
+    }
+
+    @Test("Several unattended peeks each get their own reminder")
+    func independent() {
+        var r = FollowUpReminder()
+        r.recordUnattended(id: "a", kind: .waiting, at: t0)
+        r.recordUnattended(id: "b", kind: .finished, at: t0.addingTimeInterval(120))
+        #expect(r.due(now: t0.addingTimeInterval(310)).map(\.id) == ["a"])
+        #expect(r.due(now: t0.addingTimeInterval(430)).map(\.id) == ["b"])
+    }
+
+    /// An identical second copy of a peek looks like the agent asked twice.
+    @Test("A reminder says that it is one")
+    func titlesDiffer() {
+        #expect(FollowUpReminder.title(for: .waiting) == "Still waiting on you")
+        #expect(FollowUpReminder.title(for: .finished) != FollowUpReminder.title(for: .waiting))
+    }
+}
