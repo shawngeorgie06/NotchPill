@@ -1249,6 +1249,18 @@ struct ExpandedActivityCard: View {
                             .foregroundStyle(.white.opacity(0.43))
                             .lineLimit(1)
                     }
+                    if let model = session.modelLabel {
+                        // Last of the leading group and first to be squeezed:
+                        // which model is running matters less than what the
+                        // session is, so it yields width before the project
+                        // does rather than pushing it out.
+                        Text(model)
+                            .font(font(size: 8, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.38))
+                            .lineLimit(1)
+                            .layoutPriority(-1)
+                            .accessibilityLabel("Model \(model)")
+                    }
                     Spacer(minLength: s(4))
                     Text(session.statusLabel)
                         .font(font(size: 8, weight: .bold))

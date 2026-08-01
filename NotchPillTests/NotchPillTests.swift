@@ -3918,3 +3918,85 @@ struct OpenCodeAgentTests {
         #expect(s == .working)
     }
 }
+
+@Suite("Agent model label")
+struct AgentModelLabelTests {
+    @Test("Vendor prefixes and build stamps are stripped")
+    func prettifies() {
+        #expect(AgentSession.modelLabel("claude-opus-5") == "Opus 5")
+        #expect(AgentSession.modelLabel("claude-sonnet-5") == "Sonnet 5")
+        #expect(AgentSession.modelLabel("claude-opus-4-8") == "Opus 4.8")
+        #expect(AgentSession.modelLabel("claude-haiku-4-5-20251001") == "Haiku 4.5")
+    }
+
+    @Test("Known families shorten to what you actually choose between")
+    func knownFamilies() {
+        #expect(AgentSession.modelLabel("gpt-5.6-terra") == "GPT 5.6")
+        #expect(AgentSession.modelLabel("gemini-3-pro") == "Gemini 3")
+    }
+
+    /// A model we have never seen is exactly the one worth naming. Trimming it
+    /// to its first segment would render `gpt-5.6-terra` as "Gpt", throwing
+    /// away the only part that distinguishes it — so unknowns keep their id.
+    @Test("An unfamiliar model keeps its full id")
+    func unknownPassesThrough() {
+        #expect(AgentSession.modelLabel("some-new-thing-7") == "some-new-thing-7")
+        #expect(AgentSession.modelLabel("anthropic.mystery-2") == "mystery-2")
+    }
+
+    @Test("Nothing to say stays silent")
+    func emptyStaysNil() {
+        #expect(AgentSession.modelLabel(nil) == nil)
+        #expect(AgentSession.modelLabel("") == nil)
+        #expect(AgentSession.modelLabel("   ") == nil)
+        #expect(AgentSession.modelLabel("<synthetic>") == nil)
+    }
+
+    private func session(model: String?, effort: String?) -> AgentSession {
+        AgentSession(id: "s", agent: "claude-code", project: "p", state: .working,
+                     lastActivity: Date(), model: model, effort: effort)
+    }
+
+    /// Medium is the default wherever the setting exists, so printing it would
+    /// spend row width to say "nothing unusual".
+    @Test("Effort shows only when it is not the default")
+    func effortSuffix() {
+        #expect(session(model: "claude-opus-5", effort: "high").modelLabel == "Opus 5 · high")
+        #expect(session(model: "claude-opus-5", effort: "low").modelLabel == "Opus 5 · low")
+        #expect(session(model: "claude-opus-5", effort: "medium").modelLabel == "Opus 5")
+        #expect(session(model: "claude-opus-5", effort: nil).modelLabel == "Opus 5")
+        #expect(session(model: nil, effort: "high").modelLabel == nil)
+    }
+
+    @Test("Claude records the model in the message and the effort beside it")
+    func parsesClaude() {
+        let line = #"{"effort":"low","message":{"model":"claude-opus-5","role":"assistant"}}"#
+        let got = AgentSessionScanner.claudeModel(in: line)
+        #expect(got.model == "claude-opus-5")
+        #expect(got.effort == "low")
+    }
+
+    /// Newest first: both can change mid-session, and a sub-agent may run on a
+    /// different model than its parent.
+    @Test("The newest record wins")
+    func newestWins() {
+        let text = [#"{"message":{"model":"claude-sonnet-5"}}"#,
+                    #"{"effort":"high","message":{"model":"claude-opus-5"}}"#].joined(separator: "\n")
+        #expect(AgentSessionScanner.claudeModel(in: text).model == "claude-opus-5")
+    }
+
+    @Test("Codex prefers its settled thread settings")
+    func parsesCodex() {
+        let line = #"{"payload":{"model":"gpt-5.6-terra","thread_settings":{"model":"gpt-5.6-terra","reasoning_effort":"high"}}}"#
+        let got = AgentSessionScanner.codexModel(in: line)
+        #expect(got.model == "gpt-5.6-terra")
+        #expect(got.effort == "high")
+    }
+
+    @Test("Junk lines are skipped rather than fatal")
+    func toleratesJunk() {
+        let text = ["not json", "", #"{"message":{"model":"<synthetic>"}}"#,
+                    #"{"message":{"model":"claude-opus-5"}}"#].joined(separator: "\n")
+        #expect(AgentSessionScanner.claudeModel(in: text).model == "claude-opus-5")
+    }
+}

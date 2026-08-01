@@ -99,6 +99,63 @@ struct AgentSession: Equatable, Identifiable {
         return task?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Raw model id the session is running, as its transcript reported it —
+    /// `claude-opus-5`, `gpt-5.6-terra`. Nil before the first response.
+    var model: String?
+    /// Reasoning effort, where the agent records one: `low`, `medium`, `high`.
+    var effort: String?
+
+    /// The model as it should read on a notch row.
+    ///
+    /// Vendor prefixes and date stamps are stripped: the row already says which
+    /// tool this is, and `claude-haiku-4-5-20251001` spends most of its width
+    /// on a build date nobody is choosing between. What is worth the space is
+    /// the part you actually pick — Opus against Sonnet, 5 against 4.8.
+    ///
+    /// Unknown ids pass through cleaned rather than dropped. A model we have
+    /// never seen is exactly the one worth naming, and printing it verbatim is
+    /// honest in a way that a guess or a blank would not be.
+    static func modelLabel(_ raw: String?) -> String? {
+        guard var id = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !id.isEmpty, id != "<synthetic>" else { return nil }
+        for prefix in ["claude-", "openai-", "anthropic."] where id.hasPrefix(prefix) {
+            id = String(id.dropFirst(prefix.count))
+        }
+        var parts = id.split(separator: "-").map(String.init)
+        // Trailing 8-digit build stamp, e.g. …-4-5-20251001.
+        if let last = parts.last, last.count == 8, last.allSatisfy(\.isNumber) {
+            parts.removeLast()
+        }
+        guard let family = parts.first, !family.isEmpty else { return nil }
+
+        // Families we can shorten confidently. Anything else keeps its full id
+        // rather than being trimmed down to a word: `gpt-5.6-terra` reduced to
+        // its first segment reads "Gpt", which has thrown away the only part
+        // that distinguishes it.
+        let known = ["opus": "Opus", "sonnet": "Sonnet", "haiku": "Haiku",
+                     "gpt": "GPT", "o1": "o1", "o3": "o3",
+                     "gemini": "Gemini", "grok": "Grok", "llama": "Llama"]
+        guard let name = known[family] else { return id }
+
+        // A version segment starts with a digit, so "5", "4" and "5.6" all
+        // count while codenames like "terra" do not. Numeric-only segments
+        // rejoin with dots: ["4", "8"] → "4.8".
+        let version = parts.dropFirst()
+            .prefix { $0.first?.isNumber == true }
+            .joined(separator: ".")
+        return version.isEmpty ? name : "\(name) \(version)"
+    }
+
+    /// `Opus 5` on its own, or `Opus 5 · high` when the agent reports effort.
+    /// Medium is left off: it is the default everywhere that has the setting,
+    /// so printing it would spend row width to say "nothing unusual".
+    var modelLabel: String? {
+        guard let base = Self.modelLabel(model) else { return nil }
+        guard let effort = effort?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !effort.isEmpty, effort != "medium", effort != "default" else { return base }
+        return "\(base) · \(effort)"
+    }
+
     /// A glyph for the vendor, because nothing else on the row reliably says
     /// which one it is.
     ///

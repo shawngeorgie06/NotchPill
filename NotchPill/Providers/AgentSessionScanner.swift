@@ -62,6 +62,7 @@ actor AgentSessionScanner {
             if isCodex, codexIsApprovalReviewer(url) { return nil }
             let sidechain = Self.subagentId(from: url)
             let info = sidechain.flatMap { subagentInfo(for: $0, sidechain: url) }
+            let modelInfo = currentModel(in: url, isCodex: isCodex)
             return AgentSession(
                 id: sessionId,
                 agent: isCodex ? "codex" : "claude-code",
@@ -81,7 +82,9 @@ actor AgentSessionScanner {
                 // — and two Explores looked identical.
                 task: AgentSession.summarize(info?.task
                                              ?? currentTask(in: url, isCodex: isCodex)),
-                toolActivity: currentToolActivity(in: url, isCodex: isCodex))
+                toolActivity: currentToolActivity(in: url, isCodex: isCodex),
+                model: modelInfo.model,
+                effort: modelInfo.effort)
         }
     }
 
@@ -234,6 +237,48 @@ actor AgentSessionScanner {
     private func currentToolActivity(in url: URL, isCodex: Bool) -> AgentToolActivity? {
         guard let text = text(of: url, tail: 262_144) else { return nil }
         return isCodex ? Self.codexToolActivity(in: text) : Self.claudeToolActivity(in: text)
+    }
+
+    /// The model and effort the session is currently running.
+    ///
+    /// Read from the newest record backwards, because both can change mid
+    /// session — switching model, or a sub-agent running on a different one
+    /// than its parent — and the row should say what is running now, not what
+    /// it started on.
+    private func currentModel(in url: URL, isCodex: Bool) -> (model: String?, effort: String?) {
+        guard let text = text(of: url, tail: 262_144) else { return (nil, nil) }
+        return isCodex ? Self.codexModel(in: text) : Self.claudeModel(in: text)
+    }
+
+    /// Claude Code puts the model inside `message` and the effort beside it at
+    /// the top level of the same record.
+    nonisolated static func claudeModel(in text: String) -> (model: String?, effort: String?) {
+        for line in text.split(separator: "\n").reversed() {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let message = obj["message"] as? [String: Any],
+                  let model = message["model"] as? String,
+                  !model.isEmpty, model != "<synthetic>" else { continue }
+            return (model, obj["effort"] as? String)
+        }
+        return (nil, nil)
+    }
+
+    /// Codex records both under `payload`, with the effort under its longer
+    /// name. `thread_settings` is preferred where present: it is the session's
+    /// settled configuration rather than one turn's parameters.
+    nonisolated static func codexModel(in text: String) -> (model: String?, effort: String?) {
+        for line in text.split(separator: "\n").reversed() {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let payload = obj["payload"] as? [String: Any] else { continue }
+            let settings = payload["thread_settings"] as? [String: Any]
+            let model = (settings?["model"] as? String) ?? (payload["model"] as? String)
+            guard let model, !model.isEmpty else { continue }
+            let effort = (settings?["reasoning_effort"] as? String)
+                ?? (payload["reasoning_effort"] as? String)
+                ?? (payload["effort"] as? String)
+            return (model, effort)
+        }
+        return (nil, nil)
     }
 
     nonisolated static func claudeToolActivity(in text: String) -> AgentToolActivity? {
