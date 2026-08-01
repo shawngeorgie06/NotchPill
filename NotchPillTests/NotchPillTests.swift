@@ -2692,7 +2692,12 @@ struct ExpandedHeightTests {
         let three = NotchContentLayout.expandedContentBaseHeight([agents(3)])
         let ten = NotchContentLayout.expandedContentBaseHeight([agents(10)])
         #expect(one < two)
-        #expect(two < three)
+        // Two rows is the ceiling, so three and ten clamp to the same height
+        // as two. The regression this guards against is `two` clamping down to
+        // `one`'s height, which is what happened when rows grew and the
+        // ceiling did not.
+        #expect(two == NotchContentLayout.expandedContentCeiling)
+        #expect(three == two)
         #expect(three == ten)
     }
 
@@ -2711,7 +2716,10 @@ struct ExpandedHeightTests {
         ]
         for row in rows {
             let h = NotchContentLayout.expandedContentBaseHeight(row)
-            #expect(h >= 48 && h <= 112)
+            // Bound taken from the constant, not repeated as a literal: the
+            // last time these drifted apart the card silently stopped fitting
+            // the second agent row.
+            #expect(h >= 48 && h <= NotchContentLayout.expandedContentCeiling)
         }
     }
 

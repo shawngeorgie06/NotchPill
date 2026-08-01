@@ -1,5 +1,8 @@
 # Xcode / Swift
+# `build/` is what build-release.sh uses; the suffixed ones are throwaway
+# derived-data paths from one-off builds, and each is well over 100MB.
 build/
+build-*/
 dist/
 DerivedData/
 *.xcuserstate

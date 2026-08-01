@@ -397,15 +397,32 @@ enum NotchContentLayout {
     /// before their own `ScrollView` takes over. Agent rows deliberately earn
     /// a little more vertical room than the small utility cards: the expanded
     /// notch is where you read the work, rather than merely count sessions.
+    /// The ceiling is two agent rows plus their header.
+    ///
+    /// It used to be 112, which was two rows back when a row was ~47pt. The
+    /// console redesign took rows to 52 and the ceiling stayed put, so two
+    /// sessions and three both clamped to the same height and you saw one row
+    /// and a sliver of the next — the card scrolled with only two agents on it.
+    ///
+    /// Derived from the row metrics rather than written as a number so the two
+    /// cannot drift apart again.
+    static let expandedContentCeiling: CGFloat = agentsHeader + agentsRow * 2
+
     static func expandedContentBaseHeight(_ activities: [ExpandedActivity]) -> CGFloat {
         guard !activities.isEmpty else { return 66 }
         let tallest = activities.map(expandedCardBaseHeight).max() ?? 66
-        return min(112, max(48, tallest))
+        return min(expandedContentCeiling, max(48, tallest))
     }
 
     /// Rows a card renders before it starts scrolling. Beyond this the card's
     /// own `ScrollView` takes over, so the pill must not keep growing.
     private static let expandedMaxCardRows = 3
+
+    /// An agent row's title/status line plus its activity line, and the card
+    /// header above them. Named because the height ceiling is derived from
+    /// these — see `expandedContentCeiling`.
+    static let agentsHeader: CGFloat = 18
+    static let agentsRow: CGFloat = 52
 
     private static func rowsHeight(header: CGFloat, row: CGFloat, count: Int) -> CGFloat {
         header + row * CGFloat(min(expandedMaxCardRows, max(1, count)))
@@ -418,9 +435,11 @@ enum NotchContentLayout {
         // the whole row was being sized to.
         case .media: return 78
         // Agent rows have a title/status line and one terminal-style activity
-        // line. Two are visible; a third and later session scrolls instead of
+        // line. Two are visible — the ceiling is derived from exactly that —
+        // and a third or later session scrolls inside the card instead of
         // turning the notch into a full-height panel.
-        case .agents(let sessions): return rowsHeight(header: 18, row: 52, count: sessions.count)
+        case .agents(let sessions): return rowsHeight(header: agentsHeader, row: agentsRow,
+                                                      count: sessions.count)
         case .openCodeUsage: return 56
         case .codexQuota: return 56
         case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)
