@@ -222,7 +222,8 @@ enum NotchContentLayout {
         // four diff lines — in place of the one-line question.
         let messageExtra: CGFloat
         if let request = alert.permissionRequest {
-            let lines = request.isPlan ? request.planPreview.count : request.previewLines.count
+            let lines = request.isPlan ? request.planPreview.count
+                : max(request.previewLines.count, request.commandPreviewLineLimit)
             messageExtra = 18 + CGFloat(lines) * 14 + 6
         } else {
             messageExtra = alert.questionText != nil ? 30 : 0
@@ -419,7 +420,7 @@ enum NotchContentLayout {
         // Agent rows have a title/status line and one terminal-style activity
         // line. Two are visible; a third and later session scrolls instead of
         // turning the notch into a full-height panel.
-        case .agents(let sessions): return rowsHeight(header: 18, row: 45, count: sessions.count)
+        case .agents(let sessions): return rowsHeight(header: 18, row: 52, count: sessions.count)
         case .openCodeUsage: return 56
         case .codexQuota: return 56
         case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)

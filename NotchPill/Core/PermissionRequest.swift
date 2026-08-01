@@ -75,6 +75,12 @@ struct PermissionRequest: Equatable {
         return false
     }
 
+    /// The command preview gets a few wrapped lines in the notch. Commands are
+    /// often one long shell statement, so a one-line preview hid the useful
+    /// half (for example the `printf …` after `Bash`). The cap keeps an
+    /// unbounded pasted script from turning an approval into a full-screen UI.
+    var commandPreviewLineLimit: Int { isCommand ? 3 : 1 }
+
     /// Markdown is intentionally rendered as text, not HTML: the plan came
     /// from an agent and the notch needs a safe, glanceable review surface.
     var planPreview: [PlanPreviewLine] {

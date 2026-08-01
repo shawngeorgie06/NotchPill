@@ -753,8 +753,9 @@ struct DevReadyPeekRow: View {
                     .font(.system(size: 11, weight: .medium,
                                   design: request.isCommand ? .monospaced : .default))
                     .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(1)
+                    .lineLimit(request.commandPreviewLineLimit)
                     .truncationMode(request.isCommand ? .tail : .head)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let count = request.changeCount {
                     Text(count)
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -1286,7 +1287,7 @@ struct ExpandedActivityCard: View {
                     Text(detail)
                         .font(.system(size: 9 * textScale, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.58))
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .truncationMode(.tail)
                         .layoutPriority(1)
                 }

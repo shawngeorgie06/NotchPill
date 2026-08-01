@@ -3506,7 +3506,9 @@ struct PermissionPreviewTests {
         let r = PermissionRequest(action: .run(command: "rm -rf build", note: nil), tool: "Bash")
         #expect(r.previewLines.isEmpty)
         #expect(r.isCommand)
+        #expect(r.commandPreviewLineLimit == 3)
         #expect(request("a", "b").isCommand == false)
+        #expect(request("a", "b").commandPreviewLineLimit == 1)
     }
 }
 
