@@ -90,19 +90,23 @@ struct ExpandedNotchShape: Shape {
         let notchLeft = rect.midX - physicalWidth / 2
         let notchRight = rect.midX + physicalWidth / 2
         let availableBodyHeight = max(0, height - physicalHeight)
-        // A shallow shoulder preserves the floating, continuous silhouette
-        // without exposing the full-width panel halfway down the notch.
-        let shoulderDepth = min(6, availableBodyHeight * 0.28)
-        let shoulderBottom = rect.minY + physicalHeight + shoulderDepth
+        // Let the surface begin as the physical notch, hold that width for a
+        // small neck, then grow down and out. This makes the expanded state
+        // feel born from the hardware cutout instead of a wide panel appearing
+        // underneath it.
+        let neckDepth = min(3, availableBodyHeight * 0.12)
+        let shoulderDepth = min(9, max(0, availableBodyHeight - neckDepth) * 0.36)
+        let shoulderStart = rect.minY + physicalHeight + neckDepth
+        let shoulderBottom = shoulderStart + shoulderDepth
         let radius = min(bottomRadius, min(width, max(0, height - physicalHeight)) / 2)
 
         var path = Path()
         path.move(to: CGPoint(x: notchLeft, y: rect.minY))
         path.addLine(to: CGPoint(x: notchRight, y: rect.minY))
-        path.addLine(to: CGPoint(x: notchRight, y: rect.minY + physicalHeight))
+        path.addLine(to: CGPoint(x: notchRight, y: shoulderStart))
         path.addCurve(
             to: CGPoint(x: rect.maxX, y: shoulderBottom),
-            control1: CGPoint(x: notchRight, y: rect.minY + physicalHeight + shoulderDepth * 0.32),
+            control1: CGPoint(x: notchRight, y: shoulderStart + shoulderDepth * 0.32),
             control2: CGPoint(x: rect.maxX, y: shoulderBottom - shoulderDepth * 0.28)
         )
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
@@ -123,9 +127,9 @@ struct ExpandedNotchShape: Shape {
         )
         path.addLine(to: CGPoint(x: rect.minX, y: shoulderBottom))
         path.addCurve(
-            to: CGPoint(x: notchLeft, y: rect.minY + physicalHeight),
+            to: CGPoint(x: notchLeft, y: shoulderStart),
             control1: CGPoint(x: rect.minX, y: shoulderBottom - shoulderDepth * 0.28),
-            control2: CGPoint(x: notchLeft, y: rect.minY + physicalHeight + shoulderDepth * 0.32)
+            control2: CGPoint(x: notchLeft, y: shoulderStart + shoulderDepth * 0.32)
         )
         path.closeSubpath()
         return path
