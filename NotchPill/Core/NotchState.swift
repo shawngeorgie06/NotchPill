@@ -15,6 +15,10 @@ final class NotchState: ObservableObject {
     private static let notificationHistoryKey = "recentDevReadyNotificationHistory"
     // Hover expansion.
     @Published private(set) var isExpanded = false
+    /// 0 is the physical notch; 1 is the fully expanded hover surface. Keeping
+    /// this separate from `isExpanded` gives the renderer a real in-between
+    /// state instead of swapping directly between two finished layouts.
+    @Published private(set) var expansionProgress: CGFloat = 0
 
     // The resolved collapsed-notch activity (legacy primary chip for transitions).
     @Published private(set) var activity: NotchActivity = .idle
@@ -84,6 +88,18 @@ final class NotchState: ObservableObject {
 
     func setExpanded(_ expanded: Bool) {
         guard isExpanded != expanded else { return }
+        if expanded {
+            // Publish the narrow notch first. The next main-loop turn lets the
+            // host window begin its resize before SwiftUI grows the surface.
+            expansionProgress = 0
+            isExpanded = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isExpanded else { return }
+                self.expansionProgress = 1
+            }
+            return
+        }
+        expansionProgress = 0
         isExpanded = expanded
     }
 

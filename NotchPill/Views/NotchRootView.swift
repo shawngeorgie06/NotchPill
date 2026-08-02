@@ -117,6 +117,7 @@ struct NotchRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .allowsHitTesting(true)
         .animation(expandAnimation, value: state.isExpanded)
+        .animation(expandAnimation, value: state.expansionProgress)
         .animation(expandAnimation, value: frameSize.width)
         .animation(expandAnimation, value: frameSize.height)
         .animation(expandAnimation, value: collapsedChips.map(\.id))
@@ -165,7 +166,11 @@ struct NotchRootView: View {
     /// Expanded pill: a single, softly shouldered surface growing from the
     /// physical notch; the top corners stay clear for browser tabs.
     private var expandedBackground: some View {
-        ExpandedPillSurface(notchWidth: metrics.notchWidth, notchHeight: metrics.notchHeight)
+        ExpandedPillSurface(
+            notchWidth: metrics.notchWidth,
+            notchHeight: metrics.notchHeight,
+            progress: state.isExpanded ? state.expansionProgress : 1
+        )
             .frame(width: frameSize.width, height: frameSize.height)
     }
 
@@ -188,6 +193,8 @@ struct NotchRootView: View {
                        alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+        .opacity(state.expansionProgress)
+        .scaleEffect(0.98 + state.expansionProgress * 0.02, anchor: .top)
     }
 
     private var collapsedContent: some View {

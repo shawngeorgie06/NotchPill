@@ -70,13 +70,17 @@ struct ExpandedNotchShape: Shape {
     var notchWidth: CGFloat
     var notchHeight: CGFloat
     var bottomRadius: CGFloat = 18
+    /// Interpolates the whole surface from the hardware notch (0) to the
+    /// finished floating pill (1).
+    var progress: CGFloat = 1
 
-    var animatableData: AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>> {
-        get { AnimatablePair(notchWidth, AnimatablePair(notchHeight, bottomRadius)) }
+    var animatableData: AnimatablePair<CGFloat, AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>>> {
+        get { AnimatablePair(notchWidth, AnimatablePair(notchHeight, AnimatablePair(bottomRadius, progress))) }
         set {
             notchWidth = newValue.first
             notchHeight = newValue.second.first
-            bottomRadius = newValue.second.second
+            bottomRadius = newValue.second.second.first
+            progress = newValue.second.second.second
         }
     }
 
@@ -87,48 +91,61 @@ struct ExpandedNotchShape: Shape {
 
         let physicalHeight = min(max(0, notchHeight), height)
         let physicalWidth = min(max(0, notchWidth), width)
+        let expansion = min(1, max(0, progress))
         let notchLeft = rect.midX - physicalWidth / 2
         let notchRight = rect.midX + physicalWidth / 2
         let availableBodyHeight = max(0, height - physicalHeight)
+        let bodyHeight = availableBodyHeight * expansion
+        guard bodyHeight > 0.5 else {
+            var notch = Path()
+            notch.addRect(CGRect(x: notchLeft, y: rect.minY,
+                                 width: physicalWidth, height: physicalHeight))
+            return notch
+        }
+        let surfaceBottom = rect.minY + physicalHeight + bodyHeight
+        let surfaceWidth = physicalWidth + (width - physicalWidth) * expansion
+        let surfaceLeft = rect.midX - surfaceWidth / 2
+        let surfaceRight = rect.midX + surfaceWidth / 2
+
         // Let the surface begin as the physical notch, hold that width for a
-        // small neck, then grow down and out. This makes the expanded state
-        // feel born from the hardware cutout instead of a wide panel appearing
-        // underneath it.
-        let neckDepth = min(3, availableBodyHeight * 0.12)
-        let shoulderDepth = min(9, max(0, availableBodyHeight - neckDepth) * 0.36)
+        // small neck, then grow down and out. Both height and width follow the
+        // same progress value, so it grows from the notch rather than swapping
+        // in a finished panel below it.
+        let neckDepth = min(3, bodyHeight * 0.18)
+        let shoulderDepth = min(9, max(0, bodyHeight - neckDepth) * 0.42)
         let shoulderStart = rect.minY + physicalHeight + neckDepth
-        let shoulderBottom = shoulderStart + shoulderDepth
-        let radius = min(bottomRadius, min(width, max(0, height - physicalHeight)) / 2)
+        let shoulderBottom = min(surfaceBottom, shoulderStart + shoulderDepth)
+        let radius = min(bottomRadius * expansion, min(surfaceWidth, bodyHeight) / 2)
 
         var path = Path()
         path.move(to: CGPoint(x: notchLeft, y: rect.minY))
         path.addLine(to: CGPoint(x: notchRight, y: rect.minY))
         path.addLine(to: CGPoint(x: notchRight, y: shoulderStart))
         path.addCurve(
-            to: CGPoint(x: rect.maxX, y: shoulderBottom),
+            to: CGPoint(x: surfaceRight, y: shoulderBottom),
             control1: CGPoint(x: notchRight, y: shoulderStart + shoulderDepth * 0.32),
-            control2: CGPoint(x: rect.maxX, y: shoulderBottom - shoulderDepth * 0.28)
+            control2: CGPoint(x: surfaceRight, y: shoulderBottom - shoulderDepth * 0.28)
         )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+        path.addLine(to: CGPoint(x: surfaceRight, y: surfaceBottom - radius))
         path.addArc(
-            center: CGPoint(x: rect.maxX - radius, y: rect.maxY - radius),
+            center: CGPoint(x: surfaceRight - radius, y: surfaceBottom - radius),
             radius: radius,
             startAngle: .degrees(0),
             endAngle: .degrees(90),
             clockwise: false
         )
-        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
+        path.addLine(to: CGPoint(x: surfaceLeft + radius, y: surfaceBottom))
         path.addArc(
-            center: CGPoint(x: rect.minX + radius, y: rect.maxY - radius),
+            center: CGPoint(x: surfaceLeft + radius, y: surfaceBottom - radius),
             radius: radius,
             startAngle: .degrees(90),
             endAngle: .degrees(180),
             clockwise: false
         )
-        path.addLine(to: CGPoint(x: rect.minX, y: shoulderBottom))
+        path.addLine(to: CGPoint(x: surfaceLeft, y: shoulderBottom))
         path.addCurve(
             to: CGPoint(x: notchLeft, y: shoulderStart),
-            control1: CGPoint(x: rect.minX, y: shoulderBottom - shoulderDepth * 0.28),
+            control1: CGPoint(x: surfaceLeft, y: shoulderBottom - shoulderDepth * 0.28),
             control2: CGPoint(x: notchLeft, y: shoulderStart + shoulderDepth * 0.32)
         )
         path.closeSubpath()

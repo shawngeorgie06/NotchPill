@@ -39,12 +39,13 @@ struct PillSurface: View {
 struct ExpandedPillSurface: View {
     let notchWidth: CGFloat
     let notchHeight: CGFloat
+    let progress: CGFloat
 
     var body: some View {
-        ExpandedNotchShape(notchWidth: notchWidth, notchHeight: notchHeight)
+        ExpandedNotchShape(notchWidth: notchWidth, notchHeight: notchHeight, progress: progress)
             .fill(Color.black)
             .overlay {
-                ExpandedNotchShape(notchWidth: notchWidth, notchHeight: notchHeight)
+                ExpandedNotchShape(notchWidth: notchWidth, notchHeight: notchHeight, progress: progress)
                     .stroke(NotchDesign.pillStroke, lineWidth: 0.5)
             }
     }
