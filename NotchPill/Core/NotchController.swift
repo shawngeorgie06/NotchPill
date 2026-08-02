@@ -515,12 +515,11 @@ final class NotchController {
         updateHotZones(geometry: geometry, windowFrame: frame)
         if animated {
             // Keep the AppKit window resize in step with the SwiftUI surface.
-            // The default window animation is noticeably faster than our hover
-            // spring and makes the pill look as if it snaps open underneath its
-            // content.
+            // Both use the same short ease curve; a spring in one layer and a
+            // native animation in the other produces a visible double-motion.
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.22
-                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.82, 0.22, 1.0)
+                context.duration = 0.18
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 window.animator().setFrame(frame, display: true)
             }
         } else {

@@ -18,7 +18,9 @@ struct NotchGeometry {
     // grow — i.e. bigger, more legible text. NOTE: this affects only the EXPANDED
     // pill; the hover *activation* zone is derived from the physical notch rect and
     // the collapsed size, so it is unchanged by this value.
-    static let expandedScale: CGFloat = 0.68
+    // Keep the hover panel compact: it needs room for the agent cards, but
+    // should still read as an extension of the notch rather than a banner.
+    static let expandedScale: CGFloat = 0.62
     /// Extra gap (render points) between the notch and the content, so the top
     /// row sits clear of the notch.
     static let contentTopGap: CGFloat = 10

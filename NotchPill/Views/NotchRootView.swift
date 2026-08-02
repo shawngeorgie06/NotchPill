@@ -63,9 +63,9 @@ struct NotchRootView: View {
     }
 
     private var expandAnimation: Animation {
-        // A longer, well-damped spring makes hover feel intentional while still
-        // settling before the user reaches the first card.
-        reduceMotion ? .linear(duration: 0.01) : .spring(response: 0.24, dampingFraction: 0.88, blendDuration: 0.08)
+        // Use the same short ease curve as the hosting window. A spring here
+        // fights AppKit's frame interpolation and reads as a stuttery resize.
+        reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.18)
     }
     private var contentAnimation: Animation {
         reduceMotion ? .linear(duration: 0.01) : .easeOut(duration: 0.1)

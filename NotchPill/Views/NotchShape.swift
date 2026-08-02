@@ -69,7 +69,7 @@ struct NotchShape: Shape {
 struct ExpandedNotchShape: Shape {
     var notchWidth: CGFloat
     var notchHeight: CGFloat
-    var bottomRadius: CGFloat = 22
+    var bottomRadius: CGFloat = 18
 
     var animatableData: AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>> {
         get { AnimatablePair(notchWidth, AnimatablePair(notchHeight, bottomRadius)) }
@@ -90,7 +90,9 @@ struct ExpandedNotchShape: Shape {
         let notchLeft = rect.midX - physicalWidth / 2
         let notchRight = rect.midX + physicalWidth / 2
         let availableBodyHeight = max(0, height - physicalHeight)
-        let shoulderDepth = min(14, availableBodyHeight * 0.42)
+        // A shallow shoulder preserves the floating, continuous silhouette
+        // without exposing the full-width panel halfway down the notch.
+        let shoulderDepth = min(6, availableBodyHeight * 0.28)
         let shoulderBottom = rect.minY + physicalHeight + shoulderDepth
         let radius = min(bottomRadius, min(width, max(0, height - physicalHeight)) / 2)
 
