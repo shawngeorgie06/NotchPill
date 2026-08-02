@@ -937,7 +937,9 @@ final class NotchController {
     /// and a reminder is not something that needs to land to the second.
     private func startFollowUpTimerIfNeeded() {
         guard followUpTimer == nil else { return }
-        let timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        // Polls faster than the delay so a short test delay is still observed.
+        let tick = min(30, max(2, FollowUpReminder.defaultDelay / 4))
+        let timer = Timer.scheduledTimer(withTimeInterval: tick, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.fireDueFollowUps() }
         }
         followUpTimer = timer
@@ -956,7 +958,7 @@ final class NotchController {
             if item.kind == .waiting,
                !state.agentSessions.contains(where: { $0.state == .waiting }) { continue }
             var reminder = original
-            reminder.id = "followup-" + original.id
+            reminder.id = FollowUpReminder.reminderId(for: original.id)
             reminder.title = FollowUpReminder.title(for: item.kind)
             LogStore.log("peek", "follow-up reminder for \(original.id)")
             presentDevReady(reminder)

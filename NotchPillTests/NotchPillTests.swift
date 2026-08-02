@@ -4122,3 +4122,30 @@ struct QuietSceneTests {
                                            session: session(locked: true, onConsole: true)))
     }
 }
+
+@Suite("Reminders do not nudge themselves")
+struct FollowUpSelfReferenceTests {
+    /// A reminder is presented as an ordinary peek, so when it times out it
+    /// would earn a reminder of its own — and that one another, forever. The
+    /// original tests could not see this: none of them re-presented a reminder.
+    @Test("A reminder that times out earns nothing")
+    func reminderIsNotRecorded() {
+        var r = FollowUpReminder()
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        r.recordUnattended(id: "a", kind: .waiting, at: t0)
+        let fired = r.due(now: t0.addingTimeInterval(300))
+        #expect(fired.map(\.id) == ["a"])
+
+        // The reminder peek now times out unattended, exactly as the original did.
+        r.recordUnattended(id: FollowUpReminder.reminderId(for: "a"), kind: .waiting,
+                           at: t0.addingTimeInterval(320))
+        #expect(r.pending.isEmpty)
+        #expect(r.due(now: t0.addingTimeInterval(9_000)).isEmpty)
+    }
+
+    @Test("Reminder ids are recognisable")
+    func idsAreLabelled() {
+        #expect(FollowUpReminder.isReminder(id: FollowUpReminder.reminderId(for: "x")))
+        #expect(!FollowUpReminder.isReminder(id: "x"))
+    }
+}

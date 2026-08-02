@@ -14,7 +14,19 @@ import Foundation
 /// would cost the peeks that *are* worth reading.
 struct FollowUpReminder: Equatable {
     /// How long after a peek goes unattended the reminder is due.
-    static let defaultDelay: TimeInterval = 300
+    ///
+    /// Overridable through `NOTCHPILL_FOLLOWUP_DELAY` so the round trip can be
+    /// exercised without a five-minute wait. This is a channel whose failure
+    /// mode is silence, and silence is indistinguishable from working, so it
+    /// has to be watchable end to end — the same reason the approval hook
+    /// takes a request id from the environment.
+    static var defaultDelay: TimeInterval {
+        if let raw = ProcessInfo.processInfo.environment["NOTCHPILL_FOLLOWUP_DELAY"],
+           let seconds = TimeInterval(raw), seconds > 0 {
+            return seconds
+        }
+        return 300
+    }
 
     struct Pending: Equatable {
         var id: String
@@ -34,6 +46,8 @@ struct FollowUpReminder: Equatable {
     /// to — you looked at it and decided it was not for you — and reminding
     /// about it would be arguing with the user.
     mutating func recordUnattended(id: String, kind: AlertKind, at: Date) {
+        // A reminder that goes unread does not earn another one.
+        guard !Self.isReminder(id: id) else { return }
         guard !reminded.contains(id) else { return }
         guard !pending.contains(where: { $0.id == id }) else { return }
         pending.append(Pending(id: id, kind: kind, since: at))
@@ -67,6 +81,18 @@ struct FollowUpReminder: Equatable {
     mutating func expire(now: Date, olderThan: TimeInterval = AgentSession.liveWindow) {
         pending.removeAll { now.timeIntervalSince($0.since) > olderThan }
     }
+
+    /// Marks an alert as being a reminder rather than a fresh event.
+    ///
+    /// Without this the feature eats itself: a reminder is presented as a peek
+    /// like any other, so when *it* times out unattended it earns a reminder of
+    /// its own, and five minutes later another — the endless nag this was
+    /// explicitly designed not to be. One nudge means the nudge is not nudged.
+    static let idPrefix = "followup-"
+
+    static func reminderId(for id: String) -> String { idPrefix + id }
+
+    static func isReminder(id: String) -> Bool { id.hasPrefix(idPrefix) }
 
     /// How the reminder reads. It has to say it is a reminder — an identical
     /// second copy of a peek looks like the agent asked twice.
