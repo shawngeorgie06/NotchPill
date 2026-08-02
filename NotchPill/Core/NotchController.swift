@@ -513,18 +513,11 @@ final class NotchController {
             expandedContentSize: expandedContentSize()
         )
         updateHotZones(geometry: geometry, windowFrame: frame)
-        if animated {
-            // Keep the AppKit window resize in step with the SwiftUI surface.
-            // Both use the same short ease curve; a spring in one layer and a
-            // native animation in the other produces a visible double-motion.
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.18
-                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                window.animator().setFrame(frame, display: true)
-            }
-        } else {
-            window.setFrame(frame, display: true)
-        }
+        // Keep the overlay's coordinate space fixed while SwiftUI animates the
+        // surface. Animating the NSWindow as well makes the starting notch move
+        // underneath the path, which is why previous attempts looked like a
+        // panel resize instead of an expansion from the hardware notch.
+        window.setFrame(frame, display: true)
         updateMousePassthrough(pointerInHotZone: expandHoverScreenRect().contains(NSEvent.mouseLocation))
     }
 

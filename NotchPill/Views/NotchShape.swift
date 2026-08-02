@@ -103,7 +103,11 @@ struct ExpandedNotchShape: Shape {
             return notch
         }
         let surfaceBottom = rect.minY + physicalHeight + bodyHeight
-        let surfaceWidth = physicalWidth + (width - physicalWidth) * expansion
+        // Grow downward first, then widen. This avoids the broad horizontal
+        // flash that makes a hover surface look like a panel appearing below
+        // the notch instead of an expansion of it.
+        let widthProgress = expansion * (0.5 + 0.5 * expansion)
+        let surfaceWidth = physicalWidth + (width - physicalWidth) * widthProgress
         let surfaceLeft = rect.midX - surfaceWidth / 2
         let surfaceRight = rect.midX + surfaceWidth / 2
 

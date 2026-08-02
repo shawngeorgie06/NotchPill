@@ -63,9 +63,10 @@ struct NotchRootView: View {
     }
 
     private var expandAnimation: Animation {
-        // Use the same short ease curve as the hosting window. A spring here
-        // fights AppKit's frame interpolation and reads as a stuttery resize.
-        reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.18)
+        // The host window is positioned immediately; only the visible surface
+        // moves. This longer curve can therefore grow cleanly from the physical
+        // notch without fighting an AppKit frame animation.
+        reduceMotion ? .linear(duration: 0.01) : .timingCurve(0.22, 0.8, 0.2, 1, duration: 0.28)
     }
     private var contentAnimation: Animation {
         reduceMotion ? .linear(duration: 0.01) : .easeOut(duration: 0.1)
@@ -193,8 +194,15 @@ struct NotchRootView: View {
                        alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
-        .opacity(state.expansionProgress)
-        .scaleEffect(0.98 + state.expansionProgress * 0.02, anchor: .top)
+        .opacity(contentReveal)
+        .scaleEffect(0.96 + contentReveal * 0.04, anchor: .top)
+    }
+
+    /// Hold the content until the surface is wide enough to contain it. The
+    /// visual order is therefore notch → surface → cards, rather than all three
+    /// appearing at once.
+    private var contentReveal: CGFloat {
+        min(1, max(0, (state.expansionProgress - 0.5) / 0.5))
     }
 
     private var collapsedContent: some View {
