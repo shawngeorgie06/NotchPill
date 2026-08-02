@@ -63,7 +63,9 @@ struct NotchRootView: View {
     }
 
     private var expandAnimation: Animation {
-        reduceMotion ? .linear(duration: 0.01) : .spring(response: 0.11, dampingFraction: 0.92)
+        // A longer, well-damped spring makes hover feel intentional while still
+        // settling before the user reaches the first card.
+        reduceMotion ? .linear(duration: 0.01) : .spring(response: 0.24, dampingFraction: 0.88, blendDuration: 0.08)
     }
     private var contentAnimation: Animation {
         reduceMotion ? .linear(duration: 0.01) : .easeOut(duration: 0.1)
@@ -160,19 +162,11 @@ struct NotchRootView: View {
         collapsedChips.isEmpty ? max(8, metrics.notchHeight / 2) : 12
     }
 
-    /// Expanded pill: black surface in the notch column + rounded body below; ears stay clear for tabs.
+    /// Expanded pill: a single, softly shouldered surface growing from the
+    /// physical notch; the top corners stay clear for browser tabs.
     private var expandedBackground: some View {
-        let earWidth = max(0, (frameSize.width - metrics.notchWidth) / 2)
-        return VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Color.clear.frame(width: earWidth, height: metrics.notchHeight)
-                Color.black.frame(width: metrics.notchWidth, height: metrics.notchHeight)
-                Color.clear.frame(width: earWidth, height: metrics.notchHeight)
-            }
-            PillSurface(bottomRadius: 16)
-                .frame(width: frameSize.width, height: max(0, frameSize.height - metrics.notchHeight))
-        }
-        .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+        ExpandedPillSurface(notchWidth: metrics.notchWidth, notchHeight: metrics.notchHeight)
+            .frame(width: frameSize.width, height: frameSize.height)
     }
 
     private var expandedContent: some View {

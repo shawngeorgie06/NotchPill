@@ -32,3 +32,20 @@ struct PillSurface: View {
             }
     }
 }
+
+/// The expanded, floating silhouette. The notch and the lower pill share a
+/// single path so the surface feels like it grows out of the hardware rather
+/// than two panels snapping together.
+struct ExpandedPillSurface: View {
+    let notchWidth: CGFloat
+    let notchHeight: CGFloat
+
+    var body: some View {
+        ExpandedNotchShape(notchWidth: notchWidth, notchHeight: notchHeight)
+            .fill(Color.black)
+            .overlay {
+                ExpandedNotchShape(notchWidth: notchWidth, notchHeight: notchHeight)
+                    .stroke(NotchDesign.pillStroke, lineWidth: 0.5)
+            }
+    }
+}
