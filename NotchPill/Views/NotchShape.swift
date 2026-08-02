@@ -62,15 +62,15 @@ struct NotchShape: Shape {
     }
 }
 
-/// The expanded surface is one continuous shape: it begins at the physical
-/// notch, then eases out through soft shoulders into the floating pill below.
-/// Keeping this as a single path removes the hard horizontal seam that a
-/// stacked rectangle-and-pill background produces during hover expansion.
+/// A surface attached to the *actual* hardware notch. The overlay deliberately
+/// draws nothing in the notch's own rectangle: macOS already supplies that
+/// black cutout. Its path begins at the lower edge of the cutout and flows into
+/// the floating island below, so there is only one notch on screen.
 struct ExpandedNotchShape: Shape {
     var notchWidth: CGFloat
     var notchHeight: CGFloat
     var bottomRadius: CGFloat = 18
-    /// Interpolates the whole surface from the hardware notch (0) to the
+    /// Interpolates the island from the hardware notch's lower edge (0) to the
     /// finished floating pill (1).
     var progress: CGFloat = 1
 
@@ -94,15 +94,13 @@ struct ExpandedNotchShape: Shape {
         let expansion = min(1, max(0, progress))
         let notchLeft = rect.midX - physicalWidth / 2
         let notchRight = rect.midX + physicalWidth / 2
+        let hardwareBottom = rect.minY + physicalHeight
         let availableBodyHeight = max(0, height - physicalHeight)
         let bodyHeight = availableBodyHeight * expansion
         guard bodyHeight > 0.5 else {
-            var notch = Path()
-            notch.addRect(CGRect(x: notchLeft, y: rect.minY,
-                                 width: physicalWidth, height: physicalHeight))
-            return notch
+            return Path()
         }
-        let surfaceBottom = rect.minY + physicalHeight + bodyHeight
+        let surfaceBottom = hardwareBottom + bodyHeight
         // Grow downward first, then widen. This avoids the broad horizontal
         // flash that makes a hover surface look like a panel appearing below
         // the notch instead of an expansion of it.
@@ -111,19 +109,18 @@ struct ExpandedNotchShape: Shape {
         let surfaceLeft = rect.midX - surfaceWidth / 2
         let surfaceRight = rect.midX + surfaceWidth / 2
 
-        // Let the surface begin as the physical notch, hold that width for a
-        // small neck, then grow down and out. Both height and width follow the
-        // same progress value, so it grows from the notch rather than swapping
-        // in a finished panel below it.
+        // Start at the lower edge of the *real* notch, hold that width for a
+        // small neck, then grow down and out. The overlay never paints a fake
+        // copy of the hardware cutout above this point.
         let neckDepth = min(3, bodyHeight * 0.18)
         let shoulderDepth = min(9, max(0, bodyHeight - neckDepth) * 0.42)
-        let shoulderStart = rect.minY + physicalHeight + neckDepth
+        let shoulderStart = hardwareBottom + neckDepth
         let shoulderBottom = min(surfaceBottom, shoulderStart + shoulderDepth)
         let radius = min(bottomRadius * expansion, min(surfaceWidth, bodyHeight) / 2)
 
         var path = Path()
-        path.move(to: CGPoint(x: notchLeft, y: rect.minY))
-        path.addLine(to: CGPoint(x: notchRight, y: rect.minY))
+        path.move(to: CGPoint(x: notchLeft, y: hardwareBottom))
+        path.addLine(to: CGPoint(x: notchRight, y: hardwareBottom))
         path.addLine(to: CGPoint(x: notchRight, y: shoulderStart))
         path.addCurve(
             to: CGPoint(x: surfaceRight, y: shoulderBottom),

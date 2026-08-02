@@ -27,4 +27,10 @@ final class NotchWindow: NSPanel {
     // (buttons) can receive clicks without activating the app.
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    /// Keep the transparent top of the overlay aligned with the screen's real
+    /// notch instead of allowing AppKit to nudge the panel below the menu bar.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
 }

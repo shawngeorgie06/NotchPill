@@ -76,9 +76,15 @@ struct NotchRootView: View {
         ZStack(alignment: .top) {
             if state.isExpanded || !state.devReadyAlerts.isEmpty || state.updateProgress != nil || state.replyCompose != nil {
                 expandedBackground
-            } else {
-                PillSurface(bottomRadius: collapsedBottomRadius)
-                    .frame(width: metrics.notchWidth, height: metrics.notchHeight)
+            } else if !collapsedChips.isEmpty {
+                // The physical notch itself is already black. Only draw the
+                // compact island that grows from its lower edge.
+                ExpandedPillSurface(
+                    notchWidth: metrics.notchWidth,
+                    notchHeight: metrics.notchHeight,
+                    progress: 1
+                )
+                .frame(width: frameSize.width, height: frameSize.height)
             }
         }
         .overlay(alignment: .top) {
