@@ -4362,3 +4362,144 @@ struct SessionNamingTests {
         #expect(AgentSessionScanner.firstValue(in: text, key: "cwd") == "/Users/me/proj")
     }
 }
+
+/// Codex subscription usage read from OpenAI with the token Codex already
+/// stored at login. Fixtures are the real response shape, captured from a live
+/// call on this machine (identifiers replaced).
+@Suite("Codex usage over OAuth")
+struct CodexUsageFetcherTests {
+    private func json(_ s: String) -> Data { Data(s.utf8) }
+
+    // The captured response that showed the transcript source was wrong: the
+    // notch said "4% used · 0 credits balance" while this said 100% and $298.
+    private let live = """
+    {"plan_type":"free",
+     "rate_limit":{"allowed":false,"limit_reached":true,
+       "primary_window":{"used_percent":100,"limit_window_seconds":2592000,
+                         "reset_after_seconds":361844,"reset_at":1786130351},
+       "secondary_window":null},
+     "credits":{"has_credits":true,"unlimited":false,"balance":"298.4291950000"},
+     "rate_limit_reset_credits":{"available_count":0}}
+    """
+
+    @Test("reads the real usage payload")
+    func parsesLiveResponse() {
+        let now = Date(timeIntervalSince1970: 1_785_768_507)
+        let quota = CodexUsageFetcher.quota(in: json(live), now: now)
+        #expect(quota?.usedPercent == 100)
+        #expect(quota?.resetsAt == Date(timeIntervalSince1970: 1_786_130_351))
+        #expect(quota?.updatedAt == now)
+        // The balance is $298.43 — not the 0 the old source reported by reading
+        // `rate_limit_reset_credits.available_count` instead.
+        #expect(quota?.creditBalance == Decimal(string: "298.4291950000"))
+    }
+
+    @Test("a decimal balance is not read through a Double, nor through the locale")
+    func balanceIsExact() {
+        let quota = CodexUsageFetcher.quota(in: json(live))
+        #expect(quota?.creditBalance != nil)
+        // 298.429195 has no exact binary representation; Decimal keeps it.
+        #expect(quota?.creditBalance == Decimal(sign: .plus, exponent: -10,
+                                                significand: 2_984_291_950_000))
+    }
+
+    @Test("an unlimited plan reports no balance rather than a wrong one")
+    func unlimitedHasNoBalance() {
+        let body = """
+        {"rate_limit":{"primary_window":{"used_percent":15,"reset_at":1786130351}},
+         "credits":{"has_credits":true,"unlimited":true,"balance":"0"}}
+        """
+        #expect(CodexUsageFetcher.quota(in: json(body))?.creditBalance == nil)
+    }
+
+    @Test("used percent is clamped to a percentage")
+    func clampsPercent() {
+        for (raw, want) in [("-5", 0), ("142", 100), ("15.6", 16)] {
+            let body = #"{"rate_limit":{"primary_window":{"used_percent":\#(raw)}}}"#
+            #expect(CodexUsageFetcher.quota(in: json(body))?.usedPercent == want)
+        }
+    }
+
+    @Test("a response without a rate limit yields nothing, not a zero")
+    func missingLimitIsNil() {
+        // A card reading "0% used" when we simply do not know is a lie, and the
+        // whole point of this change was to stop showing confident wrong numbers.
+        #expect(CodexUsageFetcher.quota(in: json(#"{"plan_type":"pro"}"#)) == nil)
+        #expect(CodexUsageFetcher.quota(in: json("not json")) == nil)
+    }
+
+    @Test("reads the credentials Codex wrote")
+    func parsesAuthFile() {
+        let body = """
+        {"OPENAI_API_KEY":null,"auth_mode":"chatgpt",
+         "tokens":{"id_token":"idtok","access_token":"acctok",
+                   "refresh_token":"reftok","account_id":"acct-1"},
+         "last_refresh":"2026-08-02T04:05:04.070839Z"}
+        """
+        let creds = CodexUsageFetcher.credentials(in: json(body))
+        #expect(creds?.accessToken == "acctok")
+        #expect(creds?.refreshToken == "reftok")
+        #expect(creds?.accountId == "acct-1")
+        // Fractional seconds must parse: the plain ISO8601 formatter rejects
+        // them, which would read a fresh token as "never refreshed" and force a
+        // pointless refresh on every launch.
+        #expect(creds?.lastRefresh != nil)
+    }
+
+    @Test("credentials without tokens are refused")
+    func refusesEmptyAuth() {
+        #expect(CodexUsageFetcher.credentials(in: json(#"{"tokens":{}}"#)) == nil)
+        #expect(CodexUsageFetcher.credentials(
+            in: json(#"{"tokens":{"access_token":"","refresh_token":"r"}}"#)) == nil)
+    }
+
+    @Test("refresh is due only after Codex's own interval")
+    func refreshWindow() {
+        let t0 = Date(timeIntervalSince1970: 1_785_000_000)
+        var creds = CodexUsageFetcher.Credentials(accessToken: "a", refreshToken: "r",
+                                                  accountId: nil, lastRefresh: t0)
+        #expect(!creds.needsRefresh(now: t0.addingTimeInterval(7 * 24 * 3600)))
+        #expect(creds.needsRefresh(now: t0.addingTimeInterval(9 * 24 * 3600)))
+        // Never refreshed: assume it is due rather than send a stale token.
+        creds.lastRefresh = nil
+        #expect(creds.needsRefresh(now: t0))
+    }
+
+    @Test("a refresh that returns no new refresh token keeps the old one")
+    func refreshKeepsRefreshToken() {
+        let previous = CodexUsageFetcher.Credentials(accessToken: "old", refreshToken: "keepme",
+                                                     accountId: "acct", lastRefresh: nil)
+        let now = Date(timeIntervalSince1970: 1_785_000_000)
+        let next = CodexUsageFetcher.refreshed(in: json(#"{"access_token":"new"}"#),
+                                               previous: previous, now: now)
+        #expect(next?.accessToken == "new")
+        #expect(next?.refreshToken == "keepme")
+        #expect(next?.accountId == "acct")
+        #expect(next?.lastRefresh == now)
+    }
+
+    @Test("requests carry exactly the headers Codex sends")
+    func requestHeaders() {
+        let creds = CodexUsageFetcher.Credentials(accessToken: "tok", refreshToken: "r",
+                                                  accountId: "acct-1", lastRefresh: nil)
+        let request = CodexUsageFetcher.usageRequest(creds)
+        #expect(request.url == CodexUsageFetcher.usageEndpoint)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok")
+        #expect(request.value(forHTTPHeaderField: "ChatGPT-Account-Id") == "acct-1")
+        #expect(request.value(forHTTPHeaderField: "User-Agent") == "codex-cli")
+    }
+
+    @Test("the refresh request is a refresh_token grant")
+    func refreshBody() {
+        let creds = CodexUsageFetcher.Credentials(accessToken: "a", refreshToken: "reftok",
+                                                  accountId: nil, lastRefresh: nil)
+        let request = CodexUsageFetcher.refreshRequest(creds)
+        #expect(request.httpMethod == "POST")
+        let body = request.httpBody.flatMap {
+            try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+        }
+        #expect(body?["grant_type"] as? String == "refresh_token")
+        #expect(body?["refresh_token"] as? String == "reftok")
+        #expect(body?["client_id"] as? String == CodexUsageFetcher.clientId)
+    }
+}

@@ -24,6 +24,9 @@ final class AgentSessionsProvider {
     private var lastOpenCodeUsage: OpenCodeUsage?
     private var lastCodexQuota: CodexQuota?
     private let scanner = AgentSessionScanner()
+    /// Rate-limits itself to one request a minute, so this is safe to consult
+    /// on every scan.
+    private let codexUsage = CodexUsageService()
     private var scanning = false
     /// Invalidates results from scans started before the last stop.
     private var generation = 0
@@ -93,7 +96,13 @@ final class AgentSessionsProvider {
             guard let self else { return }
             let sessions = await scanner.sessions(now: now, blocked: blocked)
             let usage = await scanner.openCodeUsage(since: Calendar.current.startOfDay(for: now))
-            let quota = await scanner.codexQuota(now: now)
+            // Live from OpenAI, falling back to the transcript only when the
+            // API cannot be reached. The transcript is a cached copy of the
+            // number from your last request: it expires with the two-hour
+            // liveness window, and it was measured showing "4% used · 0 credits"
+            // while the account was actually at 100% with a $298 balance.
+            var quota = await self.codexUsage.quota(now: now)
+            if quota == nil { quota = await scanner.codexQuota(now: now) }
             await MainActor.run { self.publish(sessions, usage: usage, quota: quota, from: issued) }
         }
     }
