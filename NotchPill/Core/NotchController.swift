@@ -292,9 +292,9 @@ final class NotchController {
     /// nothing is showing — the most-recent *finished* agent (whose peek has since
     /// auto-dismissed). Bound to the ⌥⌘R global hotkey.
     private func openReplyForLatest() {
-        guard AppSettings.shared.agentReplyEnabled else { return }
         guard let alert = state.devReadyAlerts.last ?? lastFinishedAlert,
-              TerminalReplyInjector.canTarget(alert) else { return }
+              alert.canReplyFromNotch(replyEnabled: AppSettings.shared.agentReplyEnabled)
+        else { return }
         state.beginReply(to: alert)
     }
 

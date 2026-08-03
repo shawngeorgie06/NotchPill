@@ -142,6 +142,8 @@ enum NotchContentLayout {
     static let answerButtonSpacing: CGFloat = 8
     /// Width the per-row ✕ occupies: a 28pt target plus its 8pt trailing padding.
     static let dismissControlWidth: CGFloat = 36
+    /// The reply (↰) control: a 28pt circle plus its 8pt trailing padding.
+    static let replyControlWidth: CGFloat = 36
     static let devReadyMaxVisibleRows = 3
     /// Wider than collapsed/hover chips so agent names and subtitles fit
     /// comfortably.
@@ -160,7 +162,9 @@ enum NotchContentLayout {
         return devReadyRowHeight * CGFloat(visible) + CGFloat(dividers)
     }
 
-    static func devReadyLayout(metrics: NotchMetrics, alerts: [DevReadyAlert]) -> NotchContentLayoutMetrics {
+    @MainActor
+    static func devReadyLayout(metrics: NotchMetrics, alerts: [DevReadyAlert],
+                               answerEnabled: Bool? = nil) -> NotchContentLayoutMetrics {
         let count = max(1, alerts.count)
         let headerHeight: CGFloat = count > 1 ? 18 : 0
         let listHeight = devReadyListHeight(rowCount: count)
@@ -168,8 +172,13 @@ enum NotchContentLayout {
         let titleLen = CGFloat(alerts.map(\.title.count).max() ?? 16)
         // Every row carries a ✕ (28pt + 8pt trailing). Without this allowance the
         // control eats title width instead of being given its own, and titles
-        // that used to fit start truncating.
-        let contentWidth = 300 + dismissControlWidth + max(labelLen, titleLen) * 2.5
+        // that used to fit start truncating. A replyable row carries a ↰ beside
+        // it at the same size — budgeted when *any* visible row can reply, since
+        // the rows share one window width.
+        let replyEnabled = answerEnabled ?? AppSettings.shared.agentReplyEnabled
+        let anyReplyable = alerts.contains { $0.canReplyFromNotch(replyEnabled: replyEnabled) }
+        let controls = dismissControlWidth + (anyReplyable ? replyControlWidth : 0)
+        let contentWidth = 300 + controls + max(labelLen, titleLen) * 2.5
         let width = min(
             metrics.maxExpandedRenderedWidth,
             max(metrics.notchWidth + 168, devReadyMinWidth, contentWidth)
@@ -265,7 +274,7 @@ enum NotchContentLayout {
         alerts: [DevReadyAlert],
         answerEnabled: Bool? = nil
     ) -> NotchContentLayoutMetrics {
-        let base = devReadyLayout(metrics: metrics, alerts: alerts)
+        let base = devReadyLayout(metrics: metrics, alerts: alerts, answerEnabled: answerEnabled)
         let extra = waitingExtraHeight(alerts: alerts, answerEnabled: answerEnabled)
         return NotchContentLayoutMetrics(
             size: CGSize(width: base.size.width, height: base.size.height + extra),

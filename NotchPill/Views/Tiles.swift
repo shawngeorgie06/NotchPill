@@ -497,6 +497,12 @@ struct DevReadyPeekRow: View {
         alert.canAnswerFromNotch(replyEnabled: AppSettings.shared.agentReplyEnabled)
     }
 
+    /// Separate from `canAnswer`: the quick-answer capsules need the agent's
+    /// keymap to match, the composer only needs a terminal to paste into.
+    private var canReply: Bool {
+        alert.canReplyFromNotch(replyEnabled: AppSettings.shared.agentReplyEnabled)
+    }
+
     private var accentColor: Color {
         alert.kind == .waiting ? NotchDesign.devReadyAmber : NotchDesign.devReadyGreen
     }
@@ -580,7 +586,7 @@ struct DevReadyPeekRow: View {
                                ? "Swipe left to dismiss, or double tap to open"
                                : "Double tap to open")
 
-            if canAnswer {
+            if canReply {
                 Button {
                     actions.beginReply(alert)
                 } label: {

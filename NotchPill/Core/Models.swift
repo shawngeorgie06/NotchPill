@@ -376,6 +376,69 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         return TerminalReplyInjector.canTarget(self)
     }
 
+    /// Apps that host a terminal, and so can receive a pasted reply.
+    ///
+    /// Membership is about the *window*, not the agent: whatever CLI is running
+    /// inside, a bracketed paste followed by Return reaches its prompt. This is
+    /// why it is a separate question from `supportsTypedAnswers`, which asks
+    /// whether a specific agent's *keymap* matches the buttons we would draw.
+    static let terminalHostBundleIds: Set<String> = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "com.mitchellh.ghostty",
+        "dev.warp.Warp-Stable",
+        "dev.warp.Warp",
+        "com.cmuxterm.app",
+        "net.kovidgoyal.kitty",
+        "io.alacritty",
+        "com.github.wez.wezterm",
+        "co.zeit.hyper",
+        "com.raphaelamorim.rio",
+    ]
+
+    /// Whether a **free-text** reply typed in the notch would reach this agent.
+    ///
+    /// Deliberately a looser test than `supportsTypedAnswers`. That one gates
+    /// the quick-answer capsules, which fire specific keys at a specific prompt
+    /// — send Claude Code's `y` at Codex's approval keymap and you press the
+    /// wrong thing. A free-text reply has no such problem: it is a bracketed
+    /// paste plus Return, which every terminal-hosted CLI routes to its input
+    /// box, Codex and OpenCode included.
+    ///
+    /// Conflating the two is why a finished Codex peek had no reply button at
+    /// all. The exclusion that belongs to the *buttons* silently took the
+    /// composer with it, so the one thing you actually wanted to do from a
+    /// finished notification — say the next thing — was unreachable.
+    ///
+    /// Still excluded, and for the original reasons:
+    /// - **Cursor** and the **ChatGPT/Codex desktop app**: GUI windows with no
+    ///   TUI. Keystrokes land in whatever view holds focus, which may be the
+    ///   editor rather than the chat box.
+    /// - Any signal that declared `delivery=none`.
+    var supportsTypedReply: Bool {
+        if deliverySpec?.lowercased() == "none" { return false }
+        if let bundleId = bundleId?.trimmingCharacters(in: .whitespaces),
+           Self.terminalHostBundleIds.contains(bundleId) {
+            return true
+        }
+        // No recognised terminal host. Fall back to what we know about the
+        // agent, which is what decided this before terminals were considered.
+        return supportsTypedAnswers
+    }
+
+    /// Whether the row should draw the reply (↰) control.
+    ///
+    /// Same shape as `canAnswerFromNotch` and for the same reason — the view and
+    /// the width budget must not disagree — but it never short-circuits on
+    /// `answersByDecision`: a verdict unblocks the hook without a window, while
+    /// a typed reply has nowhere to go without one.
+    @MainActor
+    func canReplyFromNotch(replyEnabled: Bool) -> Bool {
+        guard replyEnabled, supportsTypedReply else { return false }
+        guard DevReadyProvider.demotingStaleWaiting(self).kind == kind else { return false }
+        return TerminalReplyInjector.canTarget(self)
+    }
+
     /// The buttons to offer. Declared by the signal, else Claude Code's set.
     var answers: [AgentAnswer] {
         AgentAnswer.parse(answerSpec) ?? AgentAnswer.standardSet

@@ -418,6 +418,7 @@ struct DevReadyAlertTests {
     }
 
     @Test("dev ready layout is wider than a single collapsed chip")
+    @MainActor
     func width() {
         let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
                                    designExpandedWidth: 640, designExpandedHeight: 190,
@@ -429,6 +430,7 @@ struct DevReadyAlertTests {
     }
 
     @Test("dev ready layout grows with multiple agents")
+    @MainActor
     func layout() {
         let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
                                    designExpandedWidth: 640, designExpandedHeight: 190,
@@ -444,6 +446,7 @@ struct DevReadyAlertTests {
     }
 
     @Test("dev ready layout caps height for many agents")
+    @MainActor
     func cappedLayout() {
         let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
                                    designExpandedWidth: 640, designExpandedHeight: 190,
@@ -674,7 +677,8 @@ struct WaitingLayoutTests {
     @MainActor func tallerThanFinished() {
         let waiting = NotchContentLayout
             .waitingLayout(metrics: metrics, alerts: waitingAlerts, answerEnabled: true).size.height
-        let finished = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: waitingAlerts).size.height
+        let finished = NotchContentLayout
+            .devReadyLayout(metrics: metrics, alerts: waitingAlerts, answerEnabled: true).size.height
         #expect(waiting > finished)
     }
 
@@ -4147,5 +4151,79 @@ struct FollowUpSelfReferenceTests {
     func idsAreLabelled() {
         #expect(FollowUpReminder.isReminder(id: FollowUpReminder.reminderId(for: "x")))
         #expect(!FollowUpReminder.isReminder(id: "x"))
+    }
+}
+
+/// Reported by a user: a finished Codex peek had a ✕ and nothing else — there
+/// was no way to say the next thing without switching back to the terminal by
+/// hand. The cause was one predicate doing two jobs. `supportsTypedAnswers`
+/// exists to stop us firing Claude Code's `y`/`n` keys at an agent whose
+/// approval keymap is different, which is right — but the reply composer was
+/// gated on it too, and a free-text paste has no keymap to get wrong.
+@Suite("Replying from the notch")
+struct NotchReplyCapabilityTests {
+    private func alert(agent: String?, bundleId: String?,
+                       kind: AlertKind = .finished) -> DevReadyAlert {
+        DevReadyAlert(id: "1", title: "murmur-app", source: nil, agent: agent,
+                      bundleId: bundleId, kind: kind)
+    }
+
+    @Test("a finished Codex peek in a terminal can be replied to")
+    @MainActor
+    func codexInTerminalCanReply() {
+        let a = alert(agent: "codex", bundleId: "com.apple.Terminal")
+        #expect(a.canReplyFromNotch(replyEnabled: true))
+        // …but still no quick-answer capsules: those keys are Claude Code's.
+        #expect(!a.canAnswerFromNotch(replyEnabled: true))
+    }
+
+    @Test("every known terminal host can receive a reply")
+    @MainActor
+    func terminalHostsCanReply() {
+        for bundleId in DevReadyAlert.terminalHostBundleIds {
+            #expect(alert(agent: "codex", bundleId: bundleId)
+                .canReplyFromNotch(replyEnabled: true),
+                    "expected \(bundleId) to accept a reply")
+        }
+    }
+
+    // The original exclusions survive: these are GUI windows with no TUI, so a
+    // paste lands in whatever view holds focus rather than in the chat box.
+    @Test("GUI agent windows still refuse a typed reply")
+    @MainActor
+    func guiHostsRefuse() {
+        #expect(!alert(agent: "codex", bundleId: "com.openai.codex")
+            .canReplyFromNotch(replyEnabled: true))
+        #expect(!alert(agent: "cursor", bundleId: "com.todesktop.230313mzl4w4u92")
+            .canReplyFromNotch(replyEnabled: true))
+    }
+
+    @Test("a reply needs somewhere to go")
+    @MainActor
+    func noTargetNoReply() {
+        #expect(!alert(agent: "claude-code", bundleId: nil)
+            .canReplyFromNotch(replyEnabled: true))
+        #expect(!alert(agent: "claude-code", bundleId: "com.apple.Terminal")
+            .canReplyFromNotch(replyEnabled: false))
+    }
+
+    // The row draws the ↰ beside the ✕; if the width budget does not know that,
+    // the control is paid for out of the title, which truncates.
+    @Test("a replyable row is budgeted the width of its reply control")
+    @MainActor
+    func widthCoversReplyControl() {
+        let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                                   designExpandedWidth: 900, designExpandedHeight: 190,
+                                   scale: 1.0, topGap: 10)
+        let title = String(repeating: "n", count: 40)
+        let replyable = DevReadyAlert(id: "1", title: title, agent: "codex",
+                                      bundleId: "com.apple.Terminal", kind: .finished)
+        let plain = DevReadyAlert(id: "2", title: title, agent: "cursor",
+                                  bundleId: "com.todesktop.230313mzl4w4u92", kind: .finished)
+        let wide = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: [replyable],
+                                                     answerEnabled: true)
+        let narrow = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: [plain],
+                                                       answerEnabled: true)
+        #expect(wide.size.width - narrow.size.width == NotchContentLayout.replyControlWidth)
     }
 }
