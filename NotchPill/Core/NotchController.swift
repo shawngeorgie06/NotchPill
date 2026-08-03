@@ -1275,29 +1275,26 @@ final class NotchController {
     }
 
     private func focusSourceApp(bundleId: String) {
-        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first,
-           app.activate(options: [.activateIgnoringOtherApps, .activateAllWindows]) {
-            return
-        }
-        // A sandboxed or recently relaunched app may not be in the running-app
-        // list yet. Opening its registered bundle brings it forward (or starts
-        // it) instead of turning the tap into a silent no-op.
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return }
-        NSWorkspace.shared.openApplication(at: url, configuration: .init()) { _, _ in }
+        // Never the bare `activate()`: from an accessory app it returns true and
+        // does nothing. `AppActivator` escalates and checks the result.
+        AppActivator.activate(bundleId: bundleId)
     }
 
     private func focusSourceApp(alert: DevReadyAlert) {
-        for bundleId in alert.jumpTargetBundleIds {
-            if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first,
-               app.activate(options: [.activateIgnoringOtherApps, .activateAllWindows]) {
-                return
-            }
+        // Stop at the first target that is *observed* frontmost. Trusting
+        // `activate`'s return value here meant the first candidate always
+        // "succeeded", so the fallbacks below were unreachable and the tap
+        // silently did nothing.
+        // First *running* candidate wins. Trusting `activate`'s return value
+        // here meant the first candidate always "succeeded", so neither the
+        // remaining candidates nor the launch fallback were ever reached.
+        let running = alert.jumpTargetBundleIds.first {
+            NSRunningApplication.runningApplications(withBundleIdentifier: $0).first != nil
         }
-        // No target is running. Only open the first verified application; do
-        // not launch every fallback candidate in sequence.
-        if let bundleId = alert.jumpTargetBundleIds.first {
-            focusSourceApp(bundleId: bundleId)
-        }
+        // Nothing running: only open the first verified application, rather than
+        // launching every fallback candidate in sequence.
+        guard let target = running ?? alert.jumpTargetBundleIds.first else { return }
+        focusSourceApp(bundleId: target)
     }
 
     /// Renders a `ReplyError` into the composer's error line. The two call sites

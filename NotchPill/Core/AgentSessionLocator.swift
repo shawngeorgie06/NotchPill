@@ -84,9 +84,15 @@ enum AgentSessionLocator {
             return true
         }
 
-        guard let app = NSRunningApplication
-            .runningApplications(withBundleIdentifier: target).first else { return false }
-        return app.activate(options: [.activateAllWindows])
+        // The AppleScript paths above each `activate` the target themselves, so
+        // they are unaffected. This last-resort branch is the one that used to
+        // report success while leaving focus exactly where it was.
+        guard NSRunningApplication
+            .runningApplications(withBundleIdentifier: target).first != nil else { return false }
+        DispatchQueue.main.async { AppActivator.activate(bundleId: target) }
+        // "Asked, and the app is running." The escalation is asynchronous, so
+        // this cannot report the observed outcome; `AppActivator` logs it.
+        return true
     }
 
     /// Candidates in preference order. Kept independent of the process query

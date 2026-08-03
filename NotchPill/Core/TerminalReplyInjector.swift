@@ -97,7 +97,10 @@ enum TerminalReplyInjector {
         }
 
         let targetBundleId = bundleId ?? ""
-        app.activate()
+        // `app.activate()` alone reports success without moving focus when the
+        // caller is a background accessory app, which is what NotchPill always
+        // is. Every reply then hit the abort below and nothing was ever sent.
+        AppActivator.activate(bundleId: targetBundleId)
 
         let restoreClipboard = {
             guard delivery == .paste else { return }
