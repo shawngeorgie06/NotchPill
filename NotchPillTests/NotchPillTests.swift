@@ -4503,3 +4503,41 @@ struct CodexUsageFetcherTests {
         #expect(body?["client_id"] as? String == CodexUsageFetcher.clientId)
     }
 }
+
+/// Tap-to-jump for agents that live in an app rather than a terminal.
+///
+/// The locator places a session by finding a process whose arguments contain
+/// the session id. Desktop agents run one process for every conversation —
+/// `ChatGPT.app/Contents/Resources/codex … app-server` names no session — so
+/// there is nothing to walk up from and the tap did nothing at all. Only Cursor
+/// had a fallback.
+@Suite("Jumping to a desktop agent")
+struct AgentFallbackTargetTests {
+    private func session(agent: String) -> AgentSession {
+        AgentSession(id: "s1", agent: agent, project: "proj", state: .working,
+                     lastActivity: Date())
+    }
+
+    @Test("desktop Codex falls back to its app")
+    func codexHasAFallback() {
+        let ids = session(agent: "codex").fallbackAppBundleIds
+        #expect(ids.first == "com.openai.codex")
+        // The older bundle id stays as a second candidate.
+        #expect(ids.contains("com.openai.chat"))
+    }
+
+    @Test("Cursor keeps the fallback it already had")
+    func cursorUnchanged() {
+        #expect(session(agent: "cursor").fallbackAppBundleIds == ["com.todesktop.230313mzl4w4u92"])
+    }
+
+    // Guessing a terminal for a CLI agent would send you to the wrong window as
+    // often as the right one, so these deliberately offer nothing and let the
+    // process-tree walk do its job.
+    @Test("CLI agents offer no app to guess at")
+    func cliAgentsHaveNoFallback() {
+        #expect(session(agent: "claude-code").fallbackAppBundleIds.isEmpty)
+        #expect(session(agent: "opencode").fallbackAppBundleIds.isEmpty)
+        #expect(session(agent: "something-else").fallbackAppBundleIds.isEmpty)
+    }
+}

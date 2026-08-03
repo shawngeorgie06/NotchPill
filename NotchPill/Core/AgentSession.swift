@@ -211,6 +211,33 @@ struct AgentSession: Equatable, Identifiable {
         DevReadyAlert(title: "", agent: agent).knownAgent
     }
 
+    /// Where to jump when the session cannot be placed in the process tree.
+    ///
+    /// `AgentSessionLocator` finds a terminal agent by looking for a process
+    /// whose arguments contain the session id. That works for CLI agents —
+    /// `claude --resume <id>`, `codex` in a terminal — and not at all for
+    /// desktop apps, which run one process for every conversation:
+    ///
+    ///     /Applications/ChatGPT.app/Contents/Resources/codex … app-server
+    ///
+    /// No session id, so nothing to walk up from. Only Cursor had a fallback,
+    /// so tapping a desktop Codex row returned false and did nothing at all.
+    ///
+    /// The app is the honest ceiling here. Neither Cursor nor the ChatGPT
+    /// desktop app exposes a way to select one conversation, so this brings the
+    /// app forward and stops — better than the tap doing nothing, and it does
+    /// not pretend to more precision than exists.
+    var fallbackAppBundleIds: [String] {
+        switch knownAgent {
+        case .cursor: return ["com.todesktop.230313mzl4w4u92"]
+        case .codex: return ["com.openai.codex", "com.openai.chat"]
+        // Claude Code and OpenCode are CLIs. They have no app of their own to
+        // fall back to, and guessing a terminal would send you to the wrong
+        // window as often as the right one.
+        case .claudeCode, .openCode, nil: return []
+        }
+    }
+
     /// How the row reads on the right-hand side.
     var statusLabel: String {
         switch state {

@@ -924,7 +924,12 @@ final class NotchController {
     /// the pill either way: leaving it hovering over the window you just asked
     /// to see defeats the purpose.
     private func focusAgentSession(_ session: AgentSession) {
-        let fallback = session.knownAgent == .cursor ? "com.todesktop.230313mzl4w4u92" : nil
+        // Prefer an app that is actually running: a desktop agent lists more
+        // than one candidate bundle id, and activating one that is merely
+        // installed would launch a second copy rather than show you the work.
+        let fallback = session.fallbackAppBundleIds.first {
+            NSRunningApplication.runningApplications(withBundleIdentifier: $0).first != nil
+        } ?? session.fallbackAppBundleIds.first
         AgentSessionLocator.focus(sessionId: session.locatorId ?? session.id,
                                   fallbackBundleId: fallback,
                                   directory: session.directory)
