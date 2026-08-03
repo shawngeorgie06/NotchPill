@@ -54,7 +54,17 @@ actor AgentSessionScanner {
             let isCodex = url.path.contains("/.codex/")
             guard let mod = modified(url) else { return nil }
             let sessionId = url.deletingPathExtension().lastPathComponent
-            guard let project = projectName(for: url, isCodex: isCodex) else { return nil }
+            // Never drop a live session just because it could not be named.
+            //
+            // A Codex project name comes from `cwd` in the transcript's first
+            // record, and desktop Codex writes base instructions large enough
+            // to push that past the read window (see `firstValue`). This used to
+            // `guard … else { return nil }`, so a running agent disappeared from
+            // the list entirely — no row, no log line, nothing to notice. An
+            // unnamed row is a far smaller loss than a missing one, and the
+            // agent name is still true.
+            let project = projectName(for: url, isCodex: isCodex)
+                ?? Self.fallbackProjectName(isCodex: isCodex)
             // The desktop app starts an internal Codex reviewer for every
             // escalation. It is protocol machinery, not a conversation the
             // user is working with; it also writes more recently than the
@@ -447,11 +457,29 @@ actor AgentSessionScanner {
         return AgentTranscriptProvider.displayName(forPath: cwd)
     }
 
+    /// Shown when a session is live but unnamed. Deliberately the agent's own
+    /// name: it is the one thing still known to be true.
+    nonisolated static func fallbackProjectName(isCodex: Bool) -> String {
+        isCodex ? "Codex" : "Claude Code"
+    }
+
+    /// How much of a transcript's head is read looking for metadata.
+    ///
+    /// 256 KB, up from 32 KB. Desktop Codex's first record carries its full base
+    /// instructions and routinely runs past 32 KB, which put `cwd` out of reach
+    /// and — before the fallback above — made the whole session invisible. This
+    /// is a bounded head read on a handful of files, so the cost is a few
+    /// hundred KB per rediscovery, not a scan of the transcript.
+    static let metadataReadWindow = 262_144
+
     private func firstValue(in url: URL, key: String) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: 32_768),
-              let text = String(data: data, encoding: .utf8) else { return nil }
+        guard let data = try? handle.read(upToCount: Self.metadataReadWindow) else { return nil }
+        // A fixed-size read can land mid-codepoint, and strict UTF-8 decoding of
+        // that returns nil — losing the whole window over its last byte.
+        let text = String(data: data, encoding: .utf8)
+            ?? String(decoding: data, as: UTF8.self)
         return Self.firstValue(in: text, key: key)
     }
 

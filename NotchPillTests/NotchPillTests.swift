@@ -4227,3 +4227,122 @@ struct NotchReplyCapabilityTests {
         #expect(wide.size.width - narrow.size.width == NotchContentLayout.replyControlWidth)
     }
 }
+
+/// `NSRunningApplication.activate` returns `true` from a background accessory
+/// app while the frontmost application never changes — measured on macOS 26
+/// from an LSUIElement bundle. Two features were built on that return value and
+/// both failed silently: tap-to-jump returned early and did nothing, and every
+/// reply aborted with `.focusTimeout` after waiting for a handoff that was
+/// never going to happen.
+@Suite("Bringing another app forward")
+struct AppActivatorTests {
+    @Test("addresses the app by bundle id, not by name")
+    func scriptUsesBundleId() {
+        let script = AppActivator.activateScript(bundleId: "com.apple.Terminal")
+        #expect(script == "tell application id \"com.apple.Terminal\" to activate")
+        // A localised or duplicated app *name* resolves to the wrong app; an id
+        // cannot.
+        #expect(script?.contains("\"Terminal\" to activate") != true)
+    }
+
+    // Bundle ids arrive in hook payloads, so they are untrusted, and they end up
+    // inside an AppleScript string literal. Escaping quotes is not enough — a
+    // raw newline cannot live in an AppleScript string at all — so anything that
+    // is not a bundle identifier is refused outright rather than repaired.
+    @Test("a malformed bundle id is refused, not escaped")
+    func scriptRefusesInjection() {
+        #expect(AppActivator.activateScript(
+            bundleId: "com.evil\" to quit\ntell application \"Finder") == nil)
+        #expect(AppActivator.activateScript(bundleId: "com.evil\" to quit") == nil)
+        #expect(AppActivator.activateScript(bundleId: "with space") == nil)
+        #expect(AppActivator.activateScript(bundleId: "") == nil)
+        // Real ids still pass.
+        for id in ["com.apple.Terminal", "dev.warp.Warp-Stable", "com.local.notchpill"] {
+            #expect(AppActivator.isValidBundleId(id), "expected \(id) to be accepted")
+        }
+    }
+
+    @Test("an empty bundle id is refused rather than guessed at")
+    @MainActor
+    func emptyIsRefused() async {
+        let result = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+            AppActivator.activate(bundleId: "", frontmost: { "com.other" }) { c.resume(returning: $0) }
+        }
+        #expect(result == false)
+    }
+
+    @Test("an app already in front needs no activation at all")
+    @MainActor
+    func alreadyFrontIsInstant() async {
+        let result = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+            AppActivator.activate(bundleId: "com.apple.Terminal",
+                                  frontmost: { "com.apple.Terminal" }) { c.resume(returning: $0) }
+        }
+        #expect(result)
+    }
+
+    // The whole point: focus is decided by observing `frontmostApplication`,
+    // never by a return value. An app that never comes forward must report
+    // failure so the caller can escalate or tell the user — silently believing
+    // it worked is what shipped the two broken features.
+    @Test("an app that never comes forward reports failure")
+    @MainActor
+    func neverFrontmostFails() async {
+        let result = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+            AppActivator.activate(bundleId: "com.local.definitely-not-installed",
+                                  frontmost: { "com.cmuxterm.app" }) { c.resume(returning: $0) }
+        }
+        #expect(result == false)
+    }
+
+    @Test("every strategy is tried before giving up")
+    func escalationOrder() {
+        // Cheapest first: the Apple Event costs a round trip and can raise a
+        // one-time Automation prompt, so it is not tried until the free call
+        // has been shown not to work.
+        #expect(AppActivator.Strategy.allCases.map(\.rawValue)
+                == ["direct", "appleScript", "launchServices"])
+    }
+}
+
+/// Reported: Codex was running and the notch listed only Cursor.
+///
+/// A Codex row is named from `cwd` in the transcript's first record, and the
+/// scanner used to `guard let project = … else { return nil }` — so when that
+/// lookup failed the whole session was discarded. Desktop Codex writes its base
+/// instructions into that first record, large enough to push `cwd` past the
+/// read window, which made the agent most likely to hit it also the one that
+/// vanished.
+@Suite("Naming a session never hides it")
+struct SessionNamingTests {
+    @Test("an unnamed session still says which agent it is")
+    func fallbackNamesTheAgent() {
+        #expect(AgentSessionScanner.fallbackProjectName(isCodex: true) == "Codex")
+        #expect(AgentSessionScanner.fallbackProjectName(isCodex: false) == "Claude Code")
+    }
+
+    // The regression itself: cwd sitting beyond the old 32KB window.
+    @Test("cwd is found past the old read window")
+    func cwdSurvivesHugeFirstRecord() {
+        let filler = String(repeating: "x", count: 120_000)
+        let head = #"{"payload":{"instructions":"\#(filler)"}}"#
+        let second = #"{"payload":{"cwd":"/Users/me/murmur-app"}}"#
+        let text = head + "\n" + second
+        #expect(text.utf8.count > 32_768)
+        #expect(text.utf8.count < AgentSessionScanner.metadataReadWindow)
+        #expect(AgentSessionScanner.firstValue(in: text, key: "cwd") == "/Users/me/murmur-app")
+    }
+
+    @Test("the read window grew past desktop Codex's first record")
+    func windowIsLargeEnough() {
+        #expect(AgentSessionScanner.metadataReadWindow >= 262_144)
+    }
+
+    @Test("cwd is still recovered from a record cut off mid-field")
+    func partialRecordStillYieldsCwd() {
+        // A truncated first record: valid JSON never closes, so structured
+        // decoding fails and only the textual recovery can find cwd.
+        let text = #"{"payload":{"cwd":"/Users/me/proj","instructions":"blah blah"#
+        #expect(AgentSessionScanner.firstValue(in: text, key: "cwd") == "/Users/me/proj")
+    }
+}
