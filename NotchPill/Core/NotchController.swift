@@ -900,8 +900,11 @@ final class NotchController {
         }
 
         if !rendersLargeContent {
-            let overPill = isPointerOverPill(mouse)
-            window.ignoresMouseEvents = !overPill
+            // Hover is entirely screen-coordinate driven. The compact island
+            // therefore never needs to own a mouse event, and claiming its
+            // generous hover rect made browser tabs beneath the physical notch
+            // (and just beside it) impossible to activate.
+            window.ignoresMouseEvents = true
             return
         }
 
