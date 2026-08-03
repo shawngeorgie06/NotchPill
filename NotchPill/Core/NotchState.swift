@@ -74,6 +74,7 @@ final class NotchState: ObservableObject {
     @Published var openCodeUsage: OpenCodeUsage?
     /// Codex's own locally recorded current-window rate-limit signal.
     @Published var codexQuota: CodexQuota?
+    @Published var claudeQuota: ClaudeQuota?
     /// GitHub Actions runs for the repos those sessions are in.
     @Published var ciRuns: [CIRun] = []
     /// Active reply composer, non-nil while the user is typing a reply to a

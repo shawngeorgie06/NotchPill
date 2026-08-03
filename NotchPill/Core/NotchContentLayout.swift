@@ -475,6 +475,7 @@ enum NotchContentLayout {
                                                       count: sessions.count)
         case .openCodeUsage: return 56
         case .codexQuota: return 56
+        case .claudeQuota: return 56
         case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)
         case .recentAlerts(let alerts): return rowsHeight(header: 18, row: 22, count: alerts.count)
         // Everything else is a label over a value.
@@ -494,6 +495,7 @@ enum NotchContentLayout {
         case .agents: return 210
         case .openCodeUsage: return 124
         case .codexQuota: return 164
+        case .claudeQuota: return 176
         case .ci: return 150
         case .recentAlerts: return 170
         case .activeApp, .appSwitch: return 92

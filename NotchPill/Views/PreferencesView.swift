@@ -96,6 +96,7 @@ struct PreferencesView: View {
     private var enabledCardKinds: [(String, String)] {
         var out: [(String, String)] = []
         if settings.showExpandedAgents { out.append(("agents", "Live agents")) }
+        if settings.showClaudeUsage { out.append(("claudeQuota", "Claude usage limits")) }
         if settings.showExpandedCI { out.append(("ci", "CI status")) }
         if settings.showExpandedRecentActivity { out.append(("recentAlerts", "Recent activity")) }
         if settings.showExpandedMedia { out.append(("media", "Now playing")) }
@@ -147,6 +148,16 @@ struct PreferencesView: View {
             .pickerStyle(.menu)
             Divider().padding(.vertical, 2)
             Toggle("Live agents", isOn: $settings.showExpandedAgents)
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle("Claude usage limits", isOn: $settings.showClaudeUsage)
+                Text("Reads the token Claude Code saved in your Keychain, so macOS "
+                     + "will ask for permission the first time. Nothing is sent "
+                     + "anywhere except Anthropic, and it stops working if you sign "
+                     + "out of Claude Code.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Toggle("CI status", isOn: $settings.showExpandedCI)
             Toggle("Recent activity", isOn: $settings.showExpandedRecentActivity)
             Toggle("Now playing", isOn: $settings.showExpandedMedia)

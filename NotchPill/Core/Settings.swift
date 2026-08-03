@@ -95,6 +95,14 @@ final class AppSettings: ObservableObject {
     @Published var showExpandedAgents: Bool {
         didSet { defaults.set(showExpandedAgents, forKey: Keys.showExpandedAgents) }
     }
+    /// Claude usage card. **Off by default, deliberately.** Reading the token
+    /// means reading the login Keychain, which raises a macOS consent prompt —
+    /// an app that asks for that unbidden, for a card nobody requested, has
+    /// earned the suspicion it gets. Turning this on is the consent.
+    @Published var showClaudeUsage: Bool {
+        didSet { defaults.set(showClaudeUsage, forKey: Keys.showClaudeUsage) }
+    }
+
     @Published var showExpandedCI: Bool {
         didSet { defaults.set(showExpandedCI, forKey: Keys.showExpandedCI) }
     }
@@ -291,6 +299,7 @@ final class AppSettings: ObservableObject {
         static let showExpandedShelf = "showExpandedShelf"
         static let showExpandedAgents = "showExpandedAgents"
         static let showExpandedCI = "showExpandedCI"
+        static let showClaudeUsage = "showClaudeUsage"
         static let showExpandedRecentActivity = "showExpandedRecentActivity"
         static let pinnedActivityKind = "pinnedActivityKind"
         static let cardWeights = "cardWeights"
@@ -335,6 +344,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedShelf: false,
             Keys.showExpandedAgents: true,
             Keys.showExpandedCI: true,
+            Keys.showClaudeUsage: false,
             Keys.showExpandedRecentActivity: false,
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
@@ -371,6 +381,7 @@ final class AppSettings: ObservableObject {
         showExpandedShelf = defaults.bool(forKey: Keys.showExpandedShelf)
         showExpandedAgents = defaults.bool(forKey: Keys.showExpandedAgents)
         showExpandedCI = defaults.bool(forKey: Keys.showExpandedCI)
+        showClaudeUsage = defaults.bool(forKey: Keys.showClaudeUsage)
         showExpandedRecentActivity = defaults.bool(forKey: Keys.showExpandedRecentActivity)
         pinnedActivityKind = defaults.string(forKey: Keys.pinnedActivityKind) ?? ""
         cardWeights = (defaults.dictionary(forKey: Keys.cardWeights) as? [String: Double]) ?? [:]

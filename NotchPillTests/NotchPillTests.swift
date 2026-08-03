@@ -4541,3 +4541,126 @@ struct AgentFallbackTargetTests {
         #expect(session(agent: "something-else").fallbackAppBundleIds.isEmpty)
     }
 }
+
+/// Claude subscription usage from Anthropic, using the token Claude Code
+/// already stored at login. Fixtures are the real response shape, captured live
+/// from this machine.
+@Suite("Claude usage over OAuth")
+struct ClaudeUsageFetcherTests {
+    private func json(_ s: String) -> Data { Data(s.utf8) }
+
+    private let live = """
+    {"five_hour":{"utilization":51.0,"resets_at":"2026-08-03T23:59:59.849238+00:00"},
+     "seven_day":{"utilization":13.0,"resets_at":"2026-08-09T22:59:59.849262+00:00"},
+     "seven_day_opus":null,
+     "extra_usage":{"is_enabled":true,"monthly_limit":5000,"used_credits":1656.0},
+     "spend":{"used":{"amount_minor":1656,"currency":"USD","exponent":2},
+              "limit":{"amount_minor":5000,"currency":"USD","exponent":2},
+              "percent":33,"enabled":true}}
+    """
+
+    @Test("reads both windows from the real payload")
+    func parsesLiveResponse() {
+        let now = Date(timeIntervalSince1970: 1_785_785_000)
+        let quota = ClaudeUsageFetcher.quota(in: json(live), now: now)
+        #expect(quota?.sessionPercent == 51)
+        #expect(quota?.weeklyPercent == 13)
+        #expect(quota?.sessionResetsAt != nil)
+        #expect(quota?.weeklyResetsAt != nil)
+        #expect(quota?.updatedAt == now)
+        // Whichever window is closest to its limit is the one worth showing.
+        #expect(quota?.headlinePercent == 51)
+    }
+
+    // Money stays in minor units end to end. $16.56 has no exact binary
+    // representation, so a Double round trip is a wrong number on a screen
+    // about spending.
+    @Test("extra spend is rendered from minor units")
+    func spendLabel() {
+        let quota = ClaudeUsageFetcher.quota(in: json(live))
+        #expect(quota?.extraSpentMinor == 1656)
+        #expect(quota?.extraLimitMinor == 5000)
+        #expect(quota?.extraSpendLabel == "$16.56 of $50")
+    }
+
+    @Test("spend that is switched off is not shown")
+    func spendDisabled() {
+        let body = """
+        {"five_hour":{"utilization":10.0},
+         "spend":{"used":{"amount_minor":900,"currency":"USD"},"enabled":false}}
+        """
+        let quota = ClaudeUsageFetcher.quota(in: json(body))
+        #expect(quota?.sessionPercent == 10)
+        #expect(quota?.extraSpendLabel == nil)
+    }
+
+    @Test("a response with no windows yields nothing, not a zero")
+    func noWindowsIsNil() {
+        // "0% used" when we do not know is the same lie the Codex card told.
+        #expect(ClaudeUsageFetcher.quota(in: json(#"{"seven_day_opus":null}"#)) == nil)
+        #expect(ClaudeUsageFetcher.quota(in: json("nope")) == nil)
+    }
+
+    @Test("utilization is clamped to a percentage")
+    func clamps() {
+        for (raw, want) in [("-3", 0), ("130", 100), ("50.6", 51)] {
+            let body = #"{"five_hour":{"utilization":\#(raw)}}"#
+            #expect(ClaudeUsageFetcher.quota(in: json(body))?.sessionPercent == want)
+        }
+    }
+
+    // The Keychain blob stores epoch *milliseconds*. Read as seconds, every
+    // token dates to 1970 and looks expired, so usage would never be fetched.
+    @Test("expiry is read as milliseconds")
+    func credentialTimes() {
+        let body = """
+        {"claudeAiOauth":{"accessToken":"tok","refreshToken":"ref",
+          "expiresAt":1785792994905,"subscriptionType":"pro",
+          "scopes":["user:inference","user:profile"]}}
+        """
+        let creds = ClaudeUsageFetcher.credentials(in: json(body))
+        #expect(creds?.accessToken == "tok")
+        #expect(creds?.subscriptionType == "pro")
+        #expect(creds?.hasUsageScope == true)
+        let expected = Date(timeIntervalSince1970: 1_785_792_994.905)
+        #expect(abs((creds?.expiresAt ?? .distantPast).timeIntervalSince(expected)) < 0.01)
+        #expect(creds?.isExpired(now: Date(timeIntervalSince1970: 1_785_000_000)) == false)
+        #expect(creds?.isExpired(now: Date(timeIntervalSince1970: 1_786_000_000)) == true)
+    }
+
+    // A CLI token can hold only `user:inference` — enough to talk to the model,
+    // not to read the account. That 403 is worth telling apart from signed out.
+    @Test("a token without user:profile is recognised")
+    func missingScope() {
+        let body = #"{"claudeAiOauth":{"accessToken":"t","scopes":["user:inference"]}}"#
+        #expect(ClaudeUsageFetcher.credentials(in: json(body))?.hasUsageScope == false)
+    }
+
+    // Claude Code 2.1.x can store only MCP state under this item. That is
+    // signed-out for our purposes, not a broken Keychain.
+    @Test("an item holding only MCP state reads as no credentials")
+    func mcpOnlyItem() {
+        #expect(ClaudeUsageFetcher.credentials(in: json(#"{"mcpOAuth":{"a":1}}"#)) == nil)
+        #expect(ClaudeUsageFetcher.credentials(in: json(#"{"claudeAiOauth":{"accessToken":""}}"#)) == nil)
+    }
+
+    @Test("the request carries the oauth beta header")
+    func requestShape() {
+        let creds = ClaudeUsageFetcher.Credentials(accessToken: "tok", refreshToken: nil,
+                                                   expiresAt: nil, scopes: [],
+                                                   subscriptionType: nil)
+        let request = ClaudeUsageFetcher.usageRequest(creds)
+        #expect(request.url == ClaudeUsageFetcher.usageEndpoint)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok")
+        #expect(request.value(forHTTPHeaderField: "anthropic-beta") == "oauth-2025-04-20")
+    }
+
+    @Test("reset labels round to the unit that reads best")
+    func resetLabels() {
+        let now = Date(timeIntervalSince1970: 1_785_000_000)
+        #expect(ClaudeQuota.resetLabel(for: now.addingTimeInterval(1800), now: now) == "resets in 30m")
+        #expect(ClaudeQuota.resetLabel(for: now.addingTimeInterval(7200), now: now) == "resets in 2h")
+        #expect(ClaudeQuota.resetLabel(for: now.addingTimeInterval(3 * 86_400), now: now) == "resets in 3d")
+        #expect(ClaudeQuota.resetLabel(for: nil, now: now) == nil)
+    }
+}

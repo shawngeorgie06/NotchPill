@@ -886,6 +886,7 @@ enum ExpandedActivityBuilder {
         agentSessions: [AgentSession] = [],
         openCodeUsage: OpenCodeUsage? = nil,
         codexQuota: CodexQuota? = nil,
+        claudeQuota: ClaudeQuota? = nil,
         ciRuns: [CIRun] = [],
         recentAlerts: [DevReadyAlert] = [],
         showMedia: Bool,
@@ -907,6 +908,9 @@ enum ExpandedActivityBuilder {
         if showAgents, !agentSessions.isEmpty { items.append(.agents(agentSessions)) }
         if showAgents, let openCodeUsage { items.append(.openCodeUsage(openCodeUsage)) }
         if showAgents, let codexQuota { items.append(.codexQuota(codexQuota)) }
+        // Gated on its own setting, not `showAgents`: this one costs a
+        // Keychain prompt, so it appears only when explicitly asked for.
+        if let claudeQuota { items.append(.claudeQuota(claudeQuota)) }
         // Right after the agents: both answer "is the thing I started done yet?"
         if showCI, !ciRuns.isEmpty { items.append(.ci(ciRuns)) }
         if showRecentAlerts, !recentAlerts.isEmpty { items.append(.recentAlerts(recentAlerts)) }
@@ -974,6 +978,8 @@ struct ExpandedActivityCard: View {
                 openCodeUsageCard(usage)
             case .codexQuota(let quota):
                 codexQuotaCard(quota)
+            case .claudeQuota(let quota):
+                claudeQuotaCard(quota)
             case .ci(let runs):
                 ciCard(runs)
             case .recentAlerts(let alerts):
@@ -1082,6 +1088,70 @@ struct ExpandedActivityCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+
+    /// Claude's two limits side by side. Showing only the session window hides
+    /// the weekly one you actually run into on a heavy week; showing only the
+    /// weekly hides the one that stops you mid-afternoon.
+    private func claudeQuotaCard(_ quota: ClaudeQuota) -> some View {
+        VStack(alignment: .leading, spacing: s(3)) {
+            HStack(spacing: s(4)) {
+                Image(systemName: "asterisk")
+                    .font(.system(size: s(9)))
+                Text("Claude · limits")
+                    .font(font(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.45))
+
+            HStack(spacing: s(8)) {
+                quotaMeter(label: "session", percent: quota.sessionPercent)
+                quotaMeter(label: "week", percent: quota.weeklyPercent)
+            }
+
+            // The nearer reset is the one worth naming; the other is days away
+            // and would only crowd the line.
+            let reset = ClaudeQuota.resetLabel(
+                for: quota.sessionPercent >= quota.weeklyPercent
+                    ? quota.sessionResetsAt : quota.weeklyResetsAt)
+            Text([reset, quota.extraSpendLabel.map { "extra " + $0 }]
+                    .compactMap { $0 }.joined(separator: " · "))
+                .font(font(size: 10))
+                .foregroundStyle(.white.opacity(0.5))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A number and a bar. The bar exists because "51%" and "13%" read as
+    /// equally unremarkable in text, and the whole point of the card is to
+    /// notice when one of them is not.
+    private func quotaMeter(label: String, percent: Int) -> some View {
+        VStack(alignment: .leading, spacing: s(2)) {
+            Text("\(percent)%")
+                .font(font(size: 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule()
+                        .fill(quotaColor(percent))
+                        .frame(width: max(2, geo.size.width * CGFloat(percent) / 100))
+                }
+            }
+            .frame(height: s(4))
+            Text(label)
+                .font(font(size: 9))
+                .foregroundStyle(.white.opacity(0.45))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func quotaColor(_ percent: Int) -> Color {
+        // Amber before it bites, red once it is about to. A single colour meant
+        // the card looked identical at 5% and 95%.
+        if percent >= 90 { return NotchDesign.devReadyAmber.opacity(0.95) }
+        if percent >= 70 { return NotchDesign.devReadyAmber.opacity(0.75) }
+        return NotchDesign.devReadyGreen.opacity(0.8)
+    }
 
     /// GitHub Actions for the repos you have agents working in.
     private func ciCard(_ runs: [CIRun]) -> some View {

@@ -16,6 +16,7 @@ final class AgentSessionsProvider {
     var onUpdate: (([AgentSession]) -> Void)?
     var onOpenCodeUsageUpdate: ((OpenCodeUsage?) -> Void)?
     var onCodexQuotaUpdate: ((CodexQuota?) -> Void)?
+    var onClaudeQuotaUpdate: ((ClaudeQuota?) -> Void)?
 
     private let pollInterval: TimeInterval = 3
     private var timer: Timer?
@@ -23,10 +24,14 @@ final class AgentSessionsProvider {
     private var lastLabels: [String] = []
     private var lastOpenCodeUsage: OpenCodeUsage?
     private var lastCodexQuota: CodexQuota?
+    private var lastClaudeQuota: ClaudeQuota?
     private let scanner = AgentSessionScanner()
     /// Rate-limits itself to one request a minute, so this is safe to consult
     /// on every scan.
     private let codexUsage = CodexUsageService()
+    /// Only ever consulted when the setting is on: the first read raises a
+    /// Keychain consent prompt.
+    private let claudeUsage = ClaudeUsageService()
     private var scanning = false
     /// Invalidates results from scans started before the last stop.
     private var generation = 0
@@ -67,6 +72,7 @@ final class AgentSessionsProvider {
         onUpdate?([])
         onOpenCodeUsageUpdate?(nil)
         onCodexQuotaUpdate?(nil)
+        onClaudeQuotaUpdate?(nil)
     }
 
     /// Called when a peek says a session is blocked (or has stopped being).
@@ -92,6 +98,7 @@ final class AgentSessionsProvider {
         blockedSessions = blockedSessions.filter { now.timeIntervalSince($0.value) < 600 }
         let blocked = blockedSessions
         let issued = generation
+        let wantsClaude = AppSettings.shared.showClaudeUsage
         Task { [weak self] in
             guard let self else { return }
             let sessions = await scanner.sessions(now: now, blocked: blocked)
@@ -103,7 +110,12 @@ final class AgentSessionsProvider {
             // while the account was actually at 100% with a $298 balance.
             var quota = await self.codexUsage.quota(now: now)
             if quota == nil { quota = await scanner.codexQuota(now: now) }
-            await MainActor.run { self.publish(sessions, usage: usage, quota: quota, from: issued) }
+            // Never touched unless asked for — the first read prompts.
+            let claude = wantsClaude ? await self.claudeUsage.quota(now: now) : nil
+            await MainActor.run {
+                self.publish(sessions, usage: usage, quota: quota,
+                             claude: claude, from: issued)
+            }
         }
     }
 
@@ -142,7 +154,8 @@ final class AgentSessionsProvider {
         }
     }
 
-    private func publish(_ ordered: [AgentSession], usage: OpenCodeUsage?, quota: CodexQuota?, from issued: Int) {
+    private func publish(_ ordered: [AgentSession], usage: OpenCodeUsage?, quota: CodexQuota?,
+                         claude: ClaudeQuota?, from issued: Int) {
         guard issued == generation else { return }   // stopped mid-scan
         scanning = false
         if usage != lastOpenCodeUsage {
@@ -152,6 +165,10 @@ final class AgentSessionsProvider {
         if quota != lastCodexQuota {
             lastCodexQuota = quota
             onCodexQuotaUpdate?(quota)
+        }
+        if claude != lastClaudeQuota {
+            lastClaudeQuota = claude
+            onClaudeQuotaUpdate?(claude)
         }
         // An idle row is value-identical between polls, so suppressing the
         // publish froze its age on screen: "idle 4m" while ten minutes passed.

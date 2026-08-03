@@ -334,6 +334,9 @@ final class NotchController {
         agentSessions.onCodexQuotaUpdate = { [weak self] quota in
             self?.state.codexQuota = quota
         }
+        agentSessions.onClaudeQuotaUpdate = { [weak self] quota in
+            self?.state.claudeQuota = quota
+        }
         agentSessions.start()
         devReady.start()
 
