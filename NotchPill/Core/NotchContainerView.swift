@@ -27,11 +27,17 @@ final class NotchContainerView: NSView {
         self.metrics = metrics
         super.init(frame: .zero)
         wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
         registerForDraggedTypes([.fileURL])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
+
+    /// The space above the attached island is deliberately transparent so the
+    /// real hardware notch remains visible. NSView otherwise advertises itself
+    /// as opaque and composites that empty region as a black rectangle.
+    override var isOpaque: Bool { false }
 
     /// Visible pill bounds in local coordinates (bottom-left origin).
     var hotRect: CGRect {

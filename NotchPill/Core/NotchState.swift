@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import SwiftUI
 
 /// The single source of truth for the overlay. Every content change — media
 /// updates, frontmost-app switches, hover expand/collapse — is funnelled
@@ -8,6 +9,10 @@ import Combine
 /// double-render.
 @MainActor
 final class NotchState: ObservableObject {
+    static let hoverAnimationDuration: TimeInterval = 0.28
+    /// Notifications carry text and actions, so their entrance needs a touch
+    /// more time than a hover surface to read as a deliberate motion.
+    static let devReadyAnimationDuration: TimeInterval = 0.36
     /// Finished notifications are useful after their five-second peek fades,
     /// but a local history must not retain a raw permission payload or answer
     /// specification. The persisted form is intentionally presentation-only.
@@ -15,10 +20,17 @@ final class NotchState: ObservableObject {
     private static let notificationHistoryKey = "recentDevReadyNotificationHistory"
     // Hover expansion.
     @Published private(set) var isExpanded = false
+    /// Keeps the larger SwiftUI tree alive for the last fraction of a second
+    /// while it visibly shrinks. Unlike `isExpanded`, this must never keep the
+    /// large hit target alive: a vanished island should not hold hover open.
+    @Published private(set) var isCollapsing = false
     /// 0 is the physical notch; 1 is the fully expanded hover surface. Keeping
     /// this separate from `isExpanded` gives the renderer a real in-between
     /// state instead of swapping directly between two finished layouts.
     @Published private(set) var expansionProgress: CGFloat = 0
+    /// The selected card in the compact expanded deck. It lives in shared
+    /// state so mouse controls and global Arrow-key shortcuts stay in sync.
+    @Published var expandedDeckPage = 0
 
     // The resolved collapsed-notch activity (legacy primary chip for transitions).
     @Published private(set) var activity: NotchActivity = .idle
@@ -45,6 +57,12 @@ final class NotchState: ObservableObject {
     @Published private(set) var microphoneMuted: Bool? = nil
     /// Active dev-ready peeks (multiple agents can finish at once).
     @Published private(set) var devReadyAlerts: [DevReadyAlert] = []
+    /// A short-lived copy used only while a notification contracts back into
+    /// the notch. Removing the alert before rendering its exit previously made
+    /// SwiftUI replace it with the dashboard for one frame.
+    @Published private(set) var departingDevReadyAlerts: [DevReadyAlert] = []
+    @Published private(set) var isDismissingDevReady = false
+    @Published private(set) var devReadyPresentation: CGFloat = 0
     @Published private(set) var recentDevReadyAlerts: [DevReadyAlert] = []
     /// Agent conversations alive right now. Distinct from `devReadyAlerts`:
     /// those are events that fire once, this is a standing list.
@@ -69,6 +87,8 @@ final class NotchState: ObservableObject {
     private let debounceInterval: TimeInterval = 0.04
     private var resolveWorkItem: DispatchWorkItem?
     private var appSwitchRevertItem: DispatchWorkItem?
+    private var collapseWorkItem: DispatchWorkItem?
+    private var devReadyExitWorkItem: DispatchWorkItem?
 
     // Pending inputs the resolver reads when it fires.
     private var volumeHideItem: DispatchWorkItem?
@@ -87,10 +107,18 @@ final class NotchState: ObservableObject {
     // MARK: - Hover
 
     func setExpanded(_ expanded: Bool) {
-        guard isExpanded != expanded else { return }
         if expanded {
+            collapseWorkItem?.cancel()
+            collapseWorkItem = nil
+            isCollapsing = false
+            // Re-entering during the closing animation reverses it from its
+            // current visual state instead of snapping back open.
+            if isExpanded {
+                expansionProgress = 1
+                return
+            }
             // Publish the narrow notch first. The next main-loop turn lets the
-            // host window begin its resize before SwiftUI grows the surface.
+            // renderer install the compact geometry before it grows outward.
             expansionProgress = 0
             isExpanded = true
             DispatchQueue.main.async { [weak self] in
@@ -99,12 +127,41 @@ final class NotchState: ObservableObject {
             }
             return
         }
+        guard isExpanded, collapseWorkItem == nil else { return }
+        // Leave the expanded tree alive while its surface shrinks back into
+        // the notch. Removing it immediately was the source of the abrupt
+        // collapse users could see on hover exit.
+        //
+        // Crucially, `isExpanded` becomes false now. Hit testing keys off that
+        // flag, so the invisible large card cannot keep itself open while this
+        // short visual tail completes.
+        isExpanded = false
+        isCollapsing = true
         expansionProgress = 0
-        isExpanded = expanded
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.expansionProgress < 0.001 else { return }
+            self.collapseWorkItem = nil
+            self.isCollapsing = false
+        }
+        collapseWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.hoverAnimationDuration, execute: item)
+    }
+
+    func moveExpandedDeckPage(by offset: Int, count: Int) {
+        guard count > 0 else {
+            expandedDeckPage = 0
+            return
+        }
+        let current = min(max(0, expandedDeckPage), count - 1)
+        expandedDeckPage = (current + offset % count + count) % count
     }
 
     func enqueueDevReady(_ alerts: [DevReadyAlert]) {
         guard !alerts.isEmpty else { return }
+        let wasEmpty = devReadyAlerts.isEmpty
+        devReadyExitWorkItem?.cancel()
+        departingDevReadyAlerts = []
+        isDismissingDevReady = false
         for alert in alerts {
             if alert.kind == .finished {
                 recentDevReadyAlerts.removeAll { $0.id == alert.id }
@@ -126,6 +183,7 @@ final class NotchState: ObservableObject {
                 devReadyAlerts.append(alert)
             }
         }
+        if wasEmpty, !devReadyAlerts.isEmpty { animateDevReadyIn() }
     }
 
     func clearRecentDevReady() {
@@ -160,8 +218,13 @@ final class NotchState: ObservableObject {
     /// The replace key is `DevReadyAlert.isSameSession`: the agent's own
     /// `sessionId` when the hook supplies one, else `bundleId` + project title.
     func enqueueWaiting(_ alert: DevReadyAlert) {
+        let wasEmpty = devReadyAlerts.isEmpty
+        devReadyExitWorkItem?.cancel()
+        departingDevReadyAlerts = []
+        isDismissingDevReady = false
         devReadyAlerts.removeAll { $0.kind == .waiting && $0.isSameSession(as: alert) }
         devReadyAlerts.append(alert)
+        if wasEmpty { animateDevReadyIn() }
     }
 
     func removeDevReady(id: String) {
@@ -193,6 +256,44 @@ final class NotchState: ObservableObject {
     /// the user's way to say "I dealt with it, go away."
     func clearAllDevReady() {
         devReadyAlerts = []
+    }
+
+    /// The alerts that the overlay should draw. During an exit this is the
+    /// departing snapshot rather than the now-empty live collection.
+    var renderedDevReadyAlerts: [DevReadyAlert] {
+        devReadyAlerts.isEmpty ? departingDevReadyAlerts : devReadyAlerts
+    }
+
+    func beginDevReadyDismissal() {
+        guard !devReadyAlerts.isEmpty else { return }
+        devReadyExitWorkItem?.cancel()
+        departingDevReadyAlerts = devReadyAlerts
+        isDismissingDevReady = true
+        withAnimation(.timingCurve(0.22, 0.8, 0.2, 1,
+                                   duration: Self.devReadyAnimationDuration)) {
+            devReadyPresentation = 0
+        }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.isDismissingDevReady else { return }
+            self.departingDevReadyAlerts = []
+            self.isDismissingDevReady = false
+        }
+        devReadyExitWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.devReadyAnimationDuration, execute: item)
+    }
+
+    private func animateDevReadyIn() {
+        devReadyPresentation = 0
+        // One display turn first: the attached notch geometry has to be in the
+        // hierarchy before changing progress, or SwiftUI coalesces both states
+        // into a single full-sized notification.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            guard let self, !self.devReadyAlerts.isEmpty else { return }
+            withAnimation(.timingCurve(0.22, 0.8, 0.2, 1,
+                                       duration: Self.devReadyAnimationDuration)) {
+                self.devReadyPresentation = 1
+            }
+        }
     }
 
     /// Shows the volume HUD briefly after a keyboard adjustment.

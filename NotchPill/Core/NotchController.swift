@@ -76,6 +76,8 @@ final class NotchController {
     private var peekEscapeMonitors: [Any] = []
     /// Ages out on-screen waiting peeks; runs only while one is up.
     private var waitingStaleTimer: Timer?
+    private var motionTraceTimer: Timer?
+    private var motionTraceStartedAt: Date?
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -83,8 +85,8 @@ final class NotchController {
         replyHotKey.onPressed = { [weak self] in self?.openReplyForLatest() }
         replyHotKey.register()
         hotZoneKeys.onTogglePlayPause = { [weak self] in self?.nowPlaying.togglePlayPause() }
-        hotZoneKeys.onNext = { [weak self] in self?.nowPlaying.next() }
-        hotZoneKeys.onPrevious = { [weak self] in self?.nowPlaying.previous() }
+        hotZoneKeys.onNext = { [weak self] in self?.handleNextShortcut() }
+        hotZoneKeys.onPrevious = { [weak self] in self?.handlePreviousShortcut() }
         hotZoneKeys.onVolumeUp = { [weak self] in self?.volume.volumeUp() }
         hotZoneKeys.onVolumeDown = { [weak self] in self?.volume.volumeDown() }
         hotZoneKeys.pointerInHotZone = { [weak self] in
@@ -129,9 +131,10 @@ final class NotchController {
         // Resize window and refresh hover when expansion or chip content changes.
         state.$isExpanded
             .removeDuplicates()
-            .sink { [weak self] _ in
+            .sink { [weak self] expanded in
                 self?.applyWindowFrame(animated: true)
                 self?.container?.refreshTracking()
+                self?.beginMotionTrace(direction: expanded ? "expand" : "collapse")
             }
             .store(in: &cancellables)
 
@@ -401,8 +404,13 @@ final class NotchController {
         let root = makeRootView()
 
         if window == nil {
+            // The host is deliberately the full island size even at rest.
+            // It is transparent and click-through outside the visible notch,
+            // but its screen origin never changes during hover. Resizing this
+            // host from the small notch frame was the measured 105pt sideways
+            // jump users saw before the SwiftUI surface had a chance to grow.
             let initialFrame = geometry.windowFrame(
-                expanded: state.isExpanded,
+                expanded: true,
                 collapsedContentSize: collapsedContentSize(),
                 expandedContentSize: expandedContentSize()
             )
@@ -486,17 +494,18 @@ final class NotchController {
         let activities = NotchContentSnapshot.expandedActivities(
             state: state, shelf: shelf, timer: TimerStore.shared, settings: AppSettings.shared
         )
-        return NotchContentLayout.expandedSize(metrics: metrics, activities: activities)
+        return NotchContentLayout.expandedDeckSize(metrics: metrics, activities: activities)
     }
 
     private func devReadyContentSize() -> CGSize {
-        guard !state.devReadyAlerts.isEmpty else {
+        let alerts = state.renderedDevReadyAlerts
+        guard !alerts.isEmpty else {
             return CGSize(width: metrics.notchWidth + 96, height: metrics.notchHeight + metrics.topGap + 54)
         }
-        if state.devReadyAlerts.contains(where: { $0.kind == .waiting }) {
-            return NotchContentLayout.waitingLayout(metrics: metrics, alerts: state.devReadyAlerts).size
+        if alerts.contains(where: { $0.kind == .waiting }) {
+            return NotchContentLayout.waitingLayout(metrics: metrics, alerts: alerts).size
         }
-        return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: state.devReadyAlerts).size
+        return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: alerts).size
     }
 
     private func applyWindowFrame(animated: Bool) {
@@ -507,8 +516,11 @@ final class NotchController {
         // reopens the composer after the pill has already collapsed.
         let expanded = state.isExpanded || !state.devReadyAlerts.isEmpty
             || state.updateProgress != nil || state.replyCompose != nil
+        // Keep one stable, transparent coordinate space for both states. The
+        // visible background interpolates inside it; AppKit never moves the
+        // physical notch's origin underneath that animation.
         let frame = geometry.windowFrame(
-            expanded: expanded,
+            expanded: true,
             collapsedContentSize: collapsedContentSize(),
             expandedContentSize: expandedContentSize()
         )
@@ -518,7 +530,35 @@ final class NotchController {
         // underneath the path, which is why previous attempts looked like a
         // panel resize instead of an expansion from the hardware notch.
         window.setFrame(frame, display: true)
+        MotionTrace.record("set expanded=\(expanded) target=\(MotionTrace.rect(frame)) actual=\(MotionTrace.rect(window.frame))")
         updateMousePassthrough(pointerInHotZone: expandHoverScreenRect().contains(NSEvent.mouseLocation))
+    }
+
+    private func beginMotionTrace(direction: String) {
+        guard MotionTrace.enabled else { return }
+        motionTraceTimer?.invalidate()
+        motionTraceStartedAt = Date()
+        MotionTrace.record("begin \(direction)")
+        motionTraceTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] timer in
+            guard let self, let started = self.motionTraceStartedAt else {
+                timer.invalidate()
+                return
+            }
+            let elapsed = Date().timeIntervalSince(started)
+            guard elapsed <= 0.7 else {
+                MotionTrace.record("end")
+                timer.invalidate()
+                return
+            }
+            let windowFrame = self.window?.frame ?? .zero
+            let hostBounds = self.container?.bounds ?? .zero
+            let mouse = NSEvent.mouseLocation
+            MotionTrace.record(String(
+                format: "t=%.3f progress=%.2f window=%@ host=%@ mouse=(%.1f,%.1f)",
+                elapsed, self.state.expansionProgress,
+                MotionTrace.rect(windowFrame), MotionTrace.rect(hostBounds), mouse.x, mouse.y
+            ))
+        }
     }
 
     // MARK: - Hover logic
@@ -526,6 +566,12 @@ final class NotchController {
     private static let logHover = ProcessInfo.processInfo.environment["NOTCHPILL_LOG_HOVER"] == "1"
 
     private func handleHoverTick() {
+        // Screenshot/visual-inspection mode must remain open even though the
+        // pointer is not sitting in the normal hover zone.
+        if Diagnostics.forceExpand {
+            if !state.isExpanded { state.setExpanded(true) }
+            return
+        }
         let mouse = NSEvent.mouseLocation
         let overPill = isPointerOverPill(mouse)
 
@@ -558,6 +604,38 @@ final class NotchController {
         applyWindowFrame(animated: true)
         window?.orderFrontRegardless()
         window?.makeKey()
+    }
+
+    /// When the compact island is open, Left/Right navigate its pages. The
+    /// same keys retain their established media controls while the island is
+    /// collapsed, so a parked pointer never changes agent context by accident.
+    private func handleNextShortcut() {
+        guard state.isExpanded,
+              state.updateProgress == nil,
+              state.replyCompose == nil,
+              state.devReadyAlerts.isEmpty else {
+            nowPlaying.next()
+            return
+        }
+        state.moveExpandedDeckPage(by: 1, count: expandedDeckActivityCount())
+    }
+
+    private func handlePreviousShortcut() {
+        guard state.isExpanded,
+              state.updateProgress == nil,
+              state.replyCompose == nil,
+              state.devReadyAlerts.isEmpty else {
+            nowPlaying.previous()
+            return
+        }
+        state.moveExpandedDeckPage(by: -1, count: expandedDeckActivityCount())
+    }
+
+    private func expandedDeckActivityCount() -> Int {
+        NotchContentSnapshot.expandedActivities(
+            state: state, shelf: shelf, timer: TimerStore.shared,
+            settings: AppSettings.shared
+        ).count
     }
 
     /// True whenever the pill is drawn at its larger size — hovered, engaged,
@@ -1008,6 +1086,7 @@ final class NotchController {
         // gone, one on its own timer. This says which happened.
         LogStore.log("peek", id == nil ? "dismissed (fade timer)" : "dismissed (single)")
         if let id {
+            if state.devReadyAlerts.count == 1 { state.beginDevReadyDismissal() }
             state.removeDevReady(id: id)
             if !state.devReadyAlerts.isEmpty {
                 if state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
@@ -1025,6 +1104,9 @@ final class NotchController {
         guard !state.devReadyAlerts.isEmpty else { return }
         devReadyDismissItem?.cancel()
         devReadyDismissItem = nil
+        if !state.devReadyAlerts.contains(where: { $0.kind == .waiting }) {
+            state.beginDevReadyDismissal()
+        }
         state.clearFinishedDevReady()
 
         guard state.devReadyAlerts.isEmpty else {
@@ -1053,6 +1135,7 @@ final class NotchController {
         waitingDismissItems[id] = nil
         if state.replyCompose?.targetAlert.id == id { state.cancelReply() }
         LogStore.log("peek", "dismissed (single)")
+        if state.devReadyAlerts.count == 1 { state.beginDevReadyDismissal() }
         state.removeDevReady(id: id)
         guard state.devReadyAlerts.isEmpty else {
             if !state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
@@ -1069,6 +1152,7 @@ final class NotchController {
     /// including `.waiting`, which the auto-dismiss path deliberately spares.
     private func dismissAllDevReady() {
         guard !state.devReadyAlerts.isEmpty else { return }
+        state.beginDevReadyDismissal()
         state.clearAllDevReady()
         collapseAfterDevReady()
     }

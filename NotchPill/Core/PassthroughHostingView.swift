@@ -7,6 +7,17 @@ final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
     /// Screen-coordinate point test — return true only where pill controls should receive clicks.
     var acceptsScreenPoint: (NSPoint) -> Bool = { _ in false }
 
+    /// Preserve SwiftUI's transparent top region. Without this, AppKit can
+    /// flatten the whole hosting view to black, hiding the intentional notch
+    /// cutout and making the overlay look like a wide rectangular banner.
+    override var isOpaque: Bool { false }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
     /// Deliver the *first* click to the control under it.
     ///
     /// AppKit's default is to spend the first mouse-down on a non-active

@@ -424,9 +424,6 @@ struct DevReadyPeekListView: View {
     /// When set, the row list scrolls inside this height (used for multiple agents).
     var maxScrollHeight: CGFloat?
 
-    /// Drives a one-shot entrance glow so the peek catches your eye on arrival.
-    @State private var pulse = false
-
     private var orderedAlerts: [DevReadyAlert] { DevReadyAlert.focusOrdered(alerts) }
     private var focusedAlert: DevReadyAlert? { orderedAlerts.first }
     private var queuedCount: Int { max(0, orderedAlerts.count - 1) }
@@ -465,17 +462,6 @@ struct DevReadyPeekListView: View {
                 alertRows
             }
         }
-        .overlay {
-            // Green "ready" glow that flashes once on entrance, then fades out.
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(NotchDesign.devReadyGreen.opacity(pulse ? 0 : 0.22))
-                .blendMode(.plusLighter)
-                .allowsHitTesting(false)
-        }
-        .onAppear {
-            pulse = false
-            withAnimation(.easeOut(duration: 0.7)) { pulse = true }
-        }
     }
 
     private var alertRows: some View {
@@ -493,7 +479,7 @@ struct DevReadyPeekListView: View {
     }
 
     private func accent(for alert: DevReadyAlert) -> Color {
-        alert.kind == .waiting ? .orange : NotchDesign.devReadyGreen
+        alert.kind == .waiting ? NotchDesign.devReadyAmber : NotchDesign.devReadyGreen
     }
 }
 
@@ -503,7 +489,6 @@ struct DevReadyPeekRow: View {
     let actions: NotchActions
     var isFocused = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulse = false
     @State private var dismissOffset: CGFloat = 0
 
     /// Reply/answer affordances. The rule lives on the alert so the height
@@ -513,7 +498,7 @@ struct DevReadyPeekRow: View {
     }
 
     private var accentColor: Color {
-        alert.kind == .waiting ? .orange : NotchDesign.devReadyGreen
+        alert.kind == .waiting ? NotchDesign.devReadyAmber : NotchDesign.devReadyGreen
     }
 
     var body: some View {
@@ -529,16 +514,12 @@ struct DevReadyPeekRow: View {
         HStack(spacing: 6) {
             Button(action: handleTap) {
                 HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(accentColor.opacity(0.22))
-                            .frame(width: pulse ? 18 : 12, height: pulse ? 18 : 12)
-                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
-                                       value: pulse)
-                        Circle()
-                            .fill(accentColor)
-                            .frame(width: 8, height: 8)
-                    }
+                    // State is conveyed by one quiet dot only. The older
+                    // expanding halo and tinted row made a finished ping feel
+                    // visually heavier than the actual information warranted.
+                    Circle()
+                        .fill(accentColor)
+                        .frame(width: 8, height: 8)
                     .frame(width: 20)
 
                     sourceIcon
@@ -598,13 +579,6 @@ struct DevReadyPeekRow: View {
             .accessibilityHint(alert.kind == .finished
                                ? "Swipe left to dismiss, or double tap to open"
                                : "Double tap to open")
-            .background {
-                if isFocused {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(accentColor.opacity(0.08))
-                }
-            }
-            .onAppear { pulse = !reduceMotion }
 
             if canAnswer {
                 Button {
@@ -848,7 +822,7 @@ struct DevReadyPeekRow: View {
     private func agentBadge(_ text: String, prominent: Bool) -> some View {
         Text(text)
             .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(prominent ? NotchDesign.devReadyGreen : .white.opacity(0.55))
+            .foregroundStyle(prominent ? .white.opacity(0.72) : .white.opacity(0.55))
             // A badge must never wrap. "claude-code" split across two lines makes
             // the row taller than the height budgeted for it, and a single-alert
             // peek isn't in a ScrollView — the overflow clips against the window.
@@ -857,7 +831,7 @@ struct DevReadyPeekRow: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(
-                (prominent ? accentColor.opacity(0.14) : Color.white.opacity(0.08)),
+                Color.white.opacity(0.08),
                 in: Capsule()
             )
     }
@@ -1364,10 +1338,10 @@ struct ExpandedActivityCard: View {
                         .lineLimit(1)
                 }
                 if np.isPlaying { EqualizerBars(scale: readability) }
-                Image(systemName: "arrow.left.and.right")
-                    .font(.system(size: s(9), weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.28))
-                    .help("Swipe left/right for next/previous track")
+                HStack(spacing: s(2)) {
+                    mediaArrowButton("chevron.left", label: "Previous track", action: actions.previous)
+                    mediaArrowButton("chevron.right", label: "Next track", action: actions.next)
+                }
             }
             HStack(spacing: s(18)) {
                 transportButton("backward.fill", action: actions.previous)
@@ -1398,6 +1372,21 @@ struct ExpandedActivityCard: View {
         }
         .frame(width: s(32), height: s(32))
         .clipShape(RoundedRectangle(cornerRadius: s(6), style: .continuous))
+    }
+
+    /// Explicit chevrons make track navigation discoverable in the compact
+    /// deck. Their visual weight stays light, but the full 32pt square reacts
+    /// so the control is practical at the top edge of the display.
+    private func mediaArrowButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: s(11), weight: .bold))
+                .foregroundStyle(.white.opacity(0.72))
+                .frame(width: s(32), height: s(32))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(TransportButtonStyle())
+        .accessibilityLabel(label)
     }
 
     private func appCard(title: String, name: String) -> some View {

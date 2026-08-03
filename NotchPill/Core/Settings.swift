@@ -182,7 +182,7 @@ final class AppSettings: ObservableObject {
     /// A completed-agent ping should be glanceable, not a lingering banner.
     /// Waiting approval prompts deliberately use a separate, non-dismissing
     /// lifecycle so an agent cannot be stranded after this interval.
-    nonisolated static let defaultDevReadyDuration: Double = 5.0
+    nonisolated static let defaultDevReadyDuration: Double = 4.0
     nonisolated static let notchScaleRange: ClosedRange<Double> = 0.7...1.3
     /// `nonisolated` so the clamp can be tested without hopping to the main actor.
     nonisolated static func clampNotchScale(_ value: Double) -> Double {

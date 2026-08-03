@@ -99,6 +99,30 @@ enum NotchContentLayout {
         expandedLayout(metrics: metrics, activities: activities).size
     }
 
+    /// The attached island is a deck, not a dashboard. Every activity gets a
+    /// readable full-width page, so adding media, quota, CI, or another agent
+    /// never turns the notch into a wider or denser strip of tiny cards.
+    static func expandedDeckLayout(metrics: NotchMetrics, activities: [ExpandedActivity]) -> NotchContentLayoutMetrics {
+        let maxW = metrics.maxExpandedRenderedWidth
+        let preferredWidth = 360 * metrics.userScale
+        let width = min(maxW, max(metrics.notchWidth + 112, preferredWidth))
+        let cardHeight = min(expandedContentCeiling,
+                             max(56, expandedContentBaseHeight(activities)))
+        // Header / page controls live inside ExpandedView below the physical
+        // notch, rather than stealing vertical space from a card.
+        let deckChrome: CGFloat = activities.count > 1 ? 22 : 0
+        return NotchContentLayoutMetrics(
+            size: CGSize(width: width,
+                         height: metrics.notchHeight + metrics.topGap + cardHeight + deckChrome + 10),
+            readability: 1,
+            textScale: textCompensation(forUserScale: metrics.userScale)
+        )
+    }
+
+    static func expandedDeckSize(metrics: NotchMetrics, activities: [ExpandedActivity]) -> CGSize {
+        expandedDeckLayout(metrics: metrics, activities: activities).size
+    }
+
     // MARK: - Dev ready peek
 
     /// What one peek row actually renders (`DevReadyPeekRow.tapRow`): a ~16pt

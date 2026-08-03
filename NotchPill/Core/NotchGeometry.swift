@@ -20,7 +20,7 @@ struct NotchGeometry {
     // the collapsed size, so it is unchanged by this value.
     // Keep the hover panel compact: it needs room for the agent cards, but
     // should still read as an extension of the notch rather than a banner.
-    static let expandedScale: CGFloat = 0.62
+    static let expandedScale: CGFloat = 0.54
     /// Extra gap (render points) between the notch and the content, so the top
     /// row sits clear of the notch.
     static let contentTopGap: CGFloat = 10
