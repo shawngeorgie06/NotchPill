@@ -406,6 +406,9 @@ struct ExpandedView: View {
         .animation(.easeOut(duration: 0.14), value: state.frontmostApp)
         .animation(.easeOut(duration: 0.12), value: state.systemVolume)
         .animation(.easeOut(duration: 0.14), value: activities.map(\.id))
+        .onChange(of: activityKinds) { _, kinds in
+            state.reconcileExpandedDeck(kinds: kinds)
+        }
     }
 
     /// One readable card at a time. The old row made every card narrower as
@@ -425,8 +428,21 @@ struct ExpandedView: View {
                         expandToFill: true
                     )
                     .id(activities[clampedPage].id)
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+                    .transition(pageTransition)
                     .padding(.horizontal, 3)
+                }
+            }
+            .overlay {
+                if activities.count > 1 {
+                    HStack {
+                        Image(systemName: "chevron.left")
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.system(size: 9 * textScale, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.16))
+                    .padding(.horizontal, 1)
+                    .allowsHitTesting(false)
                 }
             }
             .contentShape(Rectangle())
@@ -441,6 +457,14 @@ struct ExpandedView: View {
 
             if activities.count > 1 {
                 HStack(spacing: 7) {
+                    Label(activityLabel(activities[clampedPage]), systemImage: activityIcon(activities[clampedPage]))
+                        .font(.system(size: 9 * textScale, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.48))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    Spacer(minLength: 0)
+
                     Button { selectPreviousPage() } label: {
                         Image(systemName: "chevron.left")
                             .frame(width: 26, height: 22)
@@ -452,7 +476,7 @@ struct ExpandedView: View {
 
                     HStack(spacing: 4) {
                         ForEach(Array(activities.indices), id: \.self) { index in
-                            Button { state.expandedDeckPage = index } label: {
+                            Button { state.selectExpandedDeckPage(index, kinds: activityKinds) } label: {
                                 Capsule()
                                     .fill(index == clampedPage ? Color.white.opacity(0.9) : .white.opacity(0.22))
                                     .frame(width: index == clampedPage ? 12 : 4, height: 4)
@@ -464,7 +488,7 @@ struct ExpandedView: View {
                         }
                     }
 
-                    Text("\(clampedPage + 1) of \(activities.count)")
+                    Text("← →")
                         .font(.system(size: 9 * textScale, weight: .medium))
                         .foregroundStyle(.white.opacity(0.4))
 
@@ -483,15 +507,26 @@ struct ExpandedView: View {
     }
 
     private var clampedPage: Int {
-        min(max(0, state.expandedDeckPage), max(0, activities.count - 1))
+        state.resolvedExpandedDeckPage(for: activityKinds)
+    }
+
+    private var activityKinds: [String] { activities.map(\.kind) }
+
+    private var pageTransition: AnyTransition {
+        let entering: Edge = state.expandedDeckDirection >= 0 ? .trailing : .leading
+        let leaving: Edge = state.expandedDeckDirection >= 0 ? .leading : .trailing
+        return .asymmetric(
+            insertion: .move(edge: entering).combined(with: .opacity),
+            removal: .move(edge: leaving).combined(with: .opacity)
+        )
     }
 
     private func selectPreviousPage() {
-        state.moveExpandedDeckPage(by: -1, count: activities.count)
+        state.moveExpandedDeckPage(by: -1, kinds: activityKinds)
     }
 
     private func selectNextPage() {
-        state.moveExpandedDeckPage(by: 1, count: activities.count)
+        state.moveExpandedDeckPage(by: 1, kinds: activityKinds)
     }
 
     private func activityLabel(_ activity: ExpandedActivity) -> String {
@@ -501,6 +536,22 @@ struct ExpandedView: View {
         case "openCodeUsage": return "OpenCode usage"
         case "recentAlerts": return "Recent notifications"
         default: return activity.kind.capitalized
+        }
+    }
+
+    private func activityIcon(_ activity: ExpandedActivity) -> String {
+        switch activity.kind {
+        case "agents": return "terminal"
+        case "codexQuota": return "chevron.left.forwardslash.chevron.right"
+        case "openCodeUsage": return "curlybraces"
+        case "ci": return "checkmark.seal"
+        case "recentAlerts": return "bell"
+        case "media": return "music.note"
+        case "calendar": return "calendar"
+        case "timer": return "timer"
+        case "battery": return "battery.100"
+        case "systemStats": return "gauge.with.dots.needle.50percent"
+        default: return "circle.grid.2x2"
         }
     }
 }

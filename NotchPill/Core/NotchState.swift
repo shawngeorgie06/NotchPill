@@ -28,9 +28,12 @@ final class NotchState: ObservableObject {
     /// this separate from `isExpanded` gives the renderer a real in-between
     /// state instead of swapping directly between two finished layouts.
     @Published private(set) var expansionProgress: CGFloat = 0
-    /// The selected card in the compact expanded deck. It lives in shared
-    /// state so mouse controls and global Arrow-key shortcuts stay in sync.
-    @Published var expandedDeckPage = 0
+    /// The selected deck card is stored by kind rather than by position. Live
+    /// data can insert a CI or media card ahead of it without taking someone
+    /// who was reading Codex usage to an unrelated page.
+    @Published private(set) var expandedDeckPage = 0
+    @Published private(set) var expandedDeckKind: String?
+    @Published private(set) var expandedDeckDirection = 1
 
     // The resolved collapsed-notch activity (legacy primary chip for transitions).
     @Published private(set) var activity: NotchActivity = .idle
@@ -147,13 +150,49 @@ final class NotchState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.hoverAnimationDuration, execute: item)
     }
 
-    func moveExpandedDeckPage(by offset: Int, count: Int) {
-        guard count > 0 else {
+    func resolvedExpandedDeckPage(for kinds: [String]) -> Int {
+        guard !kinds.isEmpty else { return 0 }
+        if let expandedDeckKind, let index = kinds.firstIndex(of: expandedDeckKind) {
+            return index
+        }
+        return min(max(0, expandedDeckPage), kinds.count - 1)
+    }
+
+    func selectExpandedDeckPage(_ index: Int, kinds: [String]) {
+        guard !kinds.isEmpty else {
             expandedDeckPage = 0
+            expandedDeckKind = nil
             return
         }
-        let current = min(max(0, expandedDeckPage), count - 1)
-        expandedDeckPage = (current + offset % count + count) % count
+        let current = resolvedExpandedDeckPage(for: kinds)
+        let target = min(max(0, index), kinds.count - 1)
+        expandedDeckDirection = target == current ? expandedDeckDirection : (target > current ? 1 : -1)
+        expandedDeckPage = target
+        expandedDeckKind = kinds[target]
+    }
+
+    func moveExpandedDeckPage(by offset: Int, kinds: [String]) {
+        guard !kinds.isEmpty else {
+            expandedDeckPage = 0
+            expandedDeckKind = nil
+            return
+        }
+        let current = resolvedExpandedDeckPage(for: kinds)
+        let target = (current + offset % kinds.count + kinds.count) % kinds.count
+        expandedDeckDirection = offset >= 0 ? 1 : -1
+        expandedDeckPage = target
+        expandedDeckKind = kinds[target]
+    }
+
+    func reconcileExpandedDeck(kinds: [String]) {
+        guard !kinds.isEmpty else {
+            expandedDeckPage = 0
+            expandedDeckKind = nil
+            return
+        }
+        let page = resolvedExpandedDeckPage(for: kinds)
+        expandedDeckPage = page
+        expandedDeckKind = kinds[page]
     }
 
     func enqueueDevReady(_ alerts: [DevReadyAlert]) {

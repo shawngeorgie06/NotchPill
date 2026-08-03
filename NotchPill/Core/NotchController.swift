@@ -597,6 +597,7 @@ final class NotchController {
         collapseWorkItem = nil
         expandWorkItem?.cancel()
         expandWorkItem = nil
+        prioritizeUrgentDeckCardOnOpen()
         pillEngaged = true
         state.setExpanded(true)
         hotZoneKeys.updatePointerInHotZone(true)
@@ -617,7 +618,7 @@ final class NotchController {
             nowPlaying.next()
             return
         }
-        state.moveExpandedDeckPage(by: 1, count: expandedDeckActivityCount())
+        state.moveExpandedDeckPage(by: 1, kinds: expandedDeckActivityKinds())
     }
 
     private func handlePreviousShortcut() {
@@ -628,14 +629,34 @@ final class NotchController {
             nowPlaying.previous()
             return
         }
-        state.moveExpandedDeckPage(by: -1, count: expandedDeckActivityCount())
+        state.moveExpandedDeckPage(by: -1, kinds: expandedDeckActivityKinds())
     }
 
-    private func expandedDeckActivityCount() -> Int {
+    private func expandedDeckActivityKinds() -> [String] {
         NotchContentSnapshot.expandedActivities(
             state: state, shelf: shelf, timer: TimerStore.shared,
             settings: AppSettings.shared
-        ).count
+        ).map(\.kind)
+    }
+
+    /// Priority only applies at the beginning of an open. Once the person has
+    /// navigated, `expandedDeckKind` preserves their choice through all live
+    /// updates. A failed build is the one deck status worth surfacing first;
+    /// waiting agents are already first in the activity order.
+    private func prioritizeUrgentDeckCardOnOpen() {
+        guard !state.isExpanded,
+              state.devReadyAlerts.isEmpty,
+              state.updateProgress == nil,
+              state.replyCompose == nil else { return }
+        let activities = NotchContentSnapshot.expandedActivities(
+            state: state, shelf: shelf, timer: TimerStore.shared,
+            settings: AppSettings.shared
+        )
+        guard let urgentIndex = activities.firstIndex(where: { activity in
+            guard case .ci(let runs) = activity else { return false }
+            return runs.contains { $0.state == .failed }
+        }) else { return }
+        state.selectExpandedDeckPage(urgentIndex, kinds: activities.map(\.kind))
     }
 
     /// True whenever the pill is drawn at its larger size — hovered, engaged,
@@ -711,6 +732,7 @@ final class NotchController {
         expandWorkItem = nil
         guard !isPointerInBrowserFlank(NSEvent.mouseLocation) else { return }
         if Self.logHover { print("HOVER expand @\(String(format: "%.3f", Date().timeIntervalSince1970))") }
+        prioritizeUrgentDeckCardOnOpen()
         state.setExpanded(true)
         hotZoneKeys.updatePointerInHotZone(true)
         hotZoneKeys.ensureShortcutCaptureReady()
