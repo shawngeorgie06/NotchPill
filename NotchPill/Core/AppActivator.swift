@@ -76,8 +76,19 @@ enum AppActivator {
         },
         completion: ((Bool) -> Void)? = nil
     ) {
-        guard !bundleId.isEmpty else { completion?(false); return }
-        if frontmost() == bundleId { completion?(true); return }
+        guard !bundleId.isEmpty else {
+            LogStore.log("focus", "no target to jump to")
+            completion?(false)
+            return
+        }
+        // Logged rather than returned silently. "Tap to jump does nothing" and
+        // "you are already looking at it" are indistinguishable on screen, and
+        // without this line they were indistinguishable in the log too.
+        if frontmost() == bundleId {
+            LogStore.log("focus", "\(bundleId) already frontmost — nothing to do")
+            completion?(true)
+            return
+        }
         attempt(Strategy.allCases[...], bundleId: bundleId,
                 frontmost: frontmost, completion: completion)
     }

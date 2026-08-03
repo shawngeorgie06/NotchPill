@@ -46,7 +46,20 @@ enum AgentSessionLocator {
             bundleId(walkingUpFrom: entry.pid, in: table).map { (entry, $0) }
         }.first
         let target: String? = located?.1 ?? fallbackBundleId
-        guard let target, !target.isEmpty else { return false }
+        guard let target, !target.isEmpty else {
+            // Silent until now, and it is the likeliest outcome: a terminal
+            // agent writes no bundle id anywhere, so it can only be placed by
+            // walking the process tree from a process whose command line
+            // mentions the session id. When that fails there is no fallback
+            // except for Cursor, and the tap did nothing with nothing to show
+            // for it.
+            LogStore.log("focus", "no host found for session "
+                         + "\(sessionId ?? "-") (candidates=\(candidateEntries.count), "
+                         + "fallback=\(fallbackBundleId ?? "none"))")
+            return false
+        }
+        LogStore.log("focus", "session \(sessionId ?? "-") hosted by \(target) "
+                     + "(\(located == nil ? "fallback" : "process tree"))")
 
         // Inside tmux the terminal has one tab and every pane shares it, so
         // focusing the tab alone leaves you on whichever pane was last active.
@@ -192,6 +205,14 @@ enum AgentSessionLocator {
     /// Exposed for a pure test. cmux is matched on working directory because
     /// its scripting dictionary exposes one and no TTY.
     ///
+    /// The leading `activate` is not decoration. `focus` selects a tab *within*
+    /// cmux and does nothing about which app is in front, so without it this
+    /// script matched, focused, and returned true while cmux stayed in the
+    /// background — and because the caller treats true as success, it returned
+    /// before reaching the activation fallback. Tapping a live-agent row did
+    /// nothing visible at all. Terminal's and iTerm's scripts have always
+    /// activated first; this one was the odd one out.
+    ///
     /// Two tabs open on the same directory are indistinguishable this way, so
     /// the script counts matches first and focuses nothing unless there is
     /// exactly one. Landing you in the wrong tab is worse than landing you in
@@ -201,6 +222,7 @@ enum AgentSessionLocator {
         let escaped = escapedAppleScriptString(directory)
         return """
         tell application "cmux"
+            activate
             set matches to {}
             repeat with cmuxWindow in windows
                 repeat with cmuxTab in tabs of cmuxWindow

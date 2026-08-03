@@ -1971,6 +1971,22 @@ struct LocatorChoiceTests {
         #expect(script.contains("set selected tab of terminalWindow to terminalTab"))
     }
 
+    // Reported: tapping a live-agent row did nothing. `focus` selects a tab
+    // inside cmux and says nothing about which app is frontmost, so the script
+    // matched, focused, returned true — and the caller, treating true as
+    // success, returned before the activation fallback. cmux stayed behind
+    // whatever you were looking at. Terminal and iTerm always activated first.
+    @Test("the cmux script brings cmux to the front, not just the tab")
+    func cmuxScriptActivates() {
+        let script = AgentSessionLocator.cmuxFocusScript(directory: "/Users/me/proj")
+        #expect(script.contains("activate"))
+        // Before the match loop: focusing a tab in a background app is the bug.
+        let activate = script.range(of: "activate")
+        let loop = script.range(of: "repeat with cmuxWindow")
+        #expect(activate != nil && loop != nil)
+        if let activate, let loop { #expect(activate.lowerBound < loop.lowerBound) }
+    }
+
     @Test("cmux script matches on the working directory it was given")
     func cmuxScriptUsesDirectory() {
         let script = AgentSessionLocator.cmuxFocusScript(directory: "/Users/me/proj")
