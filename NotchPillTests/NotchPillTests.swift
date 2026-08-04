@@ -3629,8 +3629,16 @@ struct AgentSessionAgeingTests {
 
     @Test("A recently quiet session is still shown")
     func recentIdleStays() {
-        let fresh = session("a", .idle(since: now.addingTimeInterval(-60)))
+        // The idle window is 30s, so this is deliberately well inside it —
+        // 60s used to qualify when the window was five minutes.
+        let fresh = session("a", .idle(since: now.addingTimeInterval(-10)))
         #expect(AgentSession.current([fresh], now: now).count == 1)
+    }
+
+    @Test("A session quiet for a minute is gone under the 30s window")
+    func minuteOldIdleIsGone() {
+        let stale = session("a", .idle(since: now.addingTimeInterval(-60)))
+        #expect(AgentSession.current([stale], now: now).isEmpty)
     }
 
     @Test("A long build is not idle and never ages out")
@@ -5095,5 +5103,77 @@ struct TerminalHostFallbackTests {
                 == "com.apple.finder")
         // A different agent, not running anywhere, must not borrow that answer.
         #expect(AgentSessionLocator.soleTerminalHost(agent: "codex", in: table) == nil)
+    }
+}
+
+@Suite("The Claude card survives a launch into a rate limit")
+struct ClaudeQuotaCacheTests {
+    private func store() -> UserDefaults {
+        let suite = UserDefaults(suiteName: "notchpill.tests.\(UUID().uuidString)")!
+        return suite
+    }
+
+    /// A launch that opens into a 429 had nothing to show, and the card simply
+    /// was not there — which read as the feature having been removed.
+    @Test func servesTheLastGoodAnswerAfterRelaunch() async throws {
+        let defaults = store()
+        var calls = 0
+        let ok = ClaudeUsageService(
+            transport: { request in
+                calls += 1
+                let body = #"{"five_hour":{"utilization":58},"seven_day":{"utilization":14}}"#
+                return (Data(body.utf8),
+                        HTTPURLResponse(url: request.url!, statusCode: 200,
+                                        httpVersion: nil, headerFields: nil)!)
+            },
+            readKeychain: {
+                Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8)
+            },
+            store: defaults)
+        let start = Date()
+        let first = try #require(await ok.quota(now: start))
+        #expect(first.sessionPercent == 58)
+        #expect(calls == 1)
+
+        // A new service, as though the app had been relaunched, that can only
+        // get a 429 — the situation measured against the live API.
+        let limited = ClaudeUsageService(
+            transport: { request in
+                (Data(), HTTPURLResponse(url: request.url!, statusCode: 429,
+                                         httpVersion: nil, headerFields: nil)!)
+            },
+            readKeychain: {
+                Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8)
+            },
+            store: defaults)
+        let restored = try #require(await limited.quota(now: start.addingTimeInterval(60)))
+        #expect(restored.sessionPercent == 58)
+        #expect(restored.weeklyPercent == 14)
+    }
+
+    /// Old enough and it stops being an answer. Showing a number from
+    /// yesterday as though it were current is worse than showing none.
+    @Test func doesNotServeAnAnswerThatIsTooOld() async throws {
+        let defaults = store()
+        defaults.set(["session": 58, "weekly": 14,
+                      "at": Date().timeIntervalSince1970 - 7200],
+                     forKey: ClaudeUsageService.cacheKey)
+        let limited = ClaudeUsageService(
+            transport: { request in
+                (Data(), HTTPURLResponse(url: request.url!, statusCode: 429,
+                                         httpVersion: nil, headerFields: nil)!)
+            },
+            readKeychain: {
+                Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8)
+            },
+            store: defaults)
+        #expect(await limited.quota(now: Date()) == nil)
+    }
+
+    @Test func ignoresAnUnreadableCache() {
+        let defaults = store()
+        defaults.set(["session": "not a number"], forKey: ClaudeUsageService.cacheKey)
+        #expect(ClaudeUsageService.restore(from: defaults) == nil)
+        #expect(ClaudeUsageService.restore(from: store()) == nil)
     }
 }

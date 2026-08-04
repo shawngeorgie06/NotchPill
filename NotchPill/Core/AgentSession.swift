@@ -350,8 +350,14 @@ struct AgentSession: Equatable, Identifiable {
     ///
     /// So the long window is spent only where it was earned: on sessions that
     /// are working or blocked on you. A session that is merely quiet is history
-    /// after five minutes, and comes straight back the moment it writes again.
-    static let idleWindow: TimeInterval = 300
+    /// almost immediately, and comes straight back the moment it writes again.
+    ///
+    /// Thirty seconds by request. Note what this does *not* change: a session
+    /// still counts as working for `workingWindow`, so a row leaves about
+    /// three quarters of a minute after the last write rather than exactly
+    /// thirty seconds. Making the two equal would drop an agent in the middle
+    /// of a long build, which is the failure `workingWindow` exists to prevent.
+    static let idleWindow: TimeInterval = 30
 
     /// Drops quiet sessions that have stopped being news. Working and waiting
     /// sessions are kept whatever their age — a long build and an unanswered

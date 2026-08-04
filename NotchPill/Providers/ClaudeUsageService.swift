@@ -9,11 +9,25 @@ import Security
 /// the user has switched the card on. An app that asks for Keychain access for
 /// a card you never requested has earned the suspicion that gets it.
 actor ClaudeUsageService {
-    static let refreshInterval: TimeInterval = 60
+    /// Five minutes, not one.
+    ///
+    /// A minute was measured earning a sustained 429 from Anthropic: the app
+    /// asked, was refused, backed off, asked again, and the card stayed blank
+    /// because a fresh launch has no cached number to fall back on. Usage
+    /// percentages do not move fast enough to be worth a per-minute request.
+    static let refreshInterval: TimeInterval = 300
     static let staleAfter: TimeInterval = 3600
 
     private var cached: ClaudeQuota?
     private var lastFetch = Date.distantPast
+    /// Where the last good answer is kept between launches.
+    ///
+    /// Without this, a launch that opens into a rate limit has nothing to show
+    /// and the card simply is not there — which is exactly how it looked when
+    /// Anthropic started refusing: the feature appeared to have been removed.
+    /// A number from twenty minutes ago is far better than no card at all,
+    /// provided it is not passed off as current.
+    static let cacheKey = "claudeUsageCache"
     /// Set once the Keychain has refused or the token cannot read usage.
     /// Retrying either on a timer would re-prompt, or hammer a 403 that only a
     /// re-login can fix.
@@ -32,9 +46,32 @@ actor ClaudeUsageService {
     init(transport: @escaping (URLRequest) async throws -> (Data, URLResponse) = {
              try await URLSession.shared.data(for: $0)
          },
-         readKeychain: @escaping () -> Data? = ClaudeUsageService.keychainBlob) {
+         readKeychain: @escaping () -> Data? = ClaudeUsageService.keychainBlob,
+         store: UserDefaults? = .standard) {
         self.transport = transport
         self.readKeychain = readKeychain
+        self.store = store
+        self.cached = Self.restore(from: store)
+    }
+
+    private let store: UserDefaults?
+
+    /// Percentages and the time they were taken. Nothing identifying, and no
+    /// token: this is the same handful of numbers already on screen.
+    static func restore(from store: UserDefaults?) -> ClaudeQuota? {
+        guard let raw = store?.dictionary(forKey: cacheKey),
+              let session = raw["session"] as? Int,
+              let weekly = raw["weekly"] as? Int,
+              let stamp = raw["at"] as? Double else { return nil }
+        return ClaudeQuota(sessionPercent: session, weeklyPercent: weekly,
+                           updatedAt: Date(timeIntervalSince1970: stamp))
+    }
+
+    private func persist(_ quota: ClaudeQuota) {
+        store?.set(["session": quota.sessionPercent,
+                    "weekly": quota.weeklyPercent,
+                    "at": (quota.updatedAt ?? Date()).timeIntervalSince1970],
+                   forKey: Self.cacheKey)
     }
 
     /// Reads the credential Claude Code stored. Returns nil when the item is
@@ -79,6 +116,7 @@ actor ClaudeUsageService {
                              + "\(fresh.weeklyPercent)% week")
             }
             cached = fresh
+            persist(fresh)
             return fresh
         } catch let error as ClaudeUsageFetcher.FetchError {
             switch error {
