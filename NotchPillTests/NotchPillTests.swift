@@ -5177,3 +5177,44 @@ struct ClaudeQuotaCacheTests {
         #expect(ClaudeUsageService.restore(from: store()) == nil)
     }
 }
+
+@Suite("Usage resets read as times, not durations")
+struct QuotaResetClockTests {
+    private let calendar = Calendar(identifier: .gregorian)
+    private let locale = Locale(identifier: "en_US_POSIX")
+    private let now = Date(timeIntervalSince1970: 1_785_800_000)   // 2026-08-03
+
+    /// "resets in 5d" tells you how long you have waited, not when you can
+    /// work again — and it was the only reset on the card, so the session
+    /// window's reset was invisible whenever weekly happened to be higher.
+    @Test func todayShowsAClockTime() throws {
+        let later = now.addingTimeInterval(3 * 3600)
+        let text = try #require(ClaudeQuota.resetClock(for: later, now: now,
+                                                       calendar: calendar, locale: locale))
+        // A time of day, not a duration.
+        #expect(text.contains(":"))
+        #expect(!text.contains("in "))
+    }
+
+    @Test func laterThisWeekNamesTheDay() throws {
+        let later = now.addingTimeInterval(3 * 86_400)
+        let text = try #require(ClaudeQuota.resetClock(for: later, now: now,
+                                                       calendar: calendar, locale: locale))
+        #expect(text.contains(":"))
+        // Includes a weekday, so "Thu 2:40 AM" cannot be misread as today.
+        #expect(text.rangeOfCharacter(from: .letters) != nil)
+    }
+
+    @Test func furtherOutGivesADate() throws {
+        let later = now.addingTimeInterval(20 * 86_400)
+        let text = try #require(ClaudeQuota.resetClock(for: later, now: now,
+                                                       calendar: calendar, locale: locale))
+        #expect(text.rangeOfCharacter(from: .decimalDigits) != nil)
+        #expect(!text.contains(":"))
+    }
+
+    @Test func nothingToShowWithoutAResetTime() {
+        #expect(ClaudeQuota.resetClock(for: nil, now: now,
+                                       calendar: calendar, locale: locale) == nil)
+    }
+}

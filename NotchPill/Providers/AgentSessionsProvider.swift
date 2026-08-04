@@ -188,10 +188,20 @@ final class AgentSessionsProvider {
             onCodexQuotaUpdate?(quota)
         }
         if claude != lastClaudeQuota {
+            // Logged at the point the card appears or disappears, which is the
+            // question actually being asked — "is it on screen?" — rather than
+            // whether some fetch succeeded. Every previous attempt to answer
+            // this from fetch-level logging has been ambiguous.
+            LogStore.log("claude", claude.map {
+                "card shown: \($0.sessionPercent)% session, \($0.weeklyPercent)% week"
+            } ?? "card hidden (no quota)")
             lastClaudeQuota = claude
             onClaudeQuotaUpdate?(claude)
         }
         if cursor != lastCursorQuota {
+            LogStore.log("cursor", cursor.map {
+                "card shown: \($0.percentUsed)% of \($0.limit)"
+            } ?? "card hidden (no quota)")
             lastCursorQuota = cursor
             onCursorQuotaUpdate?(cursor)
         }

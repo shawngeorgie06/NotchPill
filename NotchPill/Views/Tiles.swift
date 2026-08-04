@@ -1106,21 +1106,23 @@ struct ExpandedActivityCard: View {
             }
             .foregroundStyle(.white.opacity(0.45))
 
+            // Each window carries its own reset. Naming only the nearer one
+            // hid the session reset whenever the weekly figure happened to be
+            // a few points higher — and the session window is the one that
+            // stops you this afternoon.
             HStack(spacing: s(8)) {
-                quotaMeter(label: "session", percent: quota.sessionPercent)
-                quotaMeter(label: "week", percent: quota.weeklyPercent)
+                quotaMeter(label: "session", percent: quota.sessionPercent,
+                           footnote: ClaudeQuota.resetClock(for: quota.sessionResetsAt))
+                quotaMeter(label: "week", percent: quota.weeklyPercent,
+                           footnote: ClaudeQuota.resetClock(for: quota.weeklyResetsAt))
             }
 
-            // The nearer reset is the one worth naming; the other is days away
-            // and would only crowd the line.
-            let reset = ClaudeQuota.resetLabel(
-                for: quota.sessionPercent >= quota.weeklyPercent
-                    ? quota.sessionResetsAt : quota.weeklyResetsAt)
-            Text([reset, quota.extraSpendLabel.map { "extra " + $0 }]
-                    .compactMap { $0 }.joined(separator: " · "))
-                .font(font(size: 10))
-                .foregroundStyle(.white.opacity(0.5))
-                .lineLimit(1)
+            if let extra = quota.extraSpendLabel {
+                Text("extra " + extra)
+                    .font(font(size: 10))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(1)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1171,7 +1173,8 @@ struct ExpandedActivityCard: View {
     /// A number and a bar. The bar exists because "51%" and "13%" read as
     /// equally unremarkable in text, and the whole point of the card is to
     /// notice when one of them is not.
-    private func quotaMeter(label: String, percent: Int) -> some View {
+    private func quotaMeter(label: String, percent: Int,
+                            footnote: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: s(2)) {
             Text("\(percent)%")
                 .font(font(size: 15, weight: .semibold))
@@ -1185,9 +1188,10 @@ struct ExpandedActivityCard: View {
                 }
             }
             .frame(height: s(4))
-            Text(label)
+            Text(footnote.map { "\(label) · \($0)" } ?? label)
                 .font(font(size: 9))
                 .foregroundStyle(.white.opacity(0.45))
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

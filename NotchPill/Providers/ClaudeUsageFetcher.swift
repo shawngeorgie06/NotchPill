@@ -37,6 +37,31 @@ struct ClaudeQuota: Equatable {
         return "\(money(extraSpentMinor)) of \(money(extraLimitMinor))"
     }
 
+    /// The actual clock time a window reopens.
+    ///
+    /// "resets in 5d" was on the card first, and it answers the wrong question:
+    /// a duration tells you how long you have been waiting, not when you can
+    /// work again. It also hid the session reset entirely, because the card
+    /// showed only whichever window was nearer its limit — and weekly beat
+    /// session by three points while session was the one about to bite.
+    ///
+    /// Today gives a time, this week a weekday and time, beyond that a date.
+    static func resetClock(for date: Date?, now: Date = Date(),
+                           calendar: Calendar = .current,
+                           locale: Locale = .current) -> String? {
+        guard let date else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        if calendar.isDate(date, inSameDayAs: now) {
+            formatter.setLocalizedDateFormatFromTemplate("jmm")
+        } else if date.timeIntervalSince(now) < 6 * 86_400 {
+            formatter.setLocalizedDateFormatFromTemplate("EEEjmm")
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("MMMd")
+        }
+        return formatter.string(from: date)
+    }
+
     static func resetLabel(for date: Date?, now: Date = Date()) -> String? {
         guard let date else { return nil }
         let seconds = max(0, Int(date.timeIntervalSince(now)))
