@@ -4886,3 +4886,126 @@ struct AgentSessionDetailTests {
         #expect(session.contextLabel == "132k ctx")
     }
 }
+
+@Suite("Focus-free reply delivery")
+struct TerminalDirectDeliveryTests {
+    @Test func onlyClaimsTerminalsThatSupportIt() {
+        #expect(TerminalDirectDelivery.supports(bundleId: "com.cmuxterm.app"))
+        #expect(!TerminalDirectDelivery.supports(bundleId: "com.apple.Terminal"))
+        #expect(!TerminalDirectDelivery.supports(bundleId: nil))
+    }
+
+    /// AppleScript has no line continuation inside quotes, so a multi-line
+    /// reply would be a syntax error rather than a wrong result. Those go the
+    /// paste route, which handles them fine.
+    @Test func declinesTextItCannotCarry() {
+        #expect(TerminalDirectDelivery.canRepresent("hello there"))
+        #expect(!TerminalDirectDelivery.canRepresent(""))
+        #expect(!TerminalDirectDelivery.canRepresent("two\nlines"))
+        #expect(TerminalDirectDelivery.cmuxScript(
+            text: "two\nlines", directory: "/tmp", appendReturn: true) == nil)
+    }
+
+    /// A quote in a reply would otherwise end the string early and turn the
+    /// rest of someone's sentence into AppleScript.
+    @Test func escapesQuotesAndBackslashes() {
+        #expect(TerminalDirectDelivery.escaped(#"say "hi""#) == #"say \"hi\""#)
+        #expect(TerminalDirectDelivery.escaped(#"back\slash"#) == #"back\\slash"#)
+        let script = try? #require(TerminalDirectDelivery.cmuxScript(
+            text: #"say "hi""#, directory: "/tmp", appendReturn: true))
+        #expect(script?.contains(#"input text "say \"hi\"" to target"#) == true)
+    }
+
+    /// Writing a reply into the wrong agent is worse than a flicker, so an
+    /// ambiguous match has to decline rather than pick one.
+    @Test func refusesAmbiguousTargets() throws {
+        let script = try #require(TerminalDirectDelivery.cmuxScript(
+            text: "hi", directory: "/Users/me/project", appendReturn: true))
+        #expect(script.contains("if (count of found) is not 1 then return false"))
+        #expect(script.contains(#"working directory of cmuxTerminal is "/Users/me/project""#))
+    }
+
+    /// Without a directory it may only act when a single terminal exists.
+    @Test func withoutDirectoryRequiresASoleTerminal() throws {
+        let script = try #require(TerminalDirectDelivery.cmuxScript(
+            text: "hi", directory: nil, appendReturn: true))
+        #expect(script.contains("if (count of found) is not 1 then return false"))
+        #expect(!script.contains("working directory"))
+    }
+
+    /// The Return is a separate action, so a reply that should not submit
+    /// must not carry one.
+    @Test func submitsOnlyWhenAsked() throws {
+        let withReturn = try #require(TerminalDirectDelivery.cmuxScript(
+            text: "hi", directory: "/tmp", appendReturn: true))
+        // Two backslashes: AppleScript unescapes one, leaving Ghostty the
+        // `\r` escape its own action parser expects. This is the exact string
+        // verified end to end against a live cmux panel.
+        #expect(withReturn.contains(##"perform action "text:\\r" on target"##))
+        let without = try #require(TerminalDirectDelivery.cmuxScript(
+            text: "hi", directory: "/tmp", appendReturn: false))
+        #expect(!without.contains("perform action"))
+    }
+}
+
+@Suite("Usage fetches back off instead of hammering")
+struct UsageBackoffTests {
+    /// Measured live: the Claude card answered a 429 every 60 seconds for as
+    /// long as the app stayed open. A fixed retry into a rate limit is not a
+    /// retry, it is the cause of the next one.
+    @Test func honoursRetryAfter() throws {
+        let response = try #require(HTTPURLResponse(
+            url: ClaudeUsageFetcher.usageEndpoint, statusCode: 429,
+            httpVersion: nil, headerFields: ["Retry-After": "120"]))
+        #expect(ClaudeUsageFetcher.retryAfter(in: response) == 120)
+    }
+
+    /// A header we cannot read must not become a wait of zero — that is the
+    /// hammering behaviour again — nor a wait of decades.
+    @Test func ignoresUnusableRetryAfter() throws {
+        func header(_ value: String) -> HTTPURLResponse? {
+            HTTPURLResponse(url: ClaudeUsageFetcher.usageEndpoint, statusCode: 429,
+                            httpVersion: nil, headerFields: ["Retry-After": value])
+        }
+        #expect(ClaudeUsageFetcher.retryAfter(in: header("0")) == nil)
+        #expect(ClaudeUsageFetcher.retryAfter(in: header("-5")) == nil)
+        // The HTTP-date form is legal but unparsed here; a misread date would
+        // otherwise produce a wait measured in decades.
+        #expect(ClaudeUsageFetcher.retryAfter(in: header("Wed, 21 Oct 2026 07:28:00 GMT")) == nil)
+        #expect(ClaudeUsageFetcher.retryAfter(in: nil) == nil)
+    }
+
+    /// Capped, so a server sending something enormous cannot silently disable
+    /// the card for the rest of the session.
+    @Test func capsRetryAfter() throws {
+        let response = try #require(HTTPURLResponse(
+            url: ClaudeUsageFetcher.usageEndpoint, statusCode: 429,
+            httpVersion: nil, headerFields: ["Retry-After": "999999"]))
+        #expect(ClaudeUsageFetcher.retryAfter(in: response) == 3600)
+    }
+
+    /// A 429 stops being asked about; a cached answer keeps showing.
+    @Test func rateLimitedStopsAsking() async throws {
+        var calls = 0
+        let service = ClaudeUsageService(
+            transport: { request in
+                calls += 1
+                let response = HTTPURLResponse(url: request.url!, statusCode: 429,
+                                               httpVersion: nil,
+                                               headerFields: ["Retry-After": "600"])!
+                return (Data(), response)
+            },
+            readKeychain: {
+                Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8)
+            })
+        let start = Date()
+        _ = await service.quota(now: start)
+        #expect(calls == 1)
+        // Well past the 60s refresh interval, but inside the 600s the server
+        // asked for: it must not have asked again.
+        _ = await service.quota(now: start.addingTimeInterval(120))
+        #expect(calls == 1)
+        _ = await service.quota(now: start.addingTimeInterval(700))
+        #expect(calls == 2)
+    }
+}

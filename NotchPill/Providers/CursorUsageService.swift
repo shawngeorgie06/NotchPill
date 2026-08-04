@@ -16,6 +16,11 @@ actor CursorUsageService {
     /// Set once the token is missing or rejected. Both need a sign-in in the
     /// Cursor app to fix, and neither improves by being retried every 5 minutes.
     private var givenUp = false
+    /// Same reasoning as the Claude service: a fixed retry into a 429 is not a
+    /// retry, it is the cause of the next one.
+    private var retryNoEarlierThan = Date.distantPast
+    private var consecutiveFailures = 0
+    static let maxBackoff: TimeInterval = 3600
 
     private let transport: (URLRequest) async throws -> (Data, URLResponse)
     private let readToken: () -> String?
@@ -60,10 +65,13 @@ actor CursorUsageService {
 
     func quota(now: Date = Date()) async -> CursorQuota? {
         if givenUp { return nil }
+        if now < retryNoEarlierThan { return servedCache(now: now) }
         if now.timeIntervalSince(lastFetch) < Self.refreshInterval { return cached }
         lastFetch = now
         do {
             let fresh = try await fetch(now: now)
+            consecutiveFailures = 0
+            retryNoEarlierThan = .distantPast
             // Logged the first time only. Silence reads the same whether the
             // fetch worked or the code never ran, and that ambiguity has cost
             // real hours on this feature already.
@@ -83,8 +91,13 @@ actor CursorUsageService {
             case .unauthorized:
                 givenUp = true
                 LogStore.log("cursor", "token rejected — sign in to Cursor again")
+            case .rateLimited(let retryAfter):
+                let wait = backoff(suggested: retryAfter, now: now)
+                LogStore.log("cursor", "rate limited — next try in \(Int(wait))s")
             case .http(let code):
-                LogStore.log("cursor", "usage fetch failed: HTTP \(code)")
+                let wait = backoff(suggested: nil, now: now)
+                LogStore.log("cursor", "usage fetch failed: HTTP \(code)"
+                             + " — next try in \(Int(wait))s")
             case .malformedResponse:
                 LogStore.log("cursor", "usage fetch failed: unrecognised response")
             }
@@ -96,6 +109,15 @@ actor CursorUsageService {
                          + "\((error as NSError).domain) \((error as NSError).code)")
             return servedCache(now: now)
         }
+    }
+
+    @discardableResult
+    private func backoff(suggested: TimeInterval?, now: Date) -> TimeInterval {
+        consecutiveFailures += 1
+        let wait = suggested ?? min(Self.maxBackoff,
+                                    Self.refreshInterval * pow(2, Double(consecutiveFailures)))
+        retryNoEarlierThan = now.addingTimeInterval(wait)
+        return wait
     }
 
     private func servedCache(now: Date) -> CursorQuota? {
@@ -116,6 +138,10 @@ actor CursorUsageService {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status != 401, status != 403 else {
             throw CursorUsageFetcher.FetchError.unauthorized
+        }
+        guard status != 429 else {
+            throw CursorUsageFetcher.FetchError.rateLimited(
+                retryAfter: ClaudeUsageFetcher.retryAfter(in: response as? HTTPURLResponse))
         }
         guard (200..<300).contains(status) else {
             throw CursorUsageFetcher.FetchError.http(status)

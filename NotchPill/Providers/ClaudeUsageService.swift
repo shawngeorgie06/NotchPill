@@ -18,6 +18,13 @@ actor ClaudeUsageService {
     /// Retrying either on a timer would re-prompt, or hammer a 403 that only a
     /// re-login can fix.
     private var givenUp: ClaudeUsageFetcher.FetchError?
+    /// Nothing is asked before this. A 429 answered every 60s for as long as
+    /// the app is open is not a retry, it is the reason for the 429.
+    private var retryNoEarlierThan = Date.distantPast
+    /// Doubles per consecutive failure, so a service that is down is asked
+    /// about less and less rather than at a fixed drumbeat.
+    private var consecutiveFailures = 0
+    static let maxBackoff: TimeInterval = 1800
 
     private let transport: (URLRequest) async throws -> (Data, URLResponse)
     private let readKeychain: () -> Data?
@@ -57,10 +64,13 @@ actor ClaudeUsageService {
             _ = givenUp
             return nil
         }
+        if now < retryNoEarlierThan { return servedCache(now: now) }
         if now.timeIntervalSince(lastFetch) < Self.refreshInterval { return cached }
         lastFetch = now
         do {
             let fresh = try await fetch(now: now)
+            consecutiveFailures = 0
+            retryNoEarlierThan = .distantPast
             // Logged on success as well as failure. Silence is ambiguous — it
             // reads the same whether the fetch worked or the code never ran —
             // and that ambiguity has cost hours already today.
@@ -83,8 +93,13 @@ actor ClaudeUsageService {
                 return nil
             case .unauthorized:
                 LogStore.log("claude", "token rejected — sign in to Claude Code again")
+            case .rateLimited(let retryAfter):
+                let wait = backoff(suggested: retryAfter, now: now)
+                LogStore.log("claude", "rate limited — next try in \(Int(wait))s")
             case .http(let code):
-                LogStore.log("claude", "usage fetch failed: HTTP \(code)")
+                let wait = backoff(suggested: nil, now: now)
+                LogStore.log("claude", "usage fetch failed: HTTP \(code)"
+                             + " — next try in \(Int(wait))s")
             case .malformedResponse:
                 LogStore.log("claude", "usage fetch failed: unrecognised response")
             }
@@ -96,6 +111,17 @@ actor ClaudeUsageService {
                          + "\((error as NSError).domain) \((error as NSError).code)")
             return servedCache(now: now)
         }
+    }
+
+    /// Sets the next allowed attempt and returns how long that is away.
+    @discardableResult
+    private func backoff(suggested: TimeInterval?, now: Date) -> TimeInterval {
+        consecutiveFailures += 1
+        // The server's own number wins when it sends one.
+        let wait = suggested ?? min(Self.maxBackoff,
+                                    Self.refreshInterval * pow(2, Double(consecutiveFailures)))
+        retryNoEarlierThan = now.addingTimeInterval(wait)
+        return wait
     }
 
     /// Serve the last good answer until it is too old to mean anything. Wi-Fi
@@ -126,6 +152,10 @@ actor ClaudeUsageService {
         // prompt attached. An expired token means "use Claude Code once".
         guard status != 401 else { throw ClaudeUsageFetcher.FetchError.unauthorized }
         guard status != 403 else { throw ClaudeUsageFetcher.FetchError.missingScope }
+        guard status != 429 else {
+            throw ClaudeUsageFetcher.FetchError.rateLimited(
+                retryAfter: ClaudeUsageFetcher.retryAfter(in: response as? HTTPURLResponse))
+        }
         guard (200..<300).contains(status) else {
             throw ClaudeUsageFetcher.FetchError.http(status)
         }

@@ -83,6 +83,10 @@ enum ClaudeUsageFetcher {
         /// Signed in, but this token cannot read the account.
         case missingScope
         case unauthorized
+        /// Asked too often. Carries the server's own `Retry-After` when it
+        /// sends one, because guessing an interval is how you get rate-limited
+        /// a second time.
+        case rateLimited(retryAfter: TimeInterval?)
         case http(Int)
         case malformedResponse
     }
@@ -169,6 +173,16 @@ enum ClaudeUsageFetcher {
     }
 
     // MARK: - Request
+
+    /// Seconds to wait, from a `Retry-After` header. Accepts the delta-seconds
+    /// form only; the HTTP-date form is legal but nobody sends it here, and a
+    /// misparsed date would produce a wait of decades.
+    static func retryAfter(in response: HTTPURLResponse?) -> TimeInterval? {
+        guard let raw = response?.value(forHTTPHeaderField: "Retry-After"),
+              let seconds = TimeInterval(raw.trimmingCharacters(in: .whitespaces)),
+              seconds > 0 else { return nil }
+        return min(seconds, 3600)
+    }
 
     static func usageRequest(_ credentials: Credentials) -> URLRequest {
         var request = URLRequest(url: usageEndpoint)

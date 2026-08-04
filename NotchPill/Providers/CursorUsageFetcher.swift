@@ -90,6 +90,7 @@ enum CursorUsageFetcher {
     enum FetchError: Error, Equatable {
         case noCredentials
         case unauthorized
+        case rateLimited(retryAfter: TimeInterval?)
         case http(Int)
         case malformedResponse
     }
