@@ -481,6 +481,61 @@ actor AgentSessionScanner {
         return nil
     }
 
+    /// The agent's last spoken message — what you would be replying *to*.
+    ///
+    /// A finished peek's subtitle is "finished · branch", which says an agent
+    /// stopped but nothing about what it said. Replying to that is answering a
+    /// question you cannot see. Both transcript formats are read here so every
+    /// agent gets the same treatment rather than Claude Code alone.
+    ///
+    /// Reasoning and tool output are skipped deliberately: they are the
+    /// agent's working, not its answer, and the last tool call is never the
+    /// thing being replied to.
+    nonisolated static func lastAgentMessage(in text: String, isCodex: Bool) -> String? {
+        for line in text.split(separator: "\n").reversed() {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8))
+                    as? [String: Any] else { continue }
+            if isCodex {
+                guard let payload = object["payload"] as? [String: Any],
+                      let type = payload["type"] as? String,
+                      type == "agent_message" || type == "message" else { continue }
+                // `message` is a plain string; `content` is the array form.
+                if let direct = payload["message"] as? String,
+                   let cleaned = clean(direct) { return cleaned }
+                if let content = payload["content"] as? [[String: Any]] {
+                    for part in content.reversed()
+                    where part["type"] as? String == "output_text"
+                        || part["type"] as? String == "text" {
+                        if let cleaned = clean(part["text"] as? String) { return cleaned }
+                    }
+                }
+            } else {
+                guard object["type"] as? String == "assistant",
+                      let message = object["message"] as? [String: Any],
+                      let content = message["content"] as? [[String: Any]] else { continue }
+                for part in content.reversed() where part["type"] as? String == "text" {
+                    if let cleaned = clean(part["text"] as? String) { return cleaned }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Trimmed, redacted, and cut to something a notch row can hold.
+    private nonisolated static func clean(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        // The composer floats above every window, and an agent's last message
+        // can quote a command line — which is where a token ends up.
+        let redacted = SecretRedactor.redact(trimmed)
+        // First paragraph only: the composer has room for a sentence or two,
+        // not a report.
+        let firstParagraph = redacted.components(separatedBy: "\n\n").first ?? redacted
+        let flattened = firstParagraph.replacingOccurrences(of: "\n", with: " ")
+        return AgentSession.summarize(flattened, limit: 220)
+    }
+
     private nonisolated static func int(_ any: Any?) -> Int {
         (any as? Int) ?? (any as? NSNumber)?.intValue ?? 0
     }

@@ -471,6 +471,8 @@ struct ReplyComposeState: Equatable {
     var errorText: String? = nil
 
     var contextText: String? {
-        mode == .planRevision ? "Tell Claude what to change before it starts." : targetAlert.questionText
+        mode == .planRevision
+            ? "Tell Claude what to change before it starts."
+            : targetAlert.replyContextText
     }
 }

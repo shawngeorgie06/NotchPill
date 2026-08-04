@@ -76,6 +76,10 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// The raw `PreToolUse` payload, so the peek can show the change itself
     /// rather than the sentence "Claude needs your permission to use Edit".
     var permissionPayload: String?
+    /// What the agent last said, for the reply composer to show above the
+    /// field. Set for finished peeks, where there is no question but there is
+    /// still something you are replying *to*.
+    var agentMessage: String?
 
     static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
 
@@ -89,6 +93,19 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         // it is the command it wants to run — which is exactly where a token
         // ends up on a command line. The peek floats above every window.
         return SecretRedactor.redact(message)
+    }
+
+    /// What to show above the reply field: the question when there is one,
+    /// otherwise whatever the agent last said.
+    ///
+    /// Replying with nothing on screen means answering a question you cannot
+    /// see — and a finished peek's subtitle is "finished · branch", which says
+    /// an agent stopped but not what it said. Every agent gets this, not just
+    /// the ones that send a `waiting` signal.
+    var replyContextText: String? {
+        if let questionText { return questionText }
+        guard let agentMessage, !agentMessage.isEmpty else { return nil }
+        return SecretRedactor.redact(agentMessage)
     }
 
     /// The change or command this alert is asking permission for, ready to draw.
@@ -145,7 +162,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         answerSpec: String? = nil,
         deliverySpec: String? = nil,
         requestId: String? = nil,
-        permissionPayload: String? = nil
+        permissionPayload: String? = nil,
+        agentMessage: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -155,6 +173,7 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         self.bundleId = bundleId
         self.kind = kind
         self.message = message
+        self.agentMessage = agentMessage
         self.createdAt = createdAt
         self.sessionId = Self.normalized(sessionId)
         self.answerSpec = Self.normalized(answerSpec)

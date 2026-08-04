@@ -270,7 +270,10 @@ final class AgentTranscriptProvider {
             bundleId: nil,
             kind: .finished,
             createdAt: Date().timeIntervalSince1970,
-            sessionId: sessionId
+            sessionId: sessionId,
+            agentMessage: tailText(of: url).flatMap {
+                AgentSessionScanner.lastAgentMessage(in: $0, isCodex: isCodex)
+            }
         )
     }
 

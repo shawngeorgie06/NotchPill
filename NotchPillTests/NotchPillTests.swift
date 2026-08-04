@@ -5268,3 +5268,67 @@ struct DeckPageHeightTests {
         #expect(NotchContentLayout.expandedContentBaseHeight(deck, page: -1) == tallest)
     }
 }
+
+@Suite("The reply composer shows what you are replying to")
+struct ReplyContextTests {
+    /// A finished peek's subtitle is "finished · branch": it says an agent
+    /// stopped, not what it said. Replying to that was answering a question
+    /// you could not see.
+    @Test func finishedPeekShowsTheAgentsLastMessage() {
+        let alert = DevReadyAlert(title: "NotchPill", subtitle: "finished · main",
+                                  agent: "claude-code", kind: .finished,
+                                  agentMessage: "Want me to cut the release?")
+        #expect(alert.questionText == nil)
+        #expect(alert.replyContextText == "Want me to cut the release?")
+    }
+
+    /// A real question still wins — it is the more specific thing.
+    @Test func aQuestionOutranksTheLastMessage() {
+        let alert = DevReadyAlert(title: "p", kind: .waiting, message: "Allow Bash?",
+                                  agentMessage: "some earlier chatter")
+        #expect(alert.replyContextText == "Allow Bash?")
+    }
+
+    @Test func nothingToShowWhenThereIsNothing() {
+        #expect(DevReadyAlert(title: "p").replyContextText == nil)
+        #expect(DevReadyAlert(title: "p", agentMessage: "").replyContextText == nil)
+    }
+
+    /// Claude Code's transcript shape.
+    @Test func readsClaudeCodesLastSpokenText() throws {
+        let text = """
+        {"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}
+        {"type":"user","message":{"content":"a reply"}}
+        {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"},{"type":"text","text":"Shall I ship it?"}]}}
+        """
+        #expect(AgentSessionScanner.lastAgentMessage(in: text, isCodex: false) == "Shall I ship it?")
+    }
+
+    /// Codex's, which uses a different envelope entirely — the point being
+    /// that every agent gets this, not only Claude Code.
+    @Test func readsCodexsLastSpokenText() throws {
+        let text = """
+        {"payload":{"type":"agent_message","message":"Done — anything else?"}}
+        {"payload":{"type":"token_count","info":{}}}
+        """
+        #expect(AgentSessionScanner.lastAgentMessage(in: text, isCodex: true)
+                == "Done — anything else?")
+    }
+
+    /// Reasoning and tool output are the agent's working, not its answer.
+    @Test func skipsReasoningAndToolOutput() {
+        let text = """
+        {"payload":{"type":"agent_message","message":"The answer"}}
+        {"payload":{"type":"reasoning","content":[{"type":"text","text":"thinking aloud"}]}}
+        {"payload":{"type":"custom_tool_call_output","output":"tool said this"}}
+        """
+        #expect(AgentSessionScanner.lastAgentMessage(in: text, isCodex: true) == "The answer")
+    }
+
+    @Test func nothingFromATranscriptWithNoSpeech() {
+        #expect(AgentSessionScanner.lastAgentMessage(in: "not json", isCodex: false) == nil)
+        #expect(AgentSessionScanner.lastAgentMessage(
+            in: #"{"type":"assistant","message":{"content":[{"type":"text","text":"   "}]}}"#,
+            isCodex: false) == nil)
+    }
+}
