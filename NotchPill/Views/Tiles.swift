@@ -1144,11 +1144,20 @@ struct ExpandedActivityCard: View {
                 Text("unlimited")
                     .font(font(size: 15, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.92))
+            } else if let auto = quota.autoPercentUsed, let api = quota.apiPercentUsed {
+                // Two pools, shown apart. They diverge, and a single averaged
+                // number would hide whichever one is closer to biting.
+                HStack(spacing: s(8)) {
+                    quotaMeter(label: "auto", percent: auto)
+                    quotaMeter(label: "API", percent: api)
+                }
             } else {
                 quotaMeter(label: quota.usageLabel, percent: quota.percentUsed)
             }
 
-            Text([CursorQuota.cycleLabel(for: quota.cycleEnd),
+            Text([quota.isUnlimited ? nil : quota.usageLabel,
+                  quota.bonusLabel,
+                  CursorQuota.cycleLabel(for: quota.cycleEnd),
                   quota.membershipLabel,
                   quota.onDemandEnabled ? "on-demand on" : nil]
                     .compactMap { $0 }.joined(separator: " · "))
@@ -1347,13 +1356,14 @@ struct ExpandedActivityCard: View {
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 agentActivityLine(session)
+                agentMetricsLine(session)
             }
             .padding(.horizontal, s(7))
             .padding(.vertical, s(5))
-            .background(color(for: session.state).opacity(session.state == .waiting ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: s(7), style: .continuous))
+            .background(color(for: session.state).opacity(session.isWaiting ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: s(7), style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: s(7), style: .continuous)
-                    .stroke(color(for: session.state).opacity(session.state == .waiting ? 0.48 : 0.16), lineWidth: 0.75)
+                    .stroke(color(for: session.state).opacity(session.isWaiting ? 0.48 : 0.16), lineWidth: 0.75)
             }
             .contentShape(Rectangle())
         }
@@ -1416,7 +1426,7 @@ struct ExpandedActivityCard: View {
             }
         } else {
             HStack(spacing: s(5)) {
-                Text(session.state == .waiting ? "Needs your attention" : "Monitoring this session")
+                Text(session.isWaiting ? "Needs your attention" : "Monitoring this session")
                     .font(font(size: 9, weight: .medium))
                     .foregroundStyle(.white.opacity(0.42))
                     .lineLimit(1)
@@ -1424,6 +1434,24 @@ struct ExpandedActivityCard: View {
                 Spacer(minLength: s(4))
                 agentModelTag(session)
             }
+        }
+    }
+
+    /// Runtime and context size, under the activity line.
+    ///
+    /// Context is the number that decides a session's fate — a run near the
+    /// window is about to compact and lose the thread — and neither figure was
+    /// anywhere on the card before. Rendered only when there is something to
+    /// say, so short-lived rows do not grow an empty line.
+    @ViewBuilder
+    private func agentMetricsLine(_ session: AgentSession) -> some View {
+        let parts = [session.runtimeLabel, session.contextLabel].compactMap { $0 }
+        if !parts.isEmpty {
+            Text(parts.joined(separator: " · "))
+                .font(.system(size: 8.5 * textScale, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.38))
+                .lineLimit(1)
+                .padding(.leading, s(12))
         }
     }
 

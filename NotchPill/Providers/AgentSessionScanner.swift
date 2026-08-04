@@ -80,9 +80,11 @@ actor AgentSessionScanner {
                 // A prompt answered in the terminal clears nothing, so the flag
                 // would read "waiting" for ten minutes. Writing past the moment
                 // it was recorded is better evidence than the timeout.
-                state: AgentSession.state(lastWrite: mod,
-                                          blocked: blockedSessions[sessionId].map { mod <= $0 } ?? false,
-                                          now: now),
+                state: AgentSession.state(
+                    lastWrite: mod,
+                    blocked: blockedSessions[sessionId].map { mod <= $0 } ?? false,
+                    blockedSince: blockedSessions[sessionId],
+                    now: now),
                 lastActivity: mod,
                 locatorId: sidechain == nil ? sessionId : parentSessionId(of: url),
                 directory: workingDirectory(for: url, isCodex: isCodex),
@@ -94,7 +96,9 @@ actor AgentSessionScanner {
                                              ?? currentTask(in: url, isCodex: isCodex)),
                 toolActivity: currentToolActivity(in: url, isCodex: isCodex),
                 model: modelInfo.model,
-                effort: modelInfo.effort)
+                effort: modelInfo.effort,
+                contextTokens: contextTokens(in: url, isCodex: isCodex),
+                startedAt: created(url))
         }
     }
 
@@ -429,6 +433,56 @@ actor AgentSessionScanner {
 
     private func modified(_ url: URL) -> Date? {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    /// When the transcript first appeared, which is when the session started.
+    /// Cheaper and steadier than parsing the first line's timestamp — Claude
+    /// Code's opening record has no `timestamp` field at all.
+    private func created(_ url: URL) -> Date? {
+        (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
+    }
+
+    /// The live context size: what the next request will carry.
+    ///
+    /// Read from the newest usage record rather than summed over the file —
+    /// these are cumulative per request, so adding them up would report a
+    /// number many times the size of the window.
+    private func contextTokens(in url: URL, isCodex: Bool) -> Int? {
+        guard let text = text(of: url, tail: 262_144) else { return nil }
+        return Self.contextTokens(in: text, isCodex: isCodex)
+    }
+
+    nonisolated static func contextTokens(in text: String, isCodex: Bool) -> Int? {
+        for line in text.split(separator: "\n").reversed() {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8))
+                    as? [String: Any] else { continue }
+            if isCodex {
+                // Codex reports the window directly in its token_count events.
+                guard let payload = object["payload"] as? [String: Any],
+                      payload["type"] as? String == "token_count",
+                      let info = payload["info"] as? [String: Any],
+                      let last = (info["last_token_usage"] as? [String: Any])
+                        ?? (info["total_token_usage"] as? [String: Any])
+                else { continue }
+                let total = int(last["input_tokens"]) + int(last["cached_input_tokens"])
+                if total > 0 { return total }
+            } else {
+                guard let message = object["message"] as? [String: Any],
+                      let usage = message["usage"] as? [String: Any] else { continue }
+                // Prompt plus both cache figures. Output is excluded: it is not
+                // carried into the next request, so counting it would inflate
+                // the number against the window it is being compared to.
+                let total = int(usage["input_tokens"])
+                    + int(usage["cache_read_input_tokens"])
+                    + int(usage["cache_creation_input_tokens"])
+                if total > 0 { return total }
+            }
+        }
+        return nil
+    }
+
+    private nonisolated static func int(_ any: Any?) -> Int {
+        (any as? Int) ?? (any as? NSNumber)?.intValue ?? 0
     }
 
     /// The session's cwd, for anything that needs the repo rather than a label.

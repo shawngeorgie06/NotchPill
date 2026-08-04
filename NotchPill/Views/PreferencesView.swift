@@ -262,6 +262,18 @@ struct PreferencesView: View {
                 .disabled(!settings.showDevReadyPings || !settings.devReadyPlaySound)
             }
             Toggle("Reply to agents from the notch", isOn: $settings.agentReplyEnabled)
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle("Come back to what I was doing after replying",
+                       isOn: $settings.returnFocusAfterReply)
+                    .disabled(!settings.agentReplyEnabled)
+                Text("The agent's terminal has to come forward to receive the reply. "
+                     + "With this on, focus returns to whatever you were looking at "
+                     + "once the reply has been sent; with it off, you stay in the "
+                     + "terminal to watch the answer.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Toggle("Stay quiet while the Mac is locked", isOn: $settings.quietWhenLocked)
             Toggle("Remind me about what I missed", isOn: $settings.followUpReminders)
             Text("If a peek times out without you touching it, you get one reminder five minutes later — never a second. Dismissing a peek counts as dealing with it.")

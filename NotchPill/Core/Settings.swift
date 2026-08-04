@@ -110,6 +110,13 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(showCursorUsage, forKey: Keys.showCursorUsage) }
     }
 
+    /// After a reply is delivered, hand focus back to whatever you were
+    /// looking at. The agent's terminal has to come forward to receive the
+    /// text either way — this decides whether you stay there afterwards.
+    @Published var returnFocusAfterReply: Bool {
+        didSet { defaults.set(returnFocusAfterReply, forKey: Keys.returnFocusAfterReply) }
+    }
+
     @Published var showExpandedCI: Bool {
         didSet { defaults.set(showExpandedCI, forKey: Keys.showExpandedCI) }
     }
@@ -308,6 +315,7 @@ final class AppSettings: ObservableObject {
         static let showExpandedCI = "showExpandedCI"
         static let showClaudeUsage = "showClaudeUsage"
         static let showCursorUsage = "showCursorUsage"
+        static let returnFocusAfterReply = "returnFocusAfterReply"
         static let showExpandedRecentActivity = "showExpandedRecentActivity"
         static let pinnedActivityKind = "pinnedActivityKind"
         static let cardWeights = "cardWeights"
@@ -354,6 +362,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedCI: true,
             Keys.showClaudeUsage: false,
             Keys.showCursorUsage: false,
+            Keys.returnFocusAfterReply: false,
             Keys.showExpandedRecentActivity: false,
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
@@ -392,6 +401,7 @@ final class AppSettings: ObservableObject {
         showExpandedCI = defaults.bool(forKey: Keys.showExpandedCI)
         showClaudeUsage = defaults.bool(forKey: Keys.showClaudeUsage)
         showCursorUsage = defaults.bool(forKey: Keys.showCursorUsage)
+        returnFocusAfterReply = defaults.bool(forKey: Keys.returnFocusAfterReply)
         showExpandedRecentActivity = defaults.bool(forKey: Keys.showExpandedRecentActivity)
         pinnedActivityKind = defaults.string(forKey: Keys.pinnedActivityKind) ?? ""
         cardWeights = (defaults.dictionary(forKey: Keys.cardWeights) as? [String: Double]) ?? [:]
@@ -492,6 +502,7 @@ final class AppSettings: ObservableObject {
         // the network, so "back to defaults" has to mean they stop.
         showClaudeUsage = false
         showCursorUsage = false
+        returnFocusAfterReply = false
         pinnedActivityKind = ""
         cardWeights = [:]
         notchScale = AppSettings.defaultNotchScale

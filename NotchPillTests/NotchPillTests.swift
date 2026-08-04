@@ -1653,7 +1653,7 @@ struct AgentSessionTests {
     func blockedWins() {
         let now = Date()
         #expect(AgentSession.state(lastWrite: now.addingTimeInterval(-600),
-                                   blocked: true, now: now) == .waiting)
+                                   blocked: true, now: now) == .waiting(since: nil))
     }
 
     @Test("waiting sessions float above newer working ones")
@@ -1661,7 +1661,7 @@ struct AgentSessionTests {
         let now = Date()
         let ordered = AgentSession.ordered([
             session("fresh", .working, at: now),
-            session("blocked", .waiting, at: now.addingTimeInterval(-300)),
+            session("blocked", .waiting(since: nil), at: now.addingTimeInterval(-300)),
             session("old", .idle(since: now.addingTimeInterval(-600)),
                     at: now.addingTimeInterval(-600))
         ])
@@ -2776,7 +2776,7 @@ struct AgentStateWindowTests {
     @Test("blocked still beats both")
     func blockedWins() {
         let now = Date()
-        #expect(AgentSession.state(lastWrite: now, blocked: true, now: now) == .waiting)
+        #expect(AgentSession.state(lastWrite: now, blocked: true, now: now) == .waiting(since: nil))
     }
 
     // A session that has gone quiet for an hour is still one you are "in" —
@@ -3620,7 +3620,7 @@ struct AgentSessionAgeingTests {
         // The whole reason the live window is two hours: an agent blocked on a
         // permission prompt writes nothing, and dropping it would hide the one
         // row you can act on.
-        let waiting = session("a", .waiting, age: 10_000)
+        let waiting = session("a", .waiting(since: nil), age: 10_000)
         #expect(AgentSession.current([waiting], now: now).count == 1)
     }
 
@@ -4689,6 +4689,10 @@ struct CursorUsageFetcherTests {
         #expect(quota.percentUsed == 100)
         #expect(quota.included == 2000)
         #expect(quota.bonus == 7201)
+        #expect(quota.bonusLabel == "+7201 bonus")
+        // The two pools Cursor meters separately.
+        #expect(quota.autoPercentUsed == 100)
+        #expect(quota.apiPercentUsed == 100)
         #expect(quota.membership == "pro_student")
         #expect(quota.isUnlimited == false)
         #expect(quota.onDemandEnabled == false)
@@ -4698,7 +4702,8 @@ struct CursorUsageFetcherTests {
     /// The plan key is raw; the card must not print "pro_student" at a user.
     @Test func tidiesMembershipForDisplay() {
         var quota = CursorQuota(used: 1, limit: 2, included: nil, bonus: nil,
-                                percentUsed: 50, cycleEnd: nil,
+                                percentUsed: 50, autoPercentUsed: nil,
+                                apiPercentUsed: nil, cycleEnd: nil,
                                 membership: "pro_student", isUnlimited: false,
                                 onDemandEnabled: false, updatedAt: nil)
         #expect(quota.membershipLabel == "Pro Student")
@@ -4710,11 +4715,13 @@ struct CursorUsageFetcherTests {
     /// zero reads exactly like an account that has done nothing all month.
     @Test func labelsUsageUnambiguously() {
         let full = CursorQuota(used: 2000, limit: 2000, included: nil, bonus: nil,
-                               percentUsed: 100, cycleEnd: nil, membership: nil,
+                               percentUsed: 100, autoPercentUsed: nil,
+                               apiPercentUsed: nil, cycleEnd: nil, membership: nil,
                                isUnlimited: false, onDemandEnabled: false, updatedAt: nil)
         #expect(full.usageLabel == "2000 of 2000")
         let unlimited = CursorQuota(used: 0, limit: 0, included: nil, bonus: nil,
-                                    percentUsed: 0, cycleEnd: nil, membership: nil,
+                                    percentUsed: 0, autoPercentUsed: nil,
+                                    apiPercentUsed: nil, cycleEnd: nil, membership: nil,
                                     isUnlimited: true, onDemandEnabled: false, updatedAt: nil)
         #expect(unlimited.usageLabel == "unlimited")
     }
@@ -4728,6 +4735,14 @@ struct CursorUsageFetcherTests {
         let quota = try #require(CursorUsageFetcher.quota(in: Data(json.utf8)))
         #expect(quota.isUnlimited)
         #expect(quota.membershipLabel == "Business")
+    }
+
+    /// Bonus credits sit outside the gauge, so a zero or absent bonus must
+    /// print nothing rather than "+0 bonus".
+    @Test func hidesEmptyBonus() throws {
+        let json = #"{"individualUsage":{"plan":{"used":1,"limit":2,"breakdown":{"bonus":0}}}}"#
+        let quota = try #require(CursorUsageFetcher.quota(in: Data(json.utf8)))
+        #expect(quota.bonusLabel == nil)
     }
 
     @Test func rejectsUnrelatedJSON() {
@@ -4790,5 +4805,84 @@ struct CursorUsageFetcherTests {
             .init(accessToken: "T", subject: "S"))
         #expect(request.httpMethod == nil || request.httpMethod == "GET")
         #expect(request.value(forHTTPHeaderField: "Origin") == nil)
+    }
+}
+
+@Suite("Live agent detail")
+struct AgentSessionDetailTests {
+    /// Usage records are cumulative per request, so the *newest* one is the
+    /// live context. Summing them would report a multiple of the window.
+    @Test func readsNewestClaudeContext() throws {
+        let text = """
+        {"message":{"usage":{"input_tokens":3,"cache_read_input_tokens":1000,"cache_creation_input_tokens":7}}}
+        {"message":{"usage":{"input_tokens":2,"cache_read_input_tokens":131955,"cache_creation_input_tokens":503,"output_tokens":1113}}}
+        """
+        let tokens = try #require(AgentSessionScanner.contextTokens(in: text, isCodex: false))
+        // 2 + 131955 + 503. Output is excluded: it is not carried forward.
+        #expect(tokens == 132_460)
+    }
+
+    @Test func readsCodexContext() throws {
+        let text = """
+        {"payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":40000,"cached_input_tokens":2000}}}}
+        """
+        let tokens = try #require(AgentSessionScanner.contextTokens(in: text, isCodex: true))
+        #expect(tokens == 42_000)
+    }
+
+    @Test func ignoresLinesWithoutUsage() {
+        let text = """
+        {"message":{"role":"user"}}
+        not json at all
+        {"payload":{"type":"other"}}
+        """
+        #expect(AgentSessionScanner.contextTokens(in: text, isCodex: false) == nil)
+        #expect(AgentSessionScanner.contextTokens(in: text, isCodex: true) == nil)
+    }
+
+    /// A raw 132460 in a notch row is unreadable.
+    @Test func formatsTokensCompactly() {
+        #expect(AgentSession.compactTokens(940) == "940")
+        #expect(AgentSession.compactTokens(9_400) == "9.4k")
+        #expect(AgentSession.compactTokens(132_460) == "132k")
+        #expect(AgentSession.compactTokens(1_240_000) == "1.2M")
+    }
+
+    /// "waiting" alone reads the same at ten seconds and forty minutes.
+    @Test func waitingSaysHowLong() {
+        let blocked = Date().addingTimeInterval(-360)
+        let state = AgentSession.state(lastWrite: Date(), blocked: true, blockedSince: blocked)
+        var session = AgentSession(id: "s", agent: "claude-code", project: "p",
+                                   state: state, lastActivity: Date())
+        #expect(session.statusLabel == "waiting 6m")
+        #expect(session.isWaiting)
+        // Without a recorded moment it must still read sensibly.
+        session.state = .waiting(since: nil)
+        #expect(session.statusLabel == "waiting")
+    }
+
+    /// Under a minute is noise — every session passes through it.
+    @Test func hidesRuntimeUntilItMeansSomething() {
+        var session = AgentSession(id: "s", agent: "codex", project: "p",
+                                   state: .working, lastActivity: Date())
+        session.startedAt = Date().addingTimeInterval(-20)
+        #expect(session.runtimeLabel == nil)
+        session.startedAt = Date().addingTimeInterval(-2520)
+        #expect(session.runtimeLabel == "running 42m")
+        // A session resumed across a fortnight read "running 334h".
+        session.startedAt = Date().addingTimeInterval(-1_202_400)
+        #expect(session.runtimeLabel == "running 13d")
+        session.startedAt = nil
+        #expect(session.runtimeLabel == nil)
+    }
+
+    @Test func contextLabelOnlyWhenKnown() {
+        var session = AgentSession(id: "s", agent: "claude-code", project: "p",
+                                   state: .working, lastActivity: Date())
+        #expect(session.contextLabel == nil)
+        session.contextTokens = 0
+        #expect(session.contextLabel == nil)
+        session.contextTokens = 132_460
+        #expect(session.contextLabel == "132k ctx")
     }
 }

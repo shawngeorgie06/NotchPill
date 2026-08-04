@@ -156,6 +156,7 @@ final class AgentSessionsProvider {
         var line = "\(stamp) published \(sessions.count)\n"
         for s in sessions {
             line += "    \(s.displayName) | \(s.project) | \(s.statusLabel)"
+                + " | \(s.runtimeLabel ?? "-") | \(s.contextLabel ?? "-")"
                 + " | \(s.task ?? "-") | locator=\(s.locatorId ?? "-")\n"
         }
         guard let data = line.data(using: .utf8) else { return }

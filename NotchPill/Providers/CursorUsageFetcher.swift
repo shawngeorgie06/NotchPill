@@ -10,8 +10,17 @@ struct CursorQuota: Equatable {
     var limit: Int
     /// What Cursor calls the plan's included allowance before bonus credits.
     var included: Int?
+    /// Credits granted on top of the included allowance. Reported by Cursor
+    /// but *not* counted in `limit` or any of the percentages, so it is shown
+    /// as its own figure rather than folded into the gauge.
     var bonus: Int?
     var percentUsed: Int
+    /// Cursor meters two pools and reports them separately: the "total"
+    /// allowance auto-selected models draw from, and the API allowance named
+    /// models draw from. They diverge, so collapsing them into one number
+    /// hides whichever one is closer to biting.
+    var autoPercentUsed: Int?
+    var apiPercentUsed: Int?
     var cycleEnd: Date?
     /// `pro`, `pro_student`, `business`… shown verbatim but tidied for display.
     var membership: String?
@@ -37,6 +46,12 @@ struct CursorQuota: Equatable {
     var usageLabel: String {
         if isUnlimited { return "unlimited" }
         return "\(used) of \(limit)"
+    }
+
+    /// Only worth printing when there is a meaningful amount of it.
+    var bonusLabel: String? {
+        guard let bonus, bonus > 0 else { return nil }
+        return "+\(bonus) bonus"
     }
 
     static func cycleLabel(for date: Date?, now: Date = Date()) -> String? {
@@ -138,6 +153,8 @@ enum CursorUsageFetcher {
             included: int(breakdown?["included"]),
             bonus: int(breakdown?["bonus"]),
             percentUsed: min(100, max(0, percent)),
+            autoPercentUsed: int(plan["autoPercentUsed"]),
+            apiPercentUsed: int(plan["apiPercentUsed"]),
             cycleEnd: (root["billingCycleEnd"] as? String).flatMap(parseTimestamp),
             membership: root["membershipType"] as? String,
             isUnlimited: unlimited,
@@ -148,6 +165,7 @@ enum CursorUsageFetcher {
     private static func unlimitedQuota(_ root: [String: Any], now: Date) -> CursorQuota {
         CursorQuota(
             used: 0, limit: 0, included: nil, bonus: nil, percentUsed: 0,
+            autoPercentUsed: nil, apiPercentUsed: nil,
             cycleEnd: (root["billingCycleEnd"] as? String).flatMap(parseTimestamp),
             membership: root["membershipType"] as? String,
             isUnlimited: true, onDemandEnabled: false, updatedAt: now)

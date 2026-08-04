@@ -21,8 +21,10 @@ struct AgentSession: Equatable, Identifiable {
         /// The transcript is still growing — the agent is mid-turn.
         case working
         /// Blocked on you. Only Cursor reports this without a hook; for the
-        /// terminal agents it arrives via the waiting peek.
-        case waiting
+        /// terminal agents it arrives via the waiting peek. `since` is when the
+        /// block was first recorded, so the row can say how long it has been
+        /// sitting there — nil when that moment isn't known.
+        case waiting(since: Date?)
         /// Alive but quiet. `since` is when it went quiet, so the row can age.
         case idle(since: Date)
 
@@ -104,6 +106,38 @@ struct AgentSession: Equatable, Identifiable {
     var model: String?
     /// Reasoning effort, where the agent records one: `low`, `medium`, `high`.
     var effort: String?
+    /// Live context size in tokens: everything the next request will carry —
+    /// prompt plus cache. The number people actually want from a running
+    /// session, because it is the one that ends it: a session near the window
+    /// is about to compact and lose the thread.
+    var contextTokens: Int?
+    /// When the session's transcript was first written. Approximate by design —
+    /// it answers "have I been at this for twenty minutes or three hours",
+    /// which does not need to be exact.
+    var startedAt: Date?
+
+    /// "132k", "1.2M" — a raw 132460 in a notch row is unreadable.
+    static func compactTokens(_ tokens: Int) -> String {
+        if tokens < 1000 { return "\(tokens)" }
+        if tokens < 1_000_000 {
+            let k = Double(tokens) / 1000
+            return k < 10 ? String(format: "%.1fk", k) : "\(Int(k.rounded()))k"
+        }
+        return String(format: "%.1fM", Double(tokens) / 1_000_000)
+    }
+
+    var contextLabel: String? {
+        guard let contextTokens, contextTokens > 0 else { return nil }
+        return Self.compactTokens(contextTokens) + " ctx"
+    }
+
+    var runtimeLabel: String? {
+        guard let startedAt else { return nil }
+        // Under a minute is noise: every session passes through it, and "0m"
+        // says less than nothing.
+        guard Date().timeIntervalSince(startedAt) >= 60 else { return nil }
+        return "running " + Self.shortDuration(since: startedAt)
+    }
 
     /// The model as it should read on a notch row.
     ///
@@ -239,10 +273,16 @@ struct AgentSession: Equatable, Identifiable {
     }
 
     /// How the row reads on the right-hand side.
+    var isWaiting: Bool { if case .waiting = state { return true }; return false }
+
     var statusLabel: String {
         switch state {
         case .working: return "working"
-        case .waiting: return "waiting"
+        // How long it has been blocked on you is the whole point of the row:
+        // "waiting" alone reads the same at ten seconds and forty minutes.
+        case .waiting(let since):
+            guard let since else { return "waiting" }
+            return "waiting " + Self.shortDuration(since: since)
         case .idle(let since): return "idle " + Self.shortDuration(since: since)
         }
     }
@@ -263,7 +303,11 @@ struct AgentSession: Equatable, Identifiable {
         let s = max(0, Int(now.timeIntervalSince(since)))
         if s < 60 { return "\(s)s" }
         if s < 3600 { return "\(s / 60)m" }
-        return "\(s / 3600)h"
+        // Days past two of them. Idle rows never get here (they expire at two
+        // hours), but a session resumed across a fortnight does, and it read
+        // "running 334h".
+        if s < 172_800 { return "\(s / 3600)h" }
+        return "\(s / 86_400)d"
     }
 
     /// Decides a session's state from when it was last written to.
@@ -272,8 +316,9 @@ struct AgentSession: Equatable, Identifiable {
     /// `working` has to be generous: an agent thinking between two tool calls
     /// writes nothing for a few seconds, and flickering a row from working to
     /// idle and back is worse than being briefly stale.
-    static func state(lastWrite: Date, blocked: Bool, now: Date = Date()) -> State {
-        if blocked { return .waiting }
+    static func state(lastWrite: Date, blocked: Bool, blockedSince: Date? = nil,
+                      now: Date = Date()) -> State {
+        if blocked { return .waiting(since: blockedSince) }
         return now.timeIntervalSince(lastWrite) < workingWindow
             ? .working
             : .idle(since: lastWrite)
@@ -322,7 +367,7 @@ struct AgentSession: Equatable, Identifiable {
     /// row you can actually act on.
     static func ordered(_ sessions: [AgentSession]) -> [AgentSession] {
         sessions.sorted { a, b in
-            let aw = a.state == .waiting, bw = b.state == .waiting
+            let aw = a.isWaiting, bw = b.isWaiting
             if aw != bw { return aw }
             return a.lastActivity > b.lastActivity
         }

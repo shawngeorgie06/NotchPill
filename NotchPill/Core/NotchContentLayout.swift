@@ -451,11 +451,14 @@ enum NotchContentLayout {
     /// own `ScrollView` takes over, so the pill must not keep growing.
     private static let expandedMaxCardRows = 3
 
-    /// An agent row's title/status line plus its activity line, and the card
-    /// header above them. Named because the height ceiling is derived from
-    /// these — see `expandedContentCeiling`.
+    /// An agent row's title/status line, its activity line, and the runtime and
+    /// context line under them — plus the card header. Named because the height
+    /// ceiling is derived from these; see `expandedContentCeiling`.
+    ///
+    /// 52 → 63 when the metrics line was added. The row grew and this did not,
+    /// which is the exact drift the ceiling comment above warns about.
     static let agentsHeader: CGFloat = 18
-    static let agentsRow: CGFloat = 52
+    static let agentsRow: CGFloat = 63
 
     private static func rowsHeight(header: CGFloat, row: CGFloat, count: Int) -> CGFloat {
         header + row * CGFloat(min(expandedMaxCardRows, max(1, count)))

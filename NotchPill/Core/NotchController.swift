@@ -1070,7 +1070,7 @@ final class NotchController {
             // so the session list is the check: if it is no longer waiting,
             // the reminder would be stating something false.
             if item.kind == .waiting,
-               !state.agentSessions.contains(where: { $0.state == .waiting }) { continue }
+               !state.agentSessions.contains(where: \.isWaiting) { continue }
             var reminder = original
             reminder.id = FollowUpReminder.reminderId(for: original.id)
             reminder.title = FollowUpReminder.title(for: item.kind)
@@ -1339,8 +1339,10 @@ final class NotchController {
                                 grantCopy: "Grant Accessibility to send replies",
                                 failCopy: "Couldn't send reply")
         }
-        if let err = TerminalReplyInjector.send(text: text, bundleId: alert.bundleId,
-                                                completion: late) {
+        if let err = TerminalReplyInjector.send(
+            text: text, bundleId: alert.bundleId,
+            returnFocus: AppSettings.shared.returnFocusAfterReply,
+            completion: late) {
             showReplyError(err, alert: alert,
                            grantCopy: "Grant Accessibility to send replies",
                            failCopy: "Couldn't send reply")
@@ -1390,6 +1392,7 @@ final class NotchController {
                                                 bundleId: alert.bundleId,
                                                 appendReturn: answer.appendsReturn,
                                                 delivery: alert.answerDelivery,
+                                                returnFocus: AppSettings.shared.returnFocusAfterReply,
                                                 completion: { err in if let err { surface(err) } }) {
             surface(err)
             return

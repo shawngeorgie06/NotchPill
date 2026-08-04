@@ -67,10 +67,15 @@ enum TerminalReplyInjector {
     /// `nil` meaning "accepted". Failures that can only be discovered later (the
     /// target never taking focus) are reported through `completion`, which fires
     /// at most once and only for the async outcome.
+    /// - Parameter returnFocus: hand focus back to whatever was frontmost when
+    ///   the reply was sent. The target *has* to take focus to receive the
+    ///   paste, so this cannot mean "never leave" — it means "come straight
+    ///   back", which is the difference between a reply interrupting your work
+    ///   and a reply being sent from it.
     @MainActor
     @discardableResult
     static func send(text: String, bundleId: String?, appendReturn: Bool = true,
-                     delivery: Delivery = .paste,
+                     delivery: Delivery = .paste, returnFocus: Bool = false,
                      completion: ((ReplyError?) -> Void)? = nil) -> ReplyError? {
         let app = (bundleId?.isEmpty == false)
             ? NSRunningApplication.runningApplications(withBundleIdentifier: bundleId!).first
@@ -97,6 +102,11 @@ enum TerminalReplyInjector {
         }
 
         let targetBundleId = bundleId ?? ""
+        // Captured before activation, or it would just be the target.
+        // NotchPill itself is an accessory app and never frontmost, so this is
+        // the real app the user was looking at.
+        let previousApp = returnFocus
+            ? NSWorkspace.shared.frontmostApplication?.bundleIdentifier : nil
         // `app.activate()` alone reports success without moving focus when the
         // caller is a background accessory app, which is what NotchPill always
         // is. Every reply then hit the abort below and nothing was ever sent.
@@ -140,6 +150,12 @@ enum TerminalReplyInjector {
                 DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
                     restoreClipboard()
                     log("done — clipboard restored")
+                    // After the ⏎, never before: taking focus away mid-paste
+                    // would drop the rest of the reply into the wrong window.
+                    if let previousApp, previousApp != targetBundleId {
+                        log("returning focus to \(previousApp)")
+                        AppActivator.activate(bundleId: previousApp)
+                    }
                     completion?(nil)
                 }
             }
