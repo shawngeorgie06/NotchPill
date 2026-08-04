@@ -38,7 +38,9 @@ struct NotchRootView: View {
             return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: renderedAlerts)
         }
         if state.isExpanded || state.isCollapsing {
-            return NotchContentLayout.expandedDeckLayout(metrics: metrics, activities: expandedActivities)
+            return NotchContentLayout.expandedDeckLayout(
+                metrics: metrics, activities: expandedActivities,
+                page: state.resolvedExpandedDeckPage(for: expandedActivities.map(\.kind)))
         }
         return NotchContentLayout.collapsedLayout(metrics: metrics, chips: collapsedChips)
     }

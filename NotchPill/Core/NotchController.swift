@@ -152,7 +152,14 @@ final class NotchController {
             state.$openCodeUsage.map { _ in () }.eraseToAnyPublisher(),
             state.$ciRuns.map { _ in () }.eraseToAnyPublisher(),
             state.$updateProgress.map { _ in () }.eraseToAnyPublisher(),
-            state.$replyCompose.map { _ in () }.eraseToAnyPublisher()
+            state.$replyCompose.map { _ in () }.eraseToAnyPublisher(),
+            // Turning a page changes which card is on screen, and the pill is
+            // now sized to that card rather than the tallest one — so without
+            // this the height is computed correctly and never applied.
+            state.$expandedDeckPage.map { _ in () }.eraseToAnyPublisher(),
+            state.$codexQuota.map { _ in () }.eraseToAnyPublisher(),
+            state.$claudeQuota.map { _ in () }.eraseToAnyPublisher(),
+            state.$cursorQuota.map { _ in () }.eraseToAnyPublisher()
         )
         .receive(on: RunLoop.main)
         .sink { [weak self] in
@@ -500,7 +507,12 @@ final class NotchController {
         let activities = NotchContentSnapshot.expandedActivities(
             state: state, shelf: shelf, timer: TimerStore.shared, settings: AppSettings.shared
         )
-        return NotchContentLayout.expandedDeckSize(metrics: metrics, activities: activities)
+        // Same page the view is rendering. The window and the content have to
+        // agree on which card is on screen, or the pill is sized for one card
+        // while showing another.
+        return NotchContentLayout.expandedDeckSize(
+            metrics: metrics, activities: activities,
+            page: state.resolvedExpandedDeckPage(for: activities.map(\.kind)))
     }
 
     private func devReadyContentSize() -> CGSize {

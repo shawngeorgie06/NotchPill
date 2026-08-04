@@ -5218,3 +5218,53 @@ struct QuotaResetClockTests {
                                        calendar: calendar, locale: locale) == nil)
     }
 }
+
+@Suite("The deck is only as tall as the card on screen")
+struct DeckPageHeightTests {
+    private let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                                       designExpandedWidth: 640, designExpandedHeight: 190,
+                                       scale: 1, topGap: 10)
+    private func sessions(_ count: Int) -> [AgentSession] {
+        (0..<count).map {
+            AgentSession(id: "s\($0)", agent: "claude-code", project: "p",
+                         state: .working, lastActivity: Date())
+        }
+    }
+
+    /// The complaint that prompted this: paging right from a three-row agents
+    /// card to a usage card left the pill at the agents card's height, with
+    /// the difference showing as empty space.
+    @Test func aShortCardDoesNotInheritATallOne() {
+        let deck: [ExpandedActivity] = [
+            .agents(sessions(3)),
+            .claudeQuota(ClaudeQuota(sessionPercent: 26, weeklyPercent: 28)),
+        ]
+        let agentsPage = NotchContentLayout.expandedDeckSize(metrics: metrics,
+                                                            activities: deck, page: 0).height
+        let quotaPage = NotchContentLayout.expandedDeckSize(metrics: metrics,
+                                                           activities: deck, page: 1).height
+        #expect(quotaPage < agentsPage)
+    }
+
+    /// A quota card alone and the same card inside a deck of tall cards must
+    /// be the same height — that is the whole point.
+    @Test func aCardIsTheSameHeightWhereverItSits() {
+        let quota = ExpandedActivity.claudeQuota(ClaudeQuota(sessionPercent: 26, weeklyPercent: 28))
+        let alone = NotchContentLayout.expandedContentBaseHeight([quota], page: 0)
+        let inDeck = NotchContentLayout.expandedContentBaseHeight([.agents(sessions(3)), quota],
+                                                                  page: 1)
+        #expect(alone == inDeck)
+    }
+
+    /// A page index the view has not caught up with must not collapse the
+    /// pill; falling back to the tallest card is the old, safe behaviour.
+    @Test func anOutOfRangePageFallsBackRatherThanGuessing() {
+        let deck: [ExpandedActivity] = [
+            .agents(sessions(3)),
+            .claudeQuota(ClaudeQuota(sessionPercent: 26, weeklyPercent: 28)),
+        ]
+        let tallest = NotchContentLayout.expandedContentBaseHeight(deck)
+        #expect(NotchContentLayout.expandedContentBaseHeight(deck, page: 7) == tallest)
+        #expect(NotchContentLayout.expandedContentBaseHeight(deck, page: -1) == tallest)
+    }
+}
