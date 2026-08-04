@@ -113,6 +113,12 @@ final class AppSettings: ObservableObject {
     /// After a reply is delivered, hand focus back to whatever you were
     /// looking at. The agent's terminal has to come forward to receive the
     /// text either way — this decides whether you stay there afterwards.
+    ///
+    /// **On by default.** Replying from an overlay is something you do
+    /// *without* leaving what you were in; being dropped into a terminal you
+    /// did not ask to visit is the surprise, not the other way round. Tested
+    /// by someone who asked for this within minutes of the first reply landing
+    /// them somewhere they did not want to be.
     @Published var returnFocusAfterReply: Bool {
         didSet { defaults.set(returnFocusAfterReply, forKey: Keys.returnFocusAfterReply) }
     }
@@ -362,7 +368,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedCI: true,
             Keys.showClaudeUsage: false,
             Keys.showCursorUsage: false,
-            Keys.returnFocusAfterReply: false,
+            Keys.returnFocusAfterReply: true,
             Keys.showExpandedRecentActivity: false,
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
@@ -502,7 +508,7 @@ final class AppSettings: ObservableObject {
         // the network, so "back to defaults" has to mean they stop.
         showClaudeUsage = false
         showCursorUsage = false
-        returnFocusAfterReply = false
+        returnFocusAfterReply = true
         pinnedActivityKind = ""
         cardWeights = [:]
         notchScale = AppSettings.defaultNotchScale

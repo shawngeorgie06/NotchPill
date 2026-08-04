@@ -76,6 +76,7 @@ enum TerminalReplyInjector {
     @discardableResult
     static func send(text: String, bundleId: String?, appendReturn: Bool = true,
                      delivery: Delivery = .paste, returnFocus: Bool = false,
+                     directory: String? = nil,
                      completion: ((ReplyError?) -> Void)? = nil) -> ReplyError? {
         let app = (bundleId?.isEmpty == false)
             ? NSRunningApplication.runningApplications(withBundleIdentifier: bundleId!).first
@@ -91,6 +92,16 @@ enum TerminalReplyInjector {
             return err
         }
         guard let app else { log("REJECTED: app vanished"); return .targetNotRunning }
+
+        // Preferred when the terminal supports it: writes into the panel
+        // directly, so focus never moves and there is no flicker to return
+        // from. Falls through to the paste path whenever it declines.
+        if TerminalDirectDelivery.send(text: text, bundleId: bundleId,
+                                       directory: directory,
+                                       appendReturn: appendReturn) {
+            completion?(nil)
+            return nil
+        }
 
         // Keystroke delivery never touches the clipboard — nothing to save or
         // restore, and no window where the user's clipboard holds our payload.

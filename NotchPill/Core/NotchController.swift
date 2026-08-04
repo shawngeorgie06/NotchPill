@@ -929,7 +929,26 @@ final class NotchController {
     /// the process tree is walked instead — see `AgentSessionLocator`. Collapse
     /// the pill either way: leaving it hovering over the window you just asked
     /// to see defeats the purpose.
+    /// The working directory of the live session an alert belongs to.
+    ///
+    /// A peek carries no directory of its own, but the agents card has already
+    /// scanned for exactly this — and focus-free delivery needs it to tell one
+    /// terminal panel from another.
+    private func directoryForSession(_ sessionId: String?) -> String? {
+        guard let sessionId, !sessionId.isEmpty else { return nil }
+        return state.agentSessions.first {
+            $0.id == sessionId || $0.locatorId == sessionId
+        }?.directory
+    }
+
     private func focusAgentSession(_ session: AgentSession) {
+        // Logged at entry, before anything can go wrong. Without this, "the tap
+        // did nothing" and "the tap never reached here" read identically from
+        // outside — which is precisely how the jump stayed broken through two
+        // rounds of fixes aimed at code that was never being run.
+        LogStore.log("focus", "row tapped: \(session.displayName) "
+                     + "locator=\(session.locatorId ?? session.id) "
+                     + "dir=\(session.directory ?? "-")")
         // Prefer an app that is actually running: a desktop agent lists more
         // than one candidate bundle id, and activating one that is merely
         // installed would launch a second copy rather than show you the work.
@@ -1342,6 +1361,7 @@ final class NotchController {
         if let err = TerminalReplyInjector.send(
             text: text, bundleId: alert.bundleId,
             returnFocus: AppSettings.shared.returnFocusAfterReply,
+            directory: directoryForSession(alert.sessionId),
             completion: late) {
             showReplyError(err, alert: alert,
                            grantCopy: "Grant Accessibility to send replies",
