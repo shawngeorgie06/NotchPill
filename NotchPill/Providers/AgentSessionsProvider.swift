@@ -83,6 +83,12 @@ final class AgentSessionsProvider {
         onCursorQuotaUpdate?(nil)
     }
 
+    /// The agent's last spoken message for a session, for the reply composer.
+    /// Goes through the scanner so the file read stays off the main actor.
+    func lastAgentMessage(sessionId: String) async -> String? {
+        await scanner.lastAgentMessage(sessionId: sessionId)
+    }
+
     /// Called when a peek says a session is blocked (or has stopped being).
     func noteWaiting(sessionId: String?, waiting: Bool) {
         guard let id = sessionId, !id.isEmpty else { return }

@@ -1007,6 +1007,25 @@ final class NotchController {
         }
     }
 
+    /// Fills in the agent's last message for a peek that arrived without one.
+    ///
+    /// A hook signal says an agent finished but never what it said, so the
+    /// reply composer had nothing to show above the field — you were
+    /// answering a message you could not see. The transcript has it; this
+    /// reads it off the main actor and updates the peek in place.
+    private func enrichAgentMessage(for alert: DevReadyAlert) {
+        guard alert.agentMessage == nil, let sessionId = alert.sessionId,
+              !sessionId.isEmpty else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            guard let message = await agentSessions.lastAgentMessage(sessionId: sessionId)
+            else { return }
+            await MainActor.run {
+                self.state.setAgentMessage(message, forAlert: alert.id)
+            }
+        }
+    }
+
     private func presentDevReady(_ alert: DevReadyAlert, origin: String = "?") {
         guard AppSettings.shared.showDevReadyPings else {
             LogStore.log("peek", "suppressed (peeks are switched off) from=\(origin)", level: .warn)
@@ -1035,6 +1054,7 @@ final class NotchController {
         // each prompt is distinct. They now receive their own short timer below.
         if alert.kind == .waiting {
             state.enqueueWaiting(alert)   // replace-per-session, no fingerprint dedup
+            enrichAgentMessage(for: alert)
             scheduleWaitingDismiss(for: alert)
             engagePill()
             if AppSettings.shared.devReadyPlaySound {
@@ -1060,6 +1080,9 @@ final class NotchController {
         let batch = pendingDevReadyAlerts
         pendingDevReadyAlerts = []
         state.enqueueDevReady(batch)
+        // Hook signals carry no transcript text; fill it in behind the peek so
+        // the reply composer has something to show.
+        for queued in batch { enrichAgentMessage(for: queued) }
         engagePill()
         if AppSettings.shared.devReadyPlaySound {
             NSSound(named: AppSettings.shared.devReadySound)?.play()

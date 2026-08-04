@@ -5332,3 +5332,49 @@ struct ReplyContextTests {
             isCodex: false) == nil)
     }
 }
+
+@Suite("A peek from a hook still gets its context filled in")
+struct AgentMessageEnrichmentTests {
+    @MainActor
+    private func state(with alert: DevReadyAlert) -> NotchState {
+        let state = NotchState()
+        state.enqueueDevReady([alert])
+        return state
+    }
+
+    /// The measured case: a Stop-hook peek arrives with no transcript text, so
+    /// the composer had nothing above the field.
+    @MainActor @Test func fillsInAMissingMessage() {
+        let alert = DevReadyAlert(title: "NotchPill", agent: "claude-code", sessionId: "s1")
+        let state = self.state(with: alert)
+        #expect(state.devReadyAlerts.first?.replyContextText == nil)
+        state.setAgentMessage("Shall I cut the release?", forAlert: alert.id)
+        #expect(state.devReadyAlerts.first?.replyContextText == "Shall I cut the release?")
+    }
+
+    /// The composer holds its own copy of the alert. Updating only the peek
+    /// left the field blank, which is the bug this exists to fix.
+    @MainActor @Test func updatesAnOpenComposerToo() {
+        let alert = DevReadyAlert(title: "NotchPill", agent: "claude-code", sessionId: "s1")
+        let state = self.state(with: alert)
+        state.beginReply(to: alert)
+        state.setAgentMessage("Shall I cut the release?", forAlert: alert.id)
+        #expect(state.replyCompose?.contextText == "Shall I cut the release?")
+    }
+
+    /// A message already present is the more specific one — a later read must
+    /// not overwrite it.
+    @MainActor @Test func neverOverwritesWhatIsAlreadyThere() {
+        let alert = DevReadyAlert(title: "p", agent: "claude-code", sessionId: "s1",
+                                  agentMessage: "original")
+        let state = self.state(with: alert)
+        state.setAgentMessage("later read", forAlert: alert.id)
+        #expect(state.devReadyAlerts.first?.agentMessage == "original")
+    }
+
+    @MainActor @Test func ignoresAnAlertThatHasGone() {
+        let state = NotchState()
+        state.setAgentMessage("anything", forAlert: "not-here")
+        #expect(state.devReadyAlerts.isEmpty)
+    }
+}

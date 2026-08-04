@@ -272,6 +272,20 @@ final class NotchState: ObservableObject {
         devReadyAlerts.removeAll { $0.id == id }
     }
 
+    /// Fills in an on-screen peek's agent message once it has been read.
+    ///
+    /// Updates the live composer too: the peek and the composer hold separate
+    /// copies of the alert, and updating only the peek left the field with
+    /// nothing above it — which is the bug this exists to fix.
+    func setAgentMessage(_ message: String, forAlert id: String) {
+        guard let index = devReadyAlerts.firstIndex(where: { $0.id == id }),
+              devReadyAlerts[index].agentMessage == nil else { return }
+        devReadyAlerts[index].agentMessage = message
+        if replyCompose?.targetAlert.id == id {
+            replyCompose?.targetAlert.agentMessage = message
+        }
+    }
+
     /// Drops only `.finished` peeks, leaving `.waiting` peeks in place. The
     /// finished auto-dismiss timer uses this so a finished ping from terminal B
     /// can never erase terminal A's still-blocked question.

@@ -521,6 +521,25 @@ actor AgentSessionScanner {
         return nil
     }
 
+    /// The agent's last message for a session id, found by locating its
+    /// transcript.
+    ///
+    /// Needed because a peek from a hook carries no transcript text — and
+    /// hooks are the primary path, so populating this only where the peek was
+    /// *built* from a transcript missed the ordinary case entirely.
+    func lastAgentMessage(sessionId: String, now: Date = Date()) -> String? {
+        for url in transcripts(now: now) {
+            let isCodex = url.path.contains("/.codex/")
+            let name = url.deletingPathExtension().lastPathComponent
+            // Codex names its files `rollout-<timestamp>-<id>`; the hook sends
+            // the bare id.
+            guard name == sessionId || (isCodex && name.hasSuffix(sessionId)) else { continue }
+            guard let text = text(of: url, tail: 262_144) else { return nil }
+            return Self.lastAgentMessage(in: text, isCodex: isCodex)
+        }
+        return nil
+    }
+
     /// Trimmed, redacted, and cut to something a notch row can hold.
     private nonisolated static func clean(_ raw: String?) -> String? {
         guard let raw else { return nil }
