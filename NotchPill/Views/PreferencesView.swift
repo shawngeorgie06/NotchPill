@@ -97,6 +97,7 @@ struct PreferencesView: View {
         var out: [(String, String)] = []
         if settings.showExpandedAgents { out.append(("agents", "Live agents")) }
         if settings.showClaudeUsage { out.append(("claudeQuota", "Claude usage limits")) }
+        if settings.showCursorUsage { out.append(("cursorQuota", "Cursor usage limits")) }
         if settings.showExpandedCI { out.append(("ci", "CI status")) }
         if settings.showExpandedRecentActivity { out.append(("recentAlerts", "Recent activity")) }
         if settings.showExpandedMedia { out.append(("media", "Now playing")) }
@@ -154,6 +155,15 @@ struct PreferencesView: View {
                      + "will ask for permission the first time. Nothing is sent "
                      + "anywhere except Anthropic, and it stops working if you sign "
                      + "out of Claude Code.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle("Cursor usage limits", isOn: $settings.showCursorUsage)
+                Text("Reads the session token the Cursor app saved on this Mac. "
+                     + "No prompt, nothing sent anywhere except Cursor, and it "
+                     + "stops working if you sign out of Cursor.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

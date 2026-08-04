@@ -887,6 +887,7 @@ enum ExpandedActivityBuilder {
         openCodeUsage: OpenCodeUsage? = nil,
         codexQuota: CodexQuota? = nil,
         claudeQuota: ClaudeQuota? = nil,
+        cursorQuota: CursorQuota? = nil,
         ciRuns: [CIRun] = [],
         recentAlerts: [DevReadyAlert] = [],
         showMedia: Bool,
@@ -911,6 +912,7 @@ enum ExpandedActivityBuilder {
         // Gated on its own setting, not `showAgents`: this one costs a
         // Keychain prompt, so it appears only when explicitly asked for.
         if let claudeQuota { items.append(.claudeQuota(claudeQuota)) }
+        if let cursorQuota { items.append(.cursorQuota(cursorQuota)) }
         // Right after the agents: both answer "is the thing I started done yet?"
         if showCI, !ciRuns.isEmpty { items.append(.ci(ciRuns)) }
         if showRecentAlerts, !recentAlerts.isEmpty { items.append(.recentAlerts(recentAlerts)) }
@@ -980,6 +982,8 @@ struct ExpandedActivityCard: View {
                 codexQuotaCard(quota)
             case .claudeQuota(let quota):
                 claudeQuotaCard(quota)
+            case .cursorQuota(let quota):
+                cursorQuotaCard(quota)
             case .ci(let runs):
                 ciCard(runs)
             case .recentAlerts(let alerts):
@@ -1113,6 +1117,40 @@ struct ExpandedActivityCard: View {
                 for: quota.sessionPercent >= quota.weeklyPercent
                     ? quota.sessionResetsAt : quota.weeklyResetsAt)
             Text([reset, quota.extraSpendLabel.map { "extra " + $0 }]
+                    .compactMap { $0 }.joined(separator: " · "))
+                .font(font(size: 10))
+                .foregroundStyle(.white.opacity(0.5))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Cursor's included usage for the billing cycle.
+    ///
+    /// One meter, not two: Cursor meters a single pool per cycle rather than
+    /// Claude's session/week pair. The raw counts sit under the bar because the
+    /// percentage alone cannot distinguish "100% of 500" from "100% of 9201".
+    private func cursorQuotaCard(_ quota: CursorQuota) -> some View {
+        VStack(alignment: .leading, spacing: s(3)) {
+            HStack(spacing: s(4)) {
+                Image(systemName: "cursorarrow")
+                    .font(.system(size: s(9)))
+                Text("Cursor · limits")
+                    .font(font(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.45))
+
+            if quota.isUnlimited {
+                Text("unlimited")
+                    .font(font(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+            } else {
+                quotaMeter(label: quota.usageLabel, percent: quota.percentUsed)
+            }
+
+            Text([CursorQuota.cycleLabel(for: quota.cycleEnd),
+                  quota.membershipLabel,
+                  quota.onDemandEnabled ? "on-demand on" : nil]
                     .compactMap { $0 }.joined(separator: " · "))
                 .font(font(size: 10))
                 .foregroundStyle(.white.opacity(0.5))

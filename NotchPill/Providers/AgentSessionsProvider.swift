@@ -17,6 +17,7 @@ final class AgentSessionsProvider {
     var onOpenCodeUsageUpdate: ((OpenCodeUsage?) -> Void)?
     var onCodexQuotaUpdate: ((CodexQuota?) -> Void)?
     var onClaudeQuotaUpdate: ((ClaudeQuota?) -> Void)?
+    var onCursorQuotaUpdate: ((CursorQuota?) -> Void)?
 
     private let pollInterval: TimeInterval = 3
     private var timer: Timer?
@@ -25,6 +26,7 @@ final class AgentSessionsProvider {
     private var lastOpenCodeUsage: OpenCodeUsage?
     private var lastCodexQuota: CodexQuota?
     private var lastClaudeQuota: ClaudeQuota?
+    private var lastCursorQuota: CursorQuota?
     private let scanner = AgentSessionScanner()
     /// Rate-limits itself to one request a minute, so this is safe to consult
     /// on every scan.
@@ -32,6 +34,9 @@ final class AgentSessionsProvider {
     /// Only ever consulted when the setting is on: the first read raises a
     /// Keychain consent prompt.
     private let claudeUsage = ClaudeUsageService()
+    /// Reads a token from a file rather than the Keychain, so this costs no
+    /// prompt — but it is still only consulted when asked for.
+    private let cursorUsage = CursorUsageService()
     private var scanning = false
     /// Invalidates results from scans started before the last stop.
     private var generation = 0
@@ -61,6 +66,8 @@ final class AgentSessionsProvider {
         lastLabels = []
         lastOpenCodeUsage = nil
         lastCodexQuota = nil
+        lastClaudeQuota = nil
+        lastCursorQuota = nil
         // A scan already in flight would publish after this, putting the card
         // back on screen moments after it was told to go away. Bump the
         // generation so its result is discarded.
@@ -73,6 +80,7 @@ final class AgentSessionsProvider {
         onOpenCodeUsageUpdate?(nil)
         onCodexQuotaUpdate?(nil)
         onClaudeQuotaUpdate?(nil)
+        onCursorQuotaUpdate?(nil)
     }
 
     /// Called when a peek says a session is blocked (or has stopped being).
@@ -82,12 +90,20 @@ final class AgentSessionsProvider {
     }
 
     private func scan() {
-        guard AppSettings.shared.showExpandedAgents else {
+        // The Claude card has its own switch, so turning the live-agents card
+        // off must not silently take it down too — the setting that is still
+        // ticked would then describe a card that never appears.
+        guard AppSettings.shared.showExpandedAgents
+            || AppSettings.shared.showClaudeUsage
+            || AppSettings.shared.showCursorUsage else {
             if !lastPublished.isEmpty { lastPublished = []; onUpdate?([]) }
             if lastOpenCodeUsage != nil { lastOpenCodeUsage = nil; onOpenCodeUsageUpdate?(nil) }
             if lastCodexQuota != nil { lastCodexQuota = nil; onCodexQuotaUpdate?(nil) }
+            if lastClaudeQuota != nil { lastClaudeQuota = nil; onClaudeQuotaUpdate?(nil) }
+            if lastCursorQuota != nil { lastCursorQuota = nil; onCursorQuotaUpdate?(nil) }
             return
         }
+        let wantsAgents = AppSettings.shared.showExpandedAgents
         // One scan at a time. A slow disk must not queue up overlapping walks
         // that all publish the same answer.
         guard !scanning else { return }
@@ -99,22 +115,26 @@ final class AgentSessionsProvider {
         let blocked = blockedSessions
         let issued = generation
         let wantsClaude = AppSettings.shared.showClaudeUsage
+        let wantsCursor = AppSettings.shared.showCursorUsage
         Task { [weak self] in
             guard let self else { return }
-            let sessions = await scanner.sessions(now: now, blocked: blocked)
-            let usage = await scanner.openCodeUsage(since: Calendar.current.startOfDay(for: now))
+            let sessions = wantsAgents
+                ? await scanner.sessions(now: now, blocked: blocked) : []
+            let usage = wantsAgents
+                ? await scanner.openCodeUsage(since: Calendar.current.startOfDay(for: now)) : nil
             // Live from OpenAI, falling back to the transcript only when the
             // API cannot be reached. The transcript is a cached copy of the
             // number from your last request: it expires with the two-hour
             // liveness window, and it was measured showing "4% used · 0 credits"
             // while the account was actually at 100% with a $298 balance.
-            var quota = await self.codexUsage.quota(now: now)
-            if quota == nil { quota = await scanner.codexQuota(now: now) }
+            var quota = wantsAgents ? await self.codexUsage.quota(now: now) : nil
+            if wantsAgents, quota == nil { quota = await scanner.codexQuota(now: now) }
             // Never touched unless asked for — the first read prompts.
             let claude = wantsClaude ? await self.claudeUsage.quota(now: now) : nil
+            let cursor = wantsCursor ? await self.cursorUsage.quota(now: now) : nil
             await MainActor.run {
                 self.publish(sessions, usage: usage, quota: quota,
-                             claude: claude, from: issued)
+                             claude: claude, cursor: cursor, from: issued)
             }
         }
     }
@@ -155,7 +175,7 @@ final class AgentSessionsProvider {
     }
 
     private func publish(_ ordered: [AgentSession], usage: OpenCodeUsage?, quota: CodexQuota?,
-                         claude: ClaudeQuota?, from issued: Int) {
+                         claude: ClaudeQuota?, cursor: CursorQuota?, from issued: Int) {
         guard issued == generation else { return }   // stopped mid-scan
         scanning = false
         if usage != lastOpenCodeUsage {
@@ -169,6 +189,10 @@ final class AgentSessionsProvider {
         if claude != lastClaudeQuota {
             lastClaudeQuota = claude
             onClaudeQuotaUpdate?(claude)
+        }
+        if cursor != lastCursorQuota {
+            lastCursorQuota = cursor
+            onCursorQuotaUpdate?(cursor)
         }
         // An idle row is value-identical between polls, so suppressing the
         // publish froze its age on screen: "idle 4m" while ten minutes passed.

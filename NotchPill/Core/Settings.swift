@@ -103,6 +103,13 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(showClaudeUsage, forKey: Keys.showClaudeUsage) }
     }
 
+    /// Cursor's included-usage figure. Cheaper to justify than the Claude
+    /// card — the token is in a file, so nothing prompts — but it is still a
+    /// network call about your account, so it stays opt-in for symmetry.
+    @Published var showCursorUsage: Bool {
+        didSet { defaults.set(showCursorUsage, forKey: Keys.showCursorUsage) }
+    }
+
     @Published var showExpandedCI: Bool {
         didSet { defaults.set(showExpandedCI, forKey: Keys.showExpandedCI) }
     }
@@ -300,6 +307,7 @@ final class AppSettings: ObservableObject {
         static let showExpandedAgents = "showExpandedAgents"
         static let showExpandedCI = "showExpandedCI"
         static let showClaudeUsage = "showClaudeUsage"
+        static let showCursorUsage = "showCursorUsage"
         static let showExpandedRecentActivity = "showExpandedRecentActivity"
         static let pinnedActivityKind = "pinnedActivityKind"
         static let cardWeights = "cardWeights"
@@ -345,6 +353,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedAgents: true,
             Keys.showExpandedCI: true,
             Keys.showClaudeUsage: false,
+            Keys.showCursorUsage: false,
             Keys.showExpandedRecentActivity: false,
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
@@ -382,6 +391,7 @@ final class AppSettings: ObservableObject {
         showExpandedAgents = defaults.bool(forKey: Keys.showExpandedAgents)
         showExpandedCI = defaults.bool(forKey: Keys.showExpandedCI)
         showClaudeUsage = defaults.bool(forKey: Keys.showClaudeUsage)
+        showCursorUsage = defaults.bool(forKey: Keys.showCursorUsage)
         showExpandedRecentActivity = defaults.bool(forKey: Keys.showExpandedRecentActivity)
         pinnedActivityKind = defaults.string(forKey: Keys.pinnedActivityKind) ?? ""
         cardWeights = (defaults.dictionary(forKey: Keys.cardWeights) as? [String: Double]) ?? [:]
@@ -478,6 +488,10 @@ final class AppSettings: ObservableObject {
         showExpandedAgents = true
         showExpandedCI = true
         showExpandedRecentActivity = false
+        // Both off on reset. These are the only cards that read an account over
+        // the network, so "back to defaults" has to mean they stop.
+        showClaudeUsage = false
+        showCursorUsage = false
         pinnedActivityKind = ""
         cardWeights = [:]
         notchScale = AppSettings.defaultNotchScale

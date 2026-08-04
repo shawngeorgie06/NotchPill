@@ -52,6 +52,7 @@ enum NotchContentSnapshot {
             openCodeUsage: state.openCodeUsage,
             codexQuota: state.codexQuota,
             claudeQuota: state.claudeQuota,
+            cursorQuota: state.cursorQuota,
             ciRuns: state.ciRuns,
             recentAlerts: state.recentDevReadyAlerts,
             showMedia: settings.showExpandedMedia,

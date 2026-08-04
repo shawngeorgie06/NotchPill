@@ -4664,3 +4664,131 @@ struct ClaudeUsageFetcherTests {
         #expect(ClaudeQuota.resetLabel(for: nil, now: now) == nil)
     }
 }
+
+@Suite("Cursor usage over the account API")
+struct CursorUsageFetcherTests {
+    /// The shape cursor.com/api/usage-summary actually returned, trimmed.
+    private static let payload = """
+    {"billingCycleStart":"2026-07-16T20:05:08.000Z",
+     "billingCycleEnd":"2026-08-16T20:05:08.000Z",
+     "membershipType":"pro_student","limitType":"user","isUnlimited":false,
+     "individualUsage":{
+       "plan":{"enabled":true,"used":2000,"limit":2000,"remaining":0,
+               "breakdown":{"included":2000,"bonus":7201,"total":9201},
+               "autoPercentUsed":100,"apiPercentUsed":100,"totalPercentUsed":100},
+       "onDemand":{"enabled":false,"used":0,"limit":null,"remaining":null}},
+     "teamUsage":{}}
+    """
+
+    @Test func parsesLivePayload() throws {
+        let quota = try #require(CursorUsageFetcher.quota(
+            in: Data(Self.payload.utf8), now: Date(timeIntervalSince1970: 1_754_000_000)))
+        #expect(quota.used == 2000)
+        #expect(quota.limit == 2000)
+        #expect(quota.remaining == 0)
+        #expect(quota.percentUsed == 100)
+        #expect(quota.included == 2000)
+        #expect(quota.bonus == 7201)
+        #expect(quota.membership == "pro_student")
+        #expect(quota.isUnlimited == false)
+        #expect(quota.onDemandEnabled == false)
+        #expect(quota.cycleEnd != nil)
+    }
+
+    /// The plan key is raw; the card must not print "pro_student" at a user.
+    @Test func tidiesMembershipForDisplay() {
+        var quota = CursorQuota(used: 1, limit: 2, included: nil, bonus: nil,
+                                percentUsed: 50, cycleEnd: nil,
+                                membership: "pro_student", isUnlimited: false,
+                                onDemandEnabled: false, updatedAt: nil)
+        #expect(quota.membershipLabel == "Pro Student")
+        quota.membership = ""
+        #expect(quota.membershipLabel == nil)
+    }
+
+    /// "used of limit", never "remaining": at the cap, a remaining figure of
+    /// zero reads exactly like an account that has done nothing all month.
+    @Test func labelsUsageUnambiguously() {
+        let full = CursorQuota(used: 2000, limit: 2000, included: nil, bonus: nil,
+                               percentUsed: 100, cycleEnd: nil, membership: nil,
+                               isUnlimited: false, onDemandEnabled: false, updatedAt: nil)
+        #expect(full.usageLabel == "2000 of 2000")
+        let unlimited = CursorQuota(used: 0, limit: 0, included: nil, bonus: nil,
+                                    percentUsed: 0, cycleEnd: nil, membership: nil,
+                                    isUnlimited: true, onDemandEnabled: false, updatedAt: nil)
+        #expect(unlimited.usageLabel == "unlimited")
+    }
+
+    /// An unlimited plan carries no plan block. That is an answer, not a failure.
+    @Test func unlimitedWithoutPlanBlock() throws {
+        let json = """
+        {"isUnlimited":true,"membershipType":"business",
+         "billingCycleEnd":"2026-08-16T20:05:08.000Z","individualUsage":{}}
+        """
+        let quota = try #require(CursorUsageFetcher.quota(in: Data(json.utf8)))
+        #expect(quota.isUnlimited)
+        #expect(quota.membershipLabel == "Business")
+    }
+
+    @Test func rejectsUnrelatedJSON() {
+        #expect(CursorUsageFetcher.quota(in: Data(#"{"error":"nope"}"#.utf8)) == nil)
+        #expect(CursorUsageFetcher.quota(in: Data("not json".utf8)) == nil)
+    }
+
+    /// The server's own percentage wins: 1999/2000 computed locally rounds to
+    /// 100 and claims a limit that has not been reached.
+    @Test func prefersServerPercent() throws {
+        let json = """
+        {"individualUsage":{"plan":{"used":1999,"limit":2000,"totalPercentUsed":99}}}
+        """
+        let quota = try #require(CursorUsageFetcher.quota(in: Data(json.utf8)))
+        #expect(quota.percentUsed == 99)
+    }
+
+    /// Without a server percentage it rounds down, for the same reason.
+    @Test func computesPercentDownWhenAbsent() throws {
+        let json = #"{"individualUsage":{"plan":{"used":1999,"limit":2000}}}"#
+        let quota = try #require(CursorUsageFetcher.quota(in: Data(json.utf8)))
+        #expect(quota.percentUsed == 99)
+    }
+
+    @Test func readsSubjectFromTokenPayload() throws {
+        // {"sub":"auth0|user_01ABC","exp":1}
+        let body = Data(#"{"sub":"auth0|user_01ABC","exp":1}"#.utf8)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let creds = try #require(CursorUsageFetcher.credentials(token: "aaa.\(body).bbb"))
+        #expect(creds.subject == "user_01ABC")
+    }
+
+    @Test func rejectsTokensWithNoUsableSubject() {
+        #expect(CursorUsageFetcher.credentials(token: "") == nil)
+        #expect(CursorUsageFetcher.credentials(token: "   ") == nil)
+        #expect(CursorUsageFetcher.credentials(token: "notajwt") == nil)
+        #expect(CursorUsageFetcher.credentials(token: "aaa.!!!notbase64!!!.bbb") == nil)
+    }
+
+    /// The cookie Cursor expects is `<sub>::<token>`. Getting the separator
+    /// wrong authenticates as nobody and returns an empty plan rather than an
+    /// error, which is the worst possible failure for a gauge.
+    @Test func buildsSessionCookie() {
+        let request = CursorUsageFetcher.usageRequest(
+            .init(accessToken: "TOKEN", subject: "user_1"))
+        #expect(request.value(forHTTPHeaderField: "Cookie")
+                == "WorkosCursorSessionToken=user_1::TOKEN")
+        #expect(request.url == CursorUsageFetcher.usageEndpoint)
+    }
+
+    /// A GET, deliberately. The dashboard POSTs carry the same numbers but
+    /// reject any request lacking a browser Origin header, and forging one to
+    /// get past a CSRF check is not something this app should do.
+    @Test func usesTheEndpointThatNeedsNoForgedOrigin() {
+        #expect(CursorUsageFetcher.usageEndpoint.path == "/api/usage-summary")
+        let request = CursorUsageFetcher.usageRequest(
+            .init(accessToken: "T", subject: "S"))
+        #expect(request.httpMethod == nil || request.httpMethod == "GET")
+        #expect(request.value(forHTTPHeaderField: "Origin") == nil)
+    }
+}
