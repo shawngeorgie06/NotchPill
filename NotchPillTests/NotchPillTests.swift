@@ -5378,3 +5378,82 @@ struct AgentMessageEnrichmentTests {
         #expect(state.devReadyAlerts.isEmpty)
     }
 }
+
+@Suite("Media progress moves on its own")
+struct MediaProgressTests {
+    /// The adapter sends an ISO 8601 string. The parser accepted only numbers,
+    /// so it returned nil for every real payload — and with no anchor there is
+    /// nothing to interpolate from, which is why the bar sat frozen.
+    @Test func parsesTheTimestampTheAdapterActuallySends() throws {
+        let payload: [String: Any] = ["timestamp": "2026-08-04T18:32:24Z"]
+        let date = try #require(MediaRemoteBridge.parseTimestamp(payload))
+        #expect(abs(date.timeIntervalSince1970 - 1_785_868_344) < 1)
+    }
+
+    @Test func stillAcceptsNumericTimestamps() throws {
+        #expect(MediaRemoteBridge.parseTimestamp(["timestampEpochMicros": NSNumber(value: 1_785_868_344_000_000)]) != nil)
+        #expect(MediaRemoteBridge.parseTimestamp(["timestamp": NSNumber(value: 1_785_868_344)]) != nil)
+        #expect(MediaRemoteBridge.parseTimestamp([:]) == nil)
+        #expect(MediaRemoteBridge.parseTimestamp(["timestamp": "not a date"]) == nil)
+    }
+
+    @Test func acceptsFractionalSeconds() {
+        #expect(MediaRemoteBridge.parseISOTimestamp("2026-08-04T18:32:24.512Z") != nil)
+        #expect(MediaRemoteBridge.parseISOTimestamp("2026-08-04T18:32:24Z") != nil)
+        #expect(MediaRemoteBridge.parseISOTimestamp("   ") == nil)
+    }
+
+    /// The measured case: a browser reporting elapsedTime 0 against a fixed
+    /// timestamp. The position has to come from the clock.
+    @Test func projectsPositionFromTheAnchor() throws {
+        let anchor = Date()
+        let np = NowPlaying(title: "t", artist: "a", isPlaying: true, elapsed: 0,
+                            duration: 102.6, playbackRate: 1, timestamp: anchor)
+        let after = try #require(np.interpolatedElapsed(at: anchor.addingTimeInterval(30)))
+        #expect(abs(after - 30) < 0.01)
+    }
+
+    @Test func neverRunsPastTheEndOrWhilePaused() throws {
+        let anchor = Date()
+        let playing = NowPlaying(title: "t", artist: "a", isPlaying: true, elapsed: 100,
+                                 duration: 102.6, playbackRate: 1, timestamp: anchor)
+        #expect(try #require(playing.interpolatedElapsed(at: anchor.addingTimeInterval(60))) == 102.6)
+        let paused = NowPlaying(title: "t", artist: "a", isPlaying: false, elapsed: 40,
+                                duration: 102.6, playbackRate: 0, timestamp: anchor)
+        #expect(try #require(paused.interpolatedElapsed(at: anchor.addingTimeInterval(60))) == 40)
+    }
+
+    /// A seek keeps the same track, artist and play state, so equality that
+    /// ignored position dropped it as a duplicate and the bar kept running
+    /// from the old anchor.
+    @Test func aSeekIsNotADuplicate() {
+        let anchor = Date()
+        let before = NowPlaying(title: "t", artist: "a", isPlaying: true, elapsed: 10,
+                                duration: 200, playbackRate: 1, timestamp: anchor)
+        let sought = NowPlaying(title: "t", artist: "a", isPlaying: true, elapsed: 150,
+                                duration: 200, playbackRate: 1,
+                                timestamp: anchor.addingTimeInterval(5))
+        #expect(before != sought)
+    }
+
+    /// A player whose position advances by itself must not republish every
+    /// poll: the bar is already moving without help.
+    @Test func normalPlaybackIsNotAChange() {
+        let anchor = Date()
+        let before = NowPlaying(title: "t", artist: "a", isPlaying: true, elapsed: 10,
+                                duration: 200, playbackRate: 1, timestamp: anchor)
+        let later = NowPlaying(title: "t", artist: "a", isPlaying: true, elapsed: 13,
+                               duration: 200, playbackRate: 1,
+                               timestamp: anchor.addingTimeInterval(3))
+        #expect(before == later)
+    }
+
+    @Test func aDifferentTrackIsAlwaysAChange() {
+        let now = Date()
+        let a = NowPlaying(title: "one", artist: "a", isPlaying: true, elapsed: 10,
+                           duration: 200, playbackRate: 1, timestamp: now)
+        let b = NowPlaying(title: "two", artist: "a", isPlaying: true, elapsed: 10,
+                           duration: 200, playbackRate: 1, timestamp: now)
+        #expect(a != b)
+    }
+}

@@ -31,7 +31,20 @@ struct NowPlaying {
 
 extension NowPlaying: Equatable {
     static func == (lhs: NowPlaying, rhs: NowPlaying) -> Bool {
-        lhs.title == rhs.title && lhs.artist == rhs.artist && lhs.isPlaying == rhs.isPlaying
+        guard lhs.title == rhs.title, lhs.artist == rhs.artist,
+              lhs.isPlaying == rhs.isPlaying else { return false }
+        // Position has to count, or a seek never reaches the view: the track,
+        // artist and play state are all unchanged, so the update is dropped as
+        // a duplicate and the bar keeps interpolating from the old anchor —
+        // drifting further from the truth the longer you listen.
+        //
+        // Compared against where the older reading *would* be by now rather
+        // than for exact equality, so a player that reports a continuously
+        // advancing position does not republish on every poll for a bar that
+        // is already moving on its own.
+        return lhs.timestamp == rhs.timestamp
+            || abs((lhs.interpolatedElapsed(at: rhs.timestamp ?? Date()) ?? 0)
+                   - (rhs.elapsed ?? 0)) < 1.5
     }
 }
 

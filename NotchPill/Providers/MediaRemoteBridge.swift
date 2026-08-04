@@ -214,7 +214,27 @@ final class MediaRemoteBridge {
         if let ts = payload["timestamp"] as? NSNumber {
             return Date(timeIntervalSince1970: ts.doubleValue)
         }
+        // The adapter sends an ISO 8601 *string*, which the numeric cases above
+        // reject — so this returned nil for every real payload. Without a
+        // timestamp there is nothing to interpolate from, and the progress bar
+        // sat frozen: measured against a browser reporting `elapsedTime: 0` and
+        // an unchanging timestamp, which is the position as of when playback
+        // last started or seeked. Interpolation is not a refinement here, it is
+        // the only thing that can move the bar at all.
+        if let raw = payload["timestamp"] as? String {
+            return parseISOTimestamp(raw)
+        }
         return nil
+    }
+
+    /// Accepts both spellings: the plain form the adapter sends today, and the
+    /// fractional-seconds form, which the strict parser rejects outright.
+    nonisolated static func parseISOTimestamp(_ raw: String) -> Date? {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return withFraction.date(from: trimmed) ?? ISO8601DateFormatter().date(from: trimmed)
     }
 
     private func artwork(from payload: [String: Any], title: String, artist: String) -> NSImage? {
