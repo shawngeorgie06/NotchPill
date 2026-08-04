@@ -106,14 +106,19 @@ actor ClaudeUsageService {
         lastFetch = now
         do {
             let fresh = try await fetch(now: now)
+            let recovered = consecutiveFailures > 0
             consecutiveFailures = 0
             retryNoEarlierThan = .distantPast
-            // Logged on success as well as failure. Silence is ambiguous — it
-            // reads the same whether the fetch worked or the code never ran —
-            // and that ambiguity has cost hours already today.
-            if cached == nil {
+            // Logged on the first success, and on the first success after any
+            // failure. Gating on `cached == nil` alone stopped working the
+            // moment the last reading began surviving launches: a restored
+            // value meant a real recovery logged nothing, and silence reads
+            // exactly like a dead fetch. That cost an hour of chasing a rate
+            // limit that had already cleared.
+            if cached == nil || recovered {
                 LogStore.log("claude", "usage \(fresh.sessionPercent)% session, "
-                             + "\(fresh.weeklyPercent)% week")
+                             + "\(fresh.weeklyPercent)% week"
+                             + (recovered ? " (recovered)" : ""))
             }
             cached = fresh
             persist(fresh)
