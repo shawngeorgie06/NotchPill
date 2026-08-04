@@ -138,29 +138,35 @@ final class NotchController {
             }
             .store(in: &cancellables)
 
-        Publishers.MergeMany(
-            state.$nowPlaying.map { _ in () }.eraseToAnyPublisher(),
-            state.$nextEvent.map { _ in () }.eraseToAnyPublisher(),
-            state.$appSwitchHint.map { _ in () }.eraseToAnyPublisher(),
-            state.$systemStats.map { _ in () }.eraseToAnyPublisher(),
-            state.$battery.map { _ in () }.eraseToAnyPublisher(),
-            AppSettings.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher(),
-            shelf.$items.map { _ in () }.eraseToAnyPublisher(),
-            TimerStore.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher(),
-            state.$devReadyAlerts.map { _ in () }.eraseToAnyPublisher(),
-            state.$agentSessions.map { _ in () }.eraseToAnyPublisher(),
-            state.$openCodeUsage.map { _ in () }.eraseToAnyPublisher(),
-            state.$ciRuns.map { _ in () }.eraseToAnyPublisher(),
-            state.$updateProgress.map { _ in () }.eraseToAnyPublisher(),
-            state.$replyCompose.map { _ in () }.eraseToAnyPublisher(),
-            // Turning a page changes which card is on screen, and the pill is
-            // now sized to that card rather than the tallest one — so without
-            // this the height is computed correctly and never applied.
-            state.$expandedDeckPage.map { _ in () }.eraseToAnyPublisher(),
-            state.$codexQuota.map { _ in () }.eraseToAnyPublisher(),
-            state.$claudeQuota.map { _ in () }.eraseToAnyPublisher(),
-            state.$cursorQuota.map { _ in () }.eraseToAnyPublisher()
-        )
+        // Built as an array rather than a variadic call. As a single
+        // expression this grew past what the type checker would finish in
+        // reasonable time — it compiled locally off an incremental cache and
+        // failed the cold Release build in CI. An array of an explicit type
+        // costs nothing to infer.
+        var relayoutTriggers: [AnyPublisher<Void, Never>] = []
+        relayoutTriggers.append(state.$nowPlaying.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$nextEvent.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$appSwitchHint.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$systemStats.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$battery.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(AppSettings.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(shelf.$items.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(TimerStore.shared.objectWillChange.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$devReadyAlerts.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$agentSessions.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$openCodeUsage.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$ciRuns.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$updateProgress.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$replyCompose.map { _ in () }.eraseToAnyPublisher())
+        // Turning a page changes which card is on screen, and the pill is
+        // sized to that card rather than the tallest — so without this the
+        // height is computed correctly and never applied.
+        relayoutTriggers.append(state.$expandedDeckPage.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$codexQuota.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$claudeQuota.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$cursorQuota.map { _ in () }.eraseToAnyPublisher())
+
+        Publishers.MergeMany(relayoutTriggers)
         .receive(on: RunLoop.main)
         .sink { [weak self] in
             // Defer so @Published settings and state are committed before relayout.
