@@ -957,7 +957,8 @@ final class NotchController {
         } ?? session.fallbackAppBundleIds.first
         AgentSessionLocator.focus(sessionId: session.locatorId ?? session.id,
                                   fallbackBundleId: fallback,
-                                  directory: session.directory)
+                                  directory: session.directory,
+                                  agent: session.agent)
         pillEngaged = false
         state.setExpanded(false)
     }

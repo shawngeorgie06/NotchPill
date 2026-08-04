@@ -39,13 +39,17 @@ enum AgentSessionLocator {
     @discardableResult
     static func focus(sessionId: String?,
                       fallbackBundleId: String?,
-                      directory: String? = nil) -> Bool {
+                      directory: String? = nil,
+                      agent: String? = nil) -> Bool {
         let table = processTable()
         let candidateEntries: [Entry] = sessionId.map { candidates(forSessionId: $0, in: table) } ?? []
         let located = candidateEntries.lazy.compactMap { entry in
             bundleId(walkingUpFrom: entry.pid, in: table).map { (entry, $0) }
         }.first
+        // Last resort before giving up: the terminal that is demonstrably
+        // hosting agents right now.
         let target: String? = located?.1 ?? fallbackBundleId
+            ?? soleTerminalHost(agent: agent, in: table)
         guard let target, !target.isEmpty else {
             // Silent until now, and it is the likeliest outcome: a terminal
             // agent writes no bundle id anywhere, so it can only be placed by
@@ -106,6 +110,57 @@ enum AgentSessionLocator {
         // "Asked, and the app is running." The escalation is asynchronous, so
         // this cannot report the observed outcome; `AppActivator` logs it.
         return true
+    }
+
+    /// The executable name of a CLI agent, per agent.
+    ///
+    /// Split by agent rather than pooled, because pooling is wrong the moment
+    /// someone runs two: measured here with Claude Code in cmux and Codex on
+    /// the desktop, a pooled lookup saw two hosts, called it ambiguous, and
+    /// declined — leaving the tap as broken as before.
+    static func executableName(for agent: String?) -> String? {
+        switch agent {
+        case "codex": return "codex"
+        case "opencode": return "opencode"
+        case "claude-code": return "claude"
+        default: return nil
+        }
+    }
+
+    /// True when this process *is* the named binary, rather than merely
+    /// mentioning it.
+    ///
+    /// Substring matching was measured picking up a `grep -iE "claude|codex"`
+    /// — a shell that mentions both, descends from a terminal, and is not an
+    /// agent at all. It made Codex look like it was hosted in two places and
+    /// the lookup declined. Only the executable itself counts.
+    static func isProcess(_ args: String, named executable: String) -> Bool {
+        guard let first = args.split(separator: " ", maxSplits: 1,
+                                     omittingEmptySubsequences: true).first else { return false }
+        let name = first.split(separator: "/").last.map(String.init) ?? String(first)
+        return name == executable
+    }
+
+    /// The terminal app hosting CLI agents, when there is exactly one.
+    ///
+    /// The session-id lookup only succeeds while a process carrying that id is
+    /// alive, and for Claude Code those are the *transient* shells it spawns to
+    /// run tools — they exist during a Bash call and vanish the moment it ends.
+    /// So an idle agent, which is precisely the row you want to jump to, could
+    /// not be placed at all, and terminal agents had no fallback: the tap did
+    /// nothing. This walks up from the agent processes themselves, which live
+    /// as long as the session does.
+    ///
+    /// Ambiguity declines. Two terminals hosting agents means jumping to the
+    /// wrong one is as likely as the right one, and a tap that does nothing is
+    /// better than a tap that takes you somewhere false.
+    static func soleTerminalHost(agent: String?, in table: [Entry]) -> String? {
+        guard let executable = executableName(for: agent) else { return nil }
+        let hosts = Set(table.lazy
+            .filter { isProcess($0.args, named: executable) }
+            .compactMap { bundleId(walkingUpFrom: $0.pid, in: table) }
+            .filter { $0 != Bundle.main.bundleIdentifier })
+        return hosts.count == 1 ? hosts.first : nil
     }
 
     /// Candidates in preference order. Kept independent of the process query

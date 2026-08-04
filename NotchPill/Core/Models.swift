@@ -372,8 +372,14 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         guard DevReadyProvider.demotingStaleWaiting(self).kind == kind else { return false }
         // A verdict goes to a waiting hook, so there is no terminal to target
         // and nothing to type — the one path that needs no window at all.
+        // Permission prompts (Allow/Deny) and plan reviews (Approve/Revise)
+        // keep their buttons: they are a decision the notch exists to collect.
         if answersByDecision { return true }
-        return TerminalReplyInjector.canTarget(self)
+        // The generic quick-answer capsules — Yes / No / 1 / 2 / 3 — are gone
+        // by request. They guessed at an agent's options from a signal, and
+        // guessing wrong put a wrong keystroke into someone's terminal. The ↰
+        // composer answers the same prompts without guessing.
+        return false
     }
 
     /// Apps that host a terminal, and so can receive a pasted reply.

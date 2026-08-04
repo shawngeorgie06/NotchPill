@@ -603,15 +603,22 @@ struct AgentBrandingTests {
 
     @Test("an unanswerable waiting row budgets no button height")
     @MainActor func unanswerableRowIsShorter() {
-        // The height budget must mirror `canAnswer`, or a Codex peek reserves
-        // space for buttons the row will not draw.
+        // The height budget must mirror `canAnswer`, or a peek reserves space
+        // for buttons the row will not draw. Since the generic capsules were
+        // removed, neither of these draws any — only a permission decision does.
         let codex = DevReadyAlert(title: "p", agent: "codex", bundleId: "com.openai.codex",
                                   kind: .waiting, message: "Approve?")
         let claude = DevReadyAlert(title: "p", agent: "claude-code", bundleId: "com.apple.Terminal",
                                    kind: .waiting, message: "Approve?")
+        let decision = DevReadyAlert(title: "p", agent: "claude-code",
+                                     bundleId: "com.apple.Terminal", kind: .waiting,
+                                     message: "Approve?", deliverySpec: "decision",
+                                     requestId: "req-1")
         #expect(NotchContentLayout.waitingExtraHeight(alerts: [codex], answerEnabled: true)
                 == WaitingLayoutTests.messageOnlyExtra)
         #expect(NotchContentLayout.waitingExtraHeight(alerts: [claude], answerEnabled: true)
+                == WaitingLayoutTests.messageOnlyExtra)
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: [decision], answerEnabled: true)
                 == WaitingLayoutTests.withButtonsExtra)
     }
 
@@ -668,9 +675,13 @@ struct WaitingLayoutTests {
     private let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
                                        designExpandedWidth: 640, designExpandedHeight: 190,
                                        scale: 0.65, topGap: 10)
+    /// A permission decision. Since the generic Yes/No/1/2/3 capsules were
+    /// removed, this is the only kind that still draws buttons — so it is the
+    /// only kind whose height budget has to include them.
     private let waitingAlerts = [
         DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal",
-                      kind: .waiting, message: "Allow Bash?")
+                      kind: .waiting, message: "Allow Bash?",
+                      deliverySpec: "decision", requestId: "req-1")
     ]
 
     @Test("a waiting alert with a message is taller than the finished peek")
@@ -710,15 +721,28 @@ struct WaitingLayoutTests {
                 == Self.messageOnlyExtra)
     }
 
+    /// The generic quick-answer capsules are gone: a plain waiting alert now
+    /// budgets the message and nothing else, however answerable it looks.
+    @Test("a plain waiting alert no longer budgets buttons")
+    @MainActor func plainWaitingHasNoButtons() {
+        let alerts = [DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal",
+                                    kind: .waiting, message: "Allow Bash?")]
+        #expect(NotchContentLayout.waitingExtraHeight(alerts: alerts, answerEnabled: true)
+                == Self.messageOnlyExtra)
+    }
+
     @Test("finished-only alerts get no waiting allowance")
     @MainActor func finishedOnly() {
         let alerts = [DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal")]
         #expect(NotchContentLayout.waitingExtraHeight(alerts: alerts, answerEnabled: true) == 0)
     }
 
+    /// A permission decision, for the same reason as `waitingAlerts`: it is
+    /// the only kind that still draws buttons.
     private func waiting(_ msg: String, session: String) -> DevReadyAlert {
         DevReadyAlert(title: "proj", bundleId: "com.apple.Terminal",
-                      kind: .waiting, message: msg, sessionId: session)
+                      kind: .waiting, message: msg, sessionId: session,
+                      deliverySpec: "decision", requestId: "req-\(session)")
     }
 
     @Test("each waiting row gets its own allowance")
@@ -5007,5 +5031,69 @@ struct UsageBackoffTests {
         #expect(calls == 1)
         _ = await service.quota(now: start.addingTimeInterval(700))
         #expect(calls == 2)
+    }
+}
+
+@Suite("Placing a terminal agent when its session id is gone")
+struct TerminalHostFallbackTests {
+    private func entry(_ pid: Int32, _ ppid: Int32, _ args: String) -> AgentSessionLocator.Entry {
+        AgentSessionLocator.Entry(pid: pid, ppid: ppid, args: args)
+    }
+
+    /// Substring matching was measured picking up `grep -iE "claude|codex"`:
+    /// a shell that mentions both, descends from a terminal, and is not an
+    /// agent. It made Codex look hosted in two places, so the lookup declined
+    /// and the tap stayed broken.
+    @Test func onlyTheBinaryItselfCounts() {
+        #expect(AgentSessionLocator.isProcess("/opt/homebrew/bin/claude --resume", named: "claude"))
+        #expect(AgentSessionLocator.isProcess("claude", named: "claude"))
+        #expect(!AgentSessionLocator.isProcess("grep -iE claude|codex", named: "claude"))
+        #expect(!AgentSessionLocator.isProcess("/bin/zsh -c claude foo", named: "claude"))
+        #expect(!AgentSessionLocator.isProcess("", named: "claude"))
+    }
+
+    @Test func mapsAgentsToTheirBinaries() {
+        #expect(AgentSessionLocator.executableName(for: "claude-code") == "claude")
+        #expect(AgentSessionLocator.executableName(for: "codex") == "codex")
+        #expect(AgentSessionLocator.executableName(for: "opencode") == "opencode")
+        // Cursor is a GUI app placed by its own bundle id, not a process walk.
+        #expect(AgentSessionLocator.executableName(for: "cursor") == nil)
+        #expect(AgentSessionLocator.executableName(for: nil) == nil)
+    }
+
+    /// Real bundles, because the walk resolves a path to a bundle id on disk.
+    /// Fake paths resolve to nil and would make every case look "ambiguous",
+    /// which is how the first draft of these tests passed for the wrong reason.
+    private static let finder = "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder"
+    private static let music = "/System/Applications/Music.app/Contents/MacOS/Music"
+
+    /// Two terminals hosting the same agent means jumping to the wrong one is
+    /// as likely as the right one.
+    @Test func declinesWhenTwoTerminalsHostTheSameAgent() {
+        let table = [
+            entry(10, 1, Self.finder),
+            entry(11, 10, "/opt/homebrew/bin/claude"),
+            entry(20, 1, Self.music),
+            entry(21, 20, "/opt/homebrew/bin/claude"),
+        ]
+        #expect(AgentSessionLocator.soleTerminalHost(agent: "claude-code", in: table) == nil)
+    }
+
+    /// The case that was broken: an idle Claude Code session, whose only
+    /// processes carrying the session id were transient tool shells that had
+    /// already exited. It is placed by the agent binary instead, which lives
+    /// as long as the session does — and resolves through `login`, which
+    /// carries no bundle of its own.
+    @Test func placesAnIdleAgentByItsRunningBinary() {
+        let table = [
+            entry(10, 1, Self.finder),
+            entry(11, 10, "/usr/bin/login -pf someone"),
+            entry(12, 11, "/opt/homebrew/bin/claude"),
+            entry(30, 1, Self.music),
+        ]
+        #expect(AgentSessionLocator.soleTerminalHost(agent: "claude-code", in: table)
+                == "com.apple.finder")
+        // A different agent, not running anywhere, must not borrow that answer.
+        #expect(AgentSessionLocator.soleTerminalHost(agent: "codex", in: table) == nil)
     }
 }
