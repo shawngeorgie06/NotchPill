@@ -434,19 +434,6 @@ struct ExpandedView: View {
                     .padding(.horizontal, 3)
                 }
             }
-            .overlay {
-                if activities.count > 1 {
-                    HStack {
-                        Image(systemName: "chevron.left")
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                    }
-                    .font(.system(size: 9 * textScale, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.16))
-                    .padding(.horizontal, 1)
-                    .allowsHitTesting(false)
-                }
-            }
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 24)
@@ -489,10 +476,6 @@ struct ExpandedView: View {
                             .accessibilityLabel("Show \(activityLabel(activities[index]))")
                         }
                     }
-
-                    Text("← →")
-                        .font(.system(size: 9 * textScale, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
 
                     Button { selectNextPage() } label: {
                         Image(systemName: "chevron.right")
