@@ -5588,3 +5588,114 @@ struct DesktopAgentReplyTests {
                                bundleId: "com.todesktop.230313mzl4w4u92").submitsOnDelivery)
     }
 }
+
+@Suite("Now-playing equality obeys its contract")
+struct NowPlayingEqualitySymmetryTests {
+    private func track(_ elapsed: TimeInterval, at date: Date,
+                       playing: Bool = true) -> NowPlaying {
+        NowPlaying(title: "t", artist: "a", isPlaying: playing, elapsed: elapsed,
+                   duration: 200, playbackRate: playing ? 1 : 0, timestamp: date)
+    }
+
+    /// Measured asymmetry: projecting whichever value was on the left made
+    /// `a == b` true while `b == a` was false, at the duration cap where
+    /// interpolation clamps in one direction only. Equatable requires
+    /// symmetry, and removeDuplicates and SwiftUI diffing both assume it.
+    @Test func symmetricAtTheDurationCap() {
+        let t0 = Date()
+        let nearEnd = track(199, at: t0)
+        let atEnd = track(200, at: t0.addingTimeInterval(60))
+        #expect((nearEnd == atEnd) == (atEnd == nearEnd))
+    }
+
+    @Test func symmetricAcrossOrdinaryCases() {
+        let t0 = Date()
+        let pairs: [(NowPlaying, NowPlaying)] = [
+            (track(10, at: t0), track(13, at: t0.addingTimeInterval(3))),      // playing on
+            (track(10, at: t0), track(150, at: t0.addingTimeInterval(3))),     // seek
+            (track(10, at: t0, playing: false),
+             track(80, at: t0.addingTimeInterval(3), playing: false)),         // paused, moved
+            (track(199, at: t0), track(0, at: t0.addingTimeInterval(120))),    // looped
+        ]
+        for (a, b) in pairs {
+            #expect((a == b) == (b == a), "asymmetric for \(a.elapsed ?? -1) vs \(b.elapsed ?? -1)")
+        }
+    }
+
+    @Test func reflexive() {
+        let np = track(42, at: Date())
+        #expect(np == np)
+    }
+
+    /// The behaviour the symmetry fix must not cost: ordinary playback still
+    /// compares equal, and a seek still does not.
+    @Test func stillTellsPlaybackFromASeek() {
+        let t0 = Date()
+        #expect(track(10, at: t0) == track(13, at: t0.addingTimeInterval(3)))
+        #expect(track(10, at: t0) != track(150, at: t0.addingTimeInterval(3)))
+    }
+}
+
+@Suite("The Cursor card survives a launch into a failure")
+struct CursorQuotaCacheTests {
+    private func store() -> UserDefaults {
+        UserDefaults(suiteName: "notchpill.tests.\(UUID().uuidString)")!
+    }
+
+    /// The Claude card kept its last reading across launches and the Cursor
+    /// card did not — the same bug, fixed in one place only.
+    @Test func servesTheLastGoodAnswerAfterRelaunch() async throws {
+        let defaults = store()
+        let body = """
+        {"membershipType":"pro_student","isUnlimited":false,
+         "billingCycleEnd":"2026-08-16T20:05:08.000Z",
+         "individualUsage":{"plan":{"used":2000,"limit":2000,
+           "breakdown":{"included":2000,"bonus":7201},
+           "autoPercentUsed":100,"apiPercentUsed":100,"totalPercentUsed":100},
+          "onDemand":{"enabled":false}}}
+        """
+        let ok = CursorUsageService(
+            transport: { request in
+                (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200,
+                                                  httpVersion: nil, headerFields: nil)!)
+            },
+            readToken: { "aaa." + Data(#"{"sub":"auth0|user_1"}"#.utf8)
+                .base64EncodedString().replacingOccurrences(of: "=", with: "") + ".bbb" },
+            store: defaults)
+        let first = try #require(await ok.quota(now: Date()))
+        #expect(first.used == 2000)
+
+        // A fresh service that can only fail, as though relaunched offline.
+        let failing = CursorUsageService(
+            transport: { _ in throw URLError(.notConnectedToInternet) },
+            readToken: { "aaa." + Data(#"{"sub":"auth0|user_1"}"#.utf8)
+                .base64EncodedString().replacingOccurrences(of: "=", with: "") + ".bbb" },
+            store: defaults)
+        let restored = try #require(await failing.quota(now: Date()))
+        #expect(restored.used == 2000)
+        #expect(restored.percentUsed == 100)
+        #expect(restored.membershipLabel == "Pro Student")
+        #expect(restored.autoPercentUsed == 100)
+    }
+
+    @Test func ignoresAnUnreadableCache() {
+        let defaults = store()
+        defaults.set(["used": "lots"], forKey: CursorUsageService.cacheKey)
+        #expect(CursorUsageService.restore(from: defaults) == nil)
+        #expect(CursorUsageService.restore(from: store()) == nil)
+    }
+
+    /// Old enough and it stops being an answer.
+    @Test func withholdsAnAnswerThatIsTooOld() async {
+        let defaults = store()
+        defaults.set(["used": 2000, "limit": 2000, "percent": 100,
+                      "at": Date().timeIntervalSince1970 - 7200],
+                     forKey: CursorUsageService.cacheKey)
+        let failing = CursorUsageService(
+            transport: { _ in throw URLError(.notConnectedToInternet) },
+            readToken: { "aaa." + Data(#"{"sub":"auth0|user_1"}"#.utf8)
+                .base64EncodedString().replacingOccurrences(of: "=", with: "") + ".bbb" },
+            store: defaults)
+        #expect(await failing.quota(now: Date()) == nil)
+    }
+}

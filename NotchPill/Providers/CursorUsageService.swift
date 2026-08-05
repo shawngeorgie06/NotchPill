@@ -21,6 +21,11 @@ actor CursorUsageService {
     private var retryNoEarlierThan = Date.distantPast
     private var consecutiveFailures = 0
     static let maxBackoff: TimeInterval = 3600
+    /// Where the last good answer is kept between launches, for the same
+    /// reason the Claude card keeps one: a launch that opens into a failure
+    /// has nothing to show, and a card that is simply absent reads as a
+    /// feature that was removed rather than a number that is late.
+    static let cacheKey = "cursorUsageCache"
 
     private let transport: (URLRequest) async throws -> (Data, URLResponse)
     private let readToken: () -> String?
@@ -28,9 +33,49 @@ actor CursorUsageService {
     init(transport: @escaping (URLRequest) async throws -> (Data, URLResponse) = {
              try await URLSession.shared.data(for: $0)
          },
-         readToken: @escaping () -> String? = CursorUsageService.storedToken) {
+         readToken: @escaping () -> String? = CursorUsageService.storedToken,
+         store: UserDefaults? = .standard) {
         self.transport = transport
         self.readToken = readToken
+        self.store = store
+        self.cached = Self.restore(from: store)
+    }
+
+    private let store: UserDefaults?
+
+    /// Counts and a timestamp. Nothing identifying, no token, and nothing that
+    /// is not already on screen.
+    static func restore(from store: UserDefaults?) -> CursorQuota? {
+        guard let raw = store?.dictionary(forKey: cacheKey),
+              let used = raw["used"] as? Int,
+              let limit = raw["limit"] as? Int,
+              let percent = raw["percent"] as? Int,
+              let stamp = raw["at"] as? Double else { return nil }
+        return CursorQuota(used: used, limit: limit, included: nil,
+                           bonus: raw["bonus"] as? Int,
+                           percentUsed: percent,
+                           autoPercentUsed: raw["auto"] as? Int,
+                           apiPercentUsed: raw["api"] as? Int,
+                           cycleEnd: (raw["cycleEnd"] as? Double)
+                               .map(Date.init(timeIntervalSince1970:)),
+                           membership: raw["membership"] as? String,
+                           isUnlimited: (raw["unlimited"] as? Bool) ?? false,
+                           onDemandEnabled: (raw["onDemand"] as? Bool) ?? false,
+                           updatedAt: Date(timeIntervalSince1970: stamp))
+    }
+
+    private func persist(_ quota: CursorQuota) {
+        var payload: [String: Any] = [
+            "used": quota.used, "limit": quota.limit, "percent": quota.percentUsed,
+            "unlimited": quota.isUnlimited, "onDemand": quota.onDemandEnabled,
+            "at": (quota.updatedAt ?? Date()).timeIntervalSince1970,
+        ]
+        if let auto = quota.autoPercentUsed { payload["auto"] = auto }
+        if let api = quota.apiPercentUsed { payload["api"] = api }
+        if let bonus = quota.bonus { payload["bonus"] = bonus }
+        if let membership = quota.membership { payload["membership"] = membership }
+        if let cycleEnd = quota.cycleEnd { payload["cycleEnd"] = cycleEnd.timeIntervalSince1970 }
+        store?.set(payload, forKey: Self.cacheKey)
     }
 
     static var databaseURL: URL {
@@ -70,16 +115,22 @@ actor CursorUsageService {
         lastFetch = now
         do {
             let fresh = try await fetch(now: now)
+            let recovered = consecutiveFailures > 0
             consecutiveFailures = 0
             retryNoEarlierThan = .distantPast
             // Logged the first time only. Silence reads the same whether the
             // fetch worked or the code never ran, and that ambiguity has cost
             // real hours on this feature already.
-            if cached == nil {
+            // Also on the first success after a failure: gating on `cached ==
+            // nil` alone stops working the moment a reading survives launches,
+            // and silence reads exactly like a dead card.
+            if cached == nil || recovered {
                 LogStore.log("cursor", "usage \(fresh.percentUsed)% of "
-                             + "\(fresh.limit) (\(fresh.membership ?? "?"))")
+                             + "\(fresh.limit) (\(fresh.membership ?? "?"))"
+                             + (recovered ? " (recovered)" : ""))
             }
             cached = fresh
+            persist(fresh)
             return fresh
         } catch let error as CursorUsageFetcher.FetchError {
             switch error {

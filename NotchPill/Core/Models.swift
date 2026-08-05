@@ -42,9 +42,19 @@ extension NowPlaying: Equatable {
         // than for exact equality, so a player that reports a continuously
         // advancing position does not republish on every poll for a bar that
         // is already moving on its own.
-        return lhs.timestamp == rhs.timestamp
-            || abs((lhs.interpolatedElapsed(at: rhs.timestamp ?? Date()) ?? 0)
-                   - (rhs.elapsed ?? 0)) < 1.5
+        //
+        // Ordered by timestamp, not by argument position. Projecting whichever
+        // value happened to be on the left made this asymmetric — measured at
+        // the duration cap, where interpolation clamps in one direction only:
+        // `a == b` was true while `b == a` was false. Equatable requires
+        // symmetry, and both `removeDuplicates` and SwiftUI's diffing assume
+        // it, so an asymmetric answer is a bug wherever it is believed.
+        if lhs.timestamp == rhs.timestamp { return true }
+        let leftIsOlder = (lhs.timestamp ?? .distantPast) <= (rhs.timestamp ?? .distantPast)
+        let older = leftIsOlder ? lhs : rhs
+        let newer = leftIsOlder ? rhs : lhs
+        let projected = older.interpolatedElapsed(at: newer.timestamp ?? Date()) ?? 0
+        return abs(projected - (newer.elapsed ?? 0)) < 1.5
     }
 }
 
