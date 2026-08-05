@@ -25,13 +25,18 @@ enum NotchDesign {
 /// Plain black notch / pill surface with rounded bottom corners.
 struct PillSurface: View {
     var bottomRadius: CGFloat
+    /// Non-zero only where there is no hardware notch to tuck into.
+    var topRadius: CGFloat = 0
+
+    private var shape: NotchShape {
+        NotchShape(bottomRadius: bottomRadius, topRadius: topRadius)
+    }
 
     var body: some View {
-        NotchShape(bottomRadius: bottomRadius)
+        shape
             .fill(Color.black)
             .overlay {
-                NotchShape(bottomRadius: bottomRadius)
-                    .stroke(NotchDesign.pillStroke, lineWidth: 0.5)
+                shape.stroke(NotchDesign.pillStroke, lineWidth: 0.5)
             }
     }
 }
@@ -43,13 +48,21 @@ struct ExpandedPillSurface: View {
     let notchWidth: CGFloat
     let notchHeight: CGFloat
     let progress: CGFloat
+    var hasPhysicalNotch: Bool = true
+
+    private var shape: ExpandedNotchShape {
+        ExpandedNotchShape(notchWidth: notchWidth, notchHeight: notchHeight,
+                           progress: progress, hasPhysicalNotch: hasPhysicalNotch)
+    }
 
     var body: some View {
-        ExpandedNotchShape(notchWidth: notchWidth, notchHeight: notchHeight, progress: progress)
+        shape
             .fill(Color.black)
             .overlay {
-                ExpandedNotchShape(notchWidth: notchWidth, notchHeight: notchHeight, progress: progress)
-                    .stroke(NotchDesign.pillStroke, lineWidth: 0.5)
+                // The hairline matters more without a notch: the pill has no
+                // hardware edge to borrow, so this is the only thing separating
+                // it from a dark wallpaper.
+                shape.stroke(NotchDesign.pillStroke, lineWidth: 0.5)
             }
     }
 }

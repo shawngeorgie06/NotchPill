@@ -427,7 +427,8 @@ final class NotchController {
                                scale: NotchGeometry.expandedScale
                                    * CGFloat(AppSettings.shared.notchScale),
                                topGap: NotchGeometry.contentTopGap,
-                               userScale: CGFloat(AppSettings.shared.notchScale))
+                               userScale: CGFloat(AppSettings.shared.notchScale),
+                               hasPhysicalNotch: geometry.hasPhysicalNotch)
 
         let root = makeRootView()
 

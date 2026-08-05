@@ -2992,6 +2992,49 @@ struct PeekDismissHitTests {
 
 // MARK: - Notch detection
 
+// The reported bug: on a Mac with no cutout the pill was a flat-topped black
+// slab hanging under the menu bar. `NotchShape` draws square top corners flush
+// to the top edge, which is right on notched hardware — they sit inside the
+// physical notch — and wrong everywhere else, where they meet open wallpaper.
+@Suite("Pill silhouette without a notch")
+struct FloatingPillShapeTests {
+    private let box = CGRect(x: 0, y: 0, width: 300, height: 120)
+
+    /// Whether the path covers a point, used to ask about the corners.
+    private func covers(_ shape: NotchShape, _ point: CGPoint) -> Bool {
+        shape.path(in: box).contains(point)
+    }
+
+    @Test("on notched hardware the top corners stay square")
+    func notchedKeepsSquareTop() {
+        let shape = NotchShape(bottomRadius: 22)
+        // A point 2pt in from the very top-left corner.
+        #expect(covers(shape, CGPoint(x: 2, y: 2)))
+        #expect(covers(shape, CGPoint(x: box.maxX - 2, y: 2)))
+    }
+
+    @Test("without a notch the top corners are rounded away")
+    func floatingRoundsTop() {
+        let shape = NotchShape(bottomRadius: 22, topRadius: 22)
+        // The same corner points now fall outside the rounded silhouette —
+        // this is the difference between "attached" and "slab".
+        #expect(!covers(shape, CGPoint(x: 2, y: 2)))
+        #expect(!covers(shape, CGPoint(x: box.maxX - 2, y: 2)))
+        // The body is still solid.
+        #expect(covers(shape, CGPoint(x: box.midX, y: box.midY)))
+        #expect(covers(shape, CGPoint(x: box.midX, y: 2)))
+    }
+
+    // Both kinds of display round the bottom; only the top differs.
+    @Test("the bottom is rounded either way")
+    func bottomUnchanged() {
+        for top in [CGFloat(0), 22] {
+            let shape = NotchShape(bottomRadius: 22, topRadius: top)
+            #expect(!covers(shape, CGPoint(x: 2, y: box.maxY - 2)))
+        }
+    }
+}
+
 @Suite("Notch detection")
 struct NotchRectTests {
     // A 14" MacBook Pro in points.

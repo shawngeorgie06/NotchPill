@@ -94,7 +94,24 @@ struct NotchGeometry {
         browserFlankRects(for: screen).contains { $0.contains(point) }
     }
 
-    /// Finds the built-in notched screen, if the current hardware/arrangement has one.
+    /// True when `notchRect` describes real hardware.
+    ///
+    /// The pill is shaped like the cutout it grows out of — square top corners,
+    /// a neck at the cutout's exact width, shoulders flaring below it. That
+    /// shape only makes sense if there is a cutout above it to disappear into.
+    /// On a display with no notch there is nothing above it, and the same
+    /// drawing reads as a black slab hanging in free space under the menu bar.
+    var hasPhysicalNotch: Bool { source == .measured }
+
+    /// Finds the built-in screen the overlay should live on.
+    ///
+    /// The test below is `safeAreaInsets.top > 0`, which is a **menu bar**
+    /// test, not a notch test — every built-in display reports a top inset for
+    /// the menu bar whether or not it has a cutout. So this returns a geometry
+    /// on notch-less Macs too, and it always did; the difference is that the
+    /// notch rect it carries is then the assumed one, and callers now have
+    /// `hasPhysicalNotch` to tell the two apart instead of drawing hardware
+    /// that is not there.
     static func current() -> NotchGeometry? {
         for screen in NSScreen.screens {
             guard screen.safeAreaInsets.top > 0 else { continue }

@@ -100,7 +100,8 @@ struct NotchRootView: View {
                 ExpandedPillSurface(
                     notchWidth: metrics.notchWidth,
                     notchHeight: metrics.notchHeight,
-                    progress: 1
+                    progress: 1,
+                    hasPhysicalNotch: metrics.hasPhysicalNotch
                 )
                 .frame(width: frameSize.width, height: frameSize.height)
             }
@@ -212,8 +213,14 @@ struct NotchRootView: View {
         }
         let width = metrics.notchWidth + (frameSize.width - metrics.notchWidth) * progress
         let height = metrics.notchHeight + (frameSize.height - metrics.notchHeight) * progress
-        return PillSurface(bottomRadius: 22)
-            .frame(width: width, height: height)
+        // With no cutout above it, the surface needs its own top: rounded
+        // corners, and a few points of daylight under the menu bar so it reads
+        // as an island rather than as something that failed to dock.
+        let floating = !metrics.hasPhysicalNotch
+        let inset = floating ? 4 * progress : 0
+        return PillSurface(bottomRadius: 22, topRadius: floating ? 22 : 0)
+            .frame(width: width, height: max(0, height - inset))
+            .padding(.top, inset)
             .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
     }
 
