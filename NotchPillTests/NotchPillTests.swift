@@ -4235,15 +4235,18 @@ struct NotchReplyCapabilityTests {
         }
     }
 
-    // The original exclusions survive: these are GUI windows with no TUI, so a
-    // paste lands in whatever view holds focus rather than in the chat box.
-    @Test("GUI agent windows still refuse a typed reply")
+    // GUI agent windows now accept a reply — they have a composer like any
+    // other app. The risk that kept them out, a paste landing in whatever view
+    // holds focus, is handled by not submitting it: see `submitsOnDelivery`.
+    @Test("GUI agent windows accept a typed reply, unsubmitted")
     @MainActor
-    func guiHostsRefuse() {
-        #expect(!alert(agent: "codex", bundleId: "com.openai.codex")
-            .canReplyFromNotch(replyEnabled: true))
-        #expect(!alert(agent: "cursor", bundleId: "com.todesktop.230313mzl4w4u92")
-            .canReplyFromNotch(replyEnabled: true))
+    func guiHostsAcceptButDoNotSubmit() {
+        let codex = alert(agent: "codex", bundleId: "com.openai.codex")
+        let cursor = alert(agent: "cursor", bundleId: "com.todesktop.230313mzl4w4u92")
+        #expect(codex.canReplyFromNotch(replyEnabled: true))
+        #expect(cursor.canReplyFromNotch(replyEnabled: true))
+        #expect(!codex.submitsOnDelivery)
+        #expect(!cursor.submitsOnDelivery)
     }
 
     @Test("a reply needs somewhere to go")
@@ -4266,8 +4269,11 @@ struct NotchReplyCapabilityTests {
         let title = String(repeating: "n", count: 40)
         let replyable = DevReadyAlert(id: "1", title: title, agent: "codex",
                                       bundleId: "com.apple.Terminal", kind: .finished)
+        // An agent that has declared it cannot be answered: the one remaining
+        // case with no ↰, now that desktop agents draw one.
         let plain = DevReadyAlert(id: "2", title: title, agent: "cursor",
-                                  bundleId: "com.todesktop.230313mzl4w4u92", kind: .finished)
+                                  bundleId: "com.todesktop.230313mzl4w4u92", kind: .finished,
+                                  deliverySpec: "none")
         let wide = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: [replyable],
                                                      answerEnabled: true)
         let narrow = NotchContentLayout.devReadyLayout(metrics: metrics, alerts: [plain],
@@ -5542,5 +5548,43 @@ struct TerminalITermDeliveryTests {
             text: "hello", bundleId: "com.apple.Terminal", directory: "/Users/me/one",
             appendReturn: true, agent: "claude-code", resolveTTY: { _, _ in nil })
         #expect(delivered == false)
+    }
+}
+
+@Suite("Desktop agents can be replied to")
+struct DesktopAgentReplyTests {
+    /// The original complaint: a peek from Codex or Cursor offered no reply at
+    /// all. They were excluded by a rule about *answer capsules* — buttons
+    /// guessing an agent's keys — which never applied to free text.
+    @Test func codexAndCursorAcceptATypedReply() {
+        #expect(DevReadyAlert(title: "p", agent: "codex",
+                              bundleId: "com.openai.codex").supportsTypedReply)
+        #expect(DevReadyAlert(title: "p", agent: "cursor",
+                              bundleId: "com.todesktop.230313mzl4w4u92").supportsTypedReply)
+    }
+
+    /// An agent that declares it cannot be answered still cannot be.
+    @Test func anExplicitNoIsStillNo() {
+        #expect(!DevReadyAlert(title: "p", agent: "codex", bundleId: "com.openai.codex",
+                               deliverySpec: "none").supportsTypedReply)
+    }
+
+    /// A terminal agent is a prompt waiting on a line, so text plus Return is
+    /// the whole interaction.
+    @Test func terminalRepliesSubmitThemselves() {
+        #expect(DevReadyAlert(title: "p", bundleId: "com.apple.Terminal").submitsOnDelivery)
+        #expect(DevReadyAlert(title: "p", bundleId: "com.cmuxterm.app").submitsOnDelivery)
+        #expect(DevReadyAlert(title: "p").submitsOnDelivery)
+    }
+
+    /// A desktop app is not. Whatever holds keyboard focus receives the paste,
+    /// and in an editor-shaped app that can be a source file — where Return
+    /// would commit a stray line into someone's code. Pasting alone leaves
+    /// something visible and undoable.
+    @Test func desktopRepliesAreDeliveredButNotSent() {
+        #expect(!DevReadyAlert(title: "p", bundleId: "com.openai.codex").submitsOnDelivery)
+        #expect(!DevReadyAlert(title: "p", bundleId: "com.openai.chat").submitsOnDelivery)
+        #expect(!DevReadyAlert(title: "p",
+                               bundleId: "com.todesktop.230313mzl4w4u92").submitsOnDelivery)
     }
 }

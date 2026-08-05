@@ -378,6 +378,28 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     ///
     /// A signal that *declares* how to answer it overrides all of this — the
     /// guesswork above only exists for hooks that say nothing.
+    /// Agents that run as an ordinary Mac app with their own composer.
+    static let desktopAgentBundleIds: Set<String> = [
+        "com.openai.codex", "com.openai.chat",          // Codex / ChatGPT
+        "com.todesktop.230313mzl4w4u92",                // Cursor
+    ]
+
+    /// Whether delivering a reply also sends it.
+    ///
+    /// A terminal agent is a prompt waiting on a line: text plus Return is the
+    /// whole interaction. A desktop app is not — whatever holds keyboard focus
+    /// receives the paste, and in an editor-shaped app that can be a source
+    /// file rather than the chat box. Pressing Return there would commit a
+    /// stray line into someone's code; pasting alone leaves something visible
+    /// and undoable.
+    ///
+    /// So the reply is delivered but not submitted for these, and the composer
+    /// says so.
+    var submitsOnDelivery: Bool {
+        guard let bundleId = bundleId?.trimmingCharacters(in: .whitespaces) else { return true }
+        return !Self.desktopAgentBundleIds.contains(bundleId)
+    }
+
     var supportsTypedAnswers: Bool {
         if deliverySpec?.lowercased() == "none" { return false }
         if AgentAnswer.parse(answerSpec) != nil { return true }
@@ -457,6 +479,15 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         if deliverySpec?.lowercased() == "none" { return false }
         if let bundleId = bundleId?.trimmingCharacters(in: .whitespaces),
            Self.terminalHostBundleIds.contains(bundleId) {
+            return true
+        }
+        // Desktop agents have a text box like any other app, so a typed reply
+        // can reach them the same way a person would send it. They were
+        // excluded by a rule about *answer capsules* — buttons that guess an
+        // agent's keys — which never applied to free text, and those capsules
+        // are gone now anyway.
+        if let bundleId = bundleId?.trimmingCharacters(in: .whitespaces),
+           Self.desktopAgentBundleIds.contains(bundleId) {
             return true
         }
         // No recognised terminal host. Fall back to what we know about the

@@ -1402,6 +1402,7 @@ final class NotchController {
         }
         if let err = TerminalReplyInjector.send(
             text: text, bundleId: alert.bundleId,
+            appendReturn: alert.submitsOnDelivery,
             returnFocus: AppSettings.shared.returnFocusAfterReply,
             directory: directoryForSession(alert.sessionId),
             agent: alert.agent,

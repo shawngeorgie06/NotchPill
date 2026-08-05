@@ -291,7 +291,9 @@ struct ReplyComposeView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            TextField(compose.mode == .planRevision ? "What should change?" : (compose.targetAlert.replyContextText != nil ? "Your answer…" : "Reply…"),
+            TextField(compose.mode == .planRevision ? "What should change?" : (compose.targetAlert.submitsOnDelivery
+                       ? (compose.targetAlert.replyContextText != nil ? "Your answer…" : "Reply…")
+                       : "Reply… (press ⏎ there to send)"),
                       text: Binding(
                 get: { state.replyCompose?.draft ?? "" },
                 set: { state.updateReplyDraft($0) }
