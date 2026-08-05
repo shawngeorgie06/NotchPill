@@ -39,6 +39,28 @@ struct UpdateVersionTests {
         #expect(UpdateChecker.isNewer("1.1.9", than: "1.1"))      // more components
         #expect(!UpdateChecker.isNewer("1.1", than: "1.1.0"))     // equal padded
     }
+
+    // The download URL came out of the API response with its scheme and host
+    // unread, so the entire chain rested on api.github.com being the only
+    // thing that could ever shape that JSON.
+    @Test("only https GitHub origins are accepted as update downloads")
+    func downloadOriginIsChecked() {
+        #expect(UpdateChecker.isTrustedDownload(
+            URL(string: "https://github.com/shawngeorgie06/NotchPill/releases/download/v1/a.zip")!))
+        #expect(UpdateChecker.isTrustedDownload(
+            URL(string: "https://objects.githubusercontent.com/x/a.zip")!))
+
+        // Plaintext, a local path, and a look-alike that would pass a naive
+        // prefix or "contains" check.
+        #expect(!UpdateChecker.isTrustedDownload(
+            URL(string: "http://github.com/x/a.zip")!))
+        #expect(!UpdateChecker.isTrustedDownload(
+            URL(string: "file:///tmp/a.zip")!))
+        #expect(!UpdateChecker.isTrustedDownload(
+            URL(string: "https://github.com.evil.test/a.zip")!))
+        #expect(!UpdateChecker.isTrustedDownload(
+            URL(string: "https://notgithub.com/a.zip")!))
+    }
 }
 
 // MARK: - Geometry / metrics math (hardware-independent)

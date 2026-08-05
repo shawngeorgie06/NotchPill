@@ -166,7 +166,7 @@ final class AgentSessionsProvider {
                 + " | \(s.task ?? "-") | locator=\(s.locatorId ?? "-")\n"
         }
         guard let data = line.data(using: .utf8) else { return }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        PrivateStore.prepareFile(url)
         if let handle = try? FileHandle(forWritingTo: url) {
             defer { try? handle.close() }
             if (try? handle.seekToEnd()) ?? 0 > 512_000 {

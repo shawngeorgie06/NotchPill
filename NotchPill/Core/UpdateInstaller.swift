@@ -164,23 +164,33 @@ enum UpdateInstaller {
 
     private static func swapAndRelaunch(newApp: String, destPath: String) {
         let pid = ProcessInfo.processInfo.processIdentifier
+        // Paths arrive as positional arguments, never interpolated into the
+        // script body. Both are strings this process does not fully control:
+        // `destPath` is wherever the user put and named the bundle, and
+        // `newApp` is a directory name read out of the downloaded archive. A
+        // quote or `$(…)` in either used to land inside a shell script that
+        // then ran — command execution out of a filename. Verification gates
+        // the archive, so this was defence in depth rather than a live hole,
+        // but it costs nothing to close and the bundle path is not gated by
+        // anything at all.
         let script = """
         #!/bin/bash
         set -e
+        pid="$1"; dest="$2"; new="$3"
         # Wait for the running NotchPill to exit before replacing its bundle.
-        for _ in $(seq 1 100); do kill -0 \(pid) 2>/dev/null || break; sleep 0.1; done
-        BACKUP="\(destPath).old"
+        for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+        BACKUP="$dest.old"
         rm -rf "$BACKUP" 2>/dev/null || true
-        mv "\(destPath)" "$BACKUP" 2>/dev/null || true
-        if /usr/bin/ditto "\(newApp)" "\(destPath)"; then
-          /usr/bin/xattr -dr com.apple.quarantine "\(destPath)" 2>/dev/null || true
+        mv "$dest" "$BACKUP" 2>/dev/null || true
+        if /usr/bin/ditto "$new" "$dest"; then
+          /usr/bin/xattr -dr com.apple.quarantine "$dest" 2>/dev/null || true
           rm -rf "$BACKUP" 2>/dev/null || true
         else
           # Restore on failure so the user isn't left without an app.
-          rm -rf "\(destPath)" 2>/dev/null || true
-          mv "$BACKUP" "\(destPath)" 2>/dev/null || true
+          rm -rf "$dest" 2>/dev/null || true
+          mv "$BACKUP" "$dest" 2>/dev/null || true
         fi
-        /usr/bin/open "\(destPath)"
+        /usr/bin/open "$dest"
         """
         let scriptURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("notchpill-update-\(UUID().uuidString).sh")
@@ -192,7 +202,7 @@ enum UpdateInstaller {
         // Launch the swap detached so it outlives this process, then quit.
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/bash")
-        task.arguments = [scriptURL.path]
+        task.arguments = [scriptURL.path, String(pid), destPath, newApp]
         guard (try? task.run()) != nil else {
             isInstalling = false
             return
@@ -210,8 +220,21 @@ enum UpdateInstaller {
         if let range = dr.range(of: #"certificate root = H"[0-9a-fA-F]+""#, options: .regularExpression) {
             return String(dr[range])
         }
-        if dr.lowercased().contains("adhoc") { return "adhoc" }
-        return dr.isEmpty ? nil : "opaque:\(dr.hashValue)"
+        // No ad-hoc branch, deliberately.
+        //
+        // It used to return the constant "adhoc", which made every ad-hoc
+        // signature equal to every other one. An ad-hoc signature carries no
+        // identity — anyone can produce one over any payload with a single
+        // `codesign -s -` — so on an ad-hoc install the check that is supposed
+        // to stop a hostile bundle replacing the app in place was comparing
+        // "unsigned" against "unsigned" and passing. Returning nil fails the
+        // guard in `verify`, so those installs now decline to self-update and
+        // send the user to the release page instead.
+        //
+        // `opaque:` is dropped for the same reason plus a second: `hashValue`
+        // is seeded per process, so the two sides were hashed in *this* run and
+        // compared consistently, but the value means nothing beyond it.
+        return nil
     }
 
     nonisolated private static func firstApp(in dir: String) -> String? {

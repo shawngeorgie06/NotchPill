@@ -76,7 +76,7 @@ struct PermissionDecision: Equatable {
     /// nobody had answered it.
     func write(home: URL = FileManager.default.homeDirectoryForCurrentUser) throws {
         let directory = Self.directory(home: home)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        PrivateStore.makeDirectory(directory)
         let final = Self.file(for: requestId, home: home)
         let staging = directory.appendingPathComponent(".\(UUID().uuidString).tmp")
         try encoded().write(to: staging)

@@ -20,7 +20,7 @@ final class DevReadyProvider {
     }
 
     func start() {
-        try? FileManager.default.createDirectory(at: signalDirectory, withIntermediateDirectories: true)
+        PrivateStore.makeDirectory(signalDirectory)
 
         distributedObserver = DistributedNotificationCenter.default().addObserver(
             forName: DevReadyAlert.notificationName,

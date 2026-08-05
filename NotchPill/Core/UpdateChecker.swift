@@ -96,9 +96,30 @@ final class UpdateChecker: ObservableObject {
         guard let zipString = assets
                 .compactMap({ $0["browser_download_url"] as? String })
                 .first(where: { $0.hasSuffix("macOS-arm64.zip") }),
-              let zipURL = URL(string: zipString) else { return nil }
+              let zipURL = URL(string: zipString),
+              Self.isTrustedDownload(zipURL) else { return nil }
 
         return UpdateRelease(version: version, tag: tag, zipURL: zipURL, notes: notes, htmlURL: htmlURL)
+    }
+
+    /// Where an update is allowed to come from.
+    ///
+    /// `browser_download_url` was taken from the API response and handed
+    /// straight to the downloader — scheme and host unread. The response is
+    /// itself fetched over TLS from api.github.com, so this was not reachable
+    /// in practice, but it made the whole chain rest on that one assumption:
+    /// anything that could shape the JSON could point the updater at any
+    /// origin, including `http://` or a `file://` path on the machine. The
+    /// installer's signature check would still refuse to install the result;
+    /// this stops it being fetched at all.
+    ///
+    /// Subdomains are matched on a dot boundary, so `github.com.evil.test`
+    /// does not pass by prefix.
+    nonisolated static func isTrustedDownload(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https",
+              let host = url.host?.lowercased() else { return false }
+        return ["github.com", "objects.githubusercontent.com"]
+            .contains { host == $0 || host.hasSuffix("." + $0) }
     }
 
     /// Semantic-ish comparison of dotted numeric versions ("1.10.0" > "1.9.9").

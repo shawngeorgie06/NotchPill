@@ -37,8 +37,7 @@ enum ApprovalGate {
                 && error.code == Int(ENOENT) {}
             return
         }
-        try FileManager.default.createDirectory(at: target.deletingLastPathComponent(),
-                                                withIntermediateDirectories: true)
+        PrivateStore.makeDirectory(target.deletingLastPathComponent())
         // Empty: only the existence carries meaning, and writing nothing keeps
         // an enable idempotent rather than truncating something a future
         // version might have put here.
