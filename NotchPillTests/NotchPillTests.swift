@@ -509,13 +509,26 @@ struct AgentAnswerSpecTests {
         #expect(AgentAnswer.parse("Label:") == nil) // no keystroke
     }
 
-    @Test("an alert with no spec still offers Claude Code's set")
-    func defaultsPreserved() {
-        // Every hook written before this sent no spec at all.
+    @Test("an alert with no spec offers no buttons at all")
+    @MainActor func noSpecMeansNoButtons() {
+        // The inferred Yes/No/1/2/3 set was removed by request. Falling back
+        // to it here would put those capsules back, since permission
+        // decisions also reach the button row.
         let alert = DevReadyAlert(title: "p", agent: "claude-code",
                                   bundleId: "com.apple.Terminal", kind: .waiting)
-        #expect(alert.answers == AgentAnswer.standardSet)
+        #expect(alert.answers.isEmpty)
+        #expect(!alert.canAnswerFromNotch(replyEnabled: true))
         #expect(alert.answerDelivery == .keystrokes)
+    }
+
+    /// An agent that states its options keeps them: nothing is being guessed.
+    @Test("a declared set is still offered")
+    @MainActor func declaredAnswersSurvive() {
+        let alert = DevReadyAlert(title: "p", agent: "codex",
+                                  bundleId: "com.apple.Terminal", kind: .waiting,
+                                  answerSpec: "Yes:y|No:n")
+        #expect(alert.answers.map(\.label) == ["Yes", "No"])
+        #expect(alert.canAnswerFromNotch(replyEnabled: true))
     }
 
     @Test("a declared set overrides the per-agent guesswork")

@@ -439,10 +439,14 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         // Permission prompts (Allow/Deny) and plan reviews (Approve/Revise)
         // keep their buttons: they are a decision the notch exists to collect.
         if answersByDecision { return true }
-        // The generic quick-answer capsules — Yes / No / 1 / 2 / 3 — are gone
-        // by request. They guessed at an agent's options from a signal, and
-        // guessing wrong put a wrong keystroke into someone's terminal. The ↰
-        // composer answers the same prompts without guessing.
+        // An agent that *states* its options gets them. This is the case the
+        // removal below was never aimed at: nothing is being guessed, the
+        // signal said `answers=Yes:y|No:n` and those are its keys.
+        if AgentAnswer.parse(answerSpec) != nil { return true }
+        // The generic capsules — Yes / No / 1 / 2 / 3 — are gone by request.
+        // Those were inferred from nothing but the agent's name, and guessing
+        // wrong put a wrong keystroke into someone's terminal. The ↰ composer
+        // answers the same prompts without guessing.
         return false
     }
 
@@ -518,9 +522,14 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         return TerminalReplyInjector.canTarget(self)
     }
 
-    /// The buttons to offer. Declared by the signal, else Claude Code's set.
+    /// The buttons to offer.
+    ///
+    /// Only ever what the signal declared: the inferred default set is no
+    /// longer drawn, so falling back to it here would put back the capsules
+    /// that were removed — reachable, since `canAnswerFromNotch` also passes
+    /// permission decisions through.
     var answers: [AgentAnswer] {
-        AgentAnswer.parse(answerSpec) ?? AgentAnswer.standardSet
+        AgentAnswer.parse(answerSpec) ?? []
     }
 
     /// How to deliver an answer. Keystrokes by default: a permission prompt in a
