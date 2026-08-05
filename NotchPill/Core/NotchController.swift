@@ -1404,6 +1404,7 @@ final class NotchController {
             text: text, bundleId: alert.bundleId,
             returnFocus: AppSettings.shared.returnFocusAfterReply,
             directory: directoryForSession(alert.sessionId),
+            agent: alert.agent,
             completion: late) {
             showReplyError(err, alert: alert,
                            grantCopy: "Grant Accessibility to send replies",

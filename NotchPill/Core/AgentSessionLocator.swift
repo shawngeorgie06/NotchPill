@@ -163,6 +163,49 @@ enum AgentSessionLocator {
         return hosts.count == 1 ? hosts.first : nil
     }
 
+    /// The controlling terminal of the agent running in `directory`.
+    ///
+    /// Resolved from the agent's own binary rather than from a process
+    /// carrying the session id — those are the transient tool shells that
+    /// vanish the moment a tool call ends, which is the same trap that left
+    /// tap-to-jump broken for idle sessions.
+    ///
+    /// Declines on ambiguity: two agents of the same kind in the same
+    /// directory means writing a reply into the wrong one is as likely as the
+    /// right one.
+    static func tty(forDirectory directory: String?, agent: String?,
+                    in table: [Entry],
+                    workingDirectory: (Int32) -> String? = cwd(ofPid:)) -> String? {
+        guard let executable = executableName(for: agent) else { return nil }
+        let agents = table.filter { isProcess($0.args, named: executable) }
+        let matching: [Entry]
+        if let directory, !directory.isEmpty {
+            matching = agents.filter { workingDirectory($0.pid) == directory }
+        } else {
+            matching = agents
+        }
+        guard matching.count == 1, let pid = matching.first?.pid else { return nil }
+        return controllingTTY(for: pid)
+    }
+
+    /// A process's working directory, via `lsof`. Only ever called for the
+    /// handful of processes that are already known to be agents.
+    static func cwd(ofPid pid: Int32) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        process.arguments = ["-a", "-p", "\(pid)", "-d", "cwd", "-Fn"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
+            .split(separator: "\n")
+            .first(where: { $0.hasPrefix("n/") })
+            .map { String($0.dropFirst()) }
+    }
+
     /// Candidates in preference order. Kept independent of the process query
     /// both for tests and so focusing uses precisely the same safety rule as
     /// the host-app lookup.
@@ -201,7 +244,7 @@ enum AgentSessionLocator {
 
     /// `ps` reports the controlling terminal as (for example) `ttys012`.
     /// Terminal's scripting API uses the corresponding `/dev/ttys012` value.
-    private static func controllingTTY(for pid: Int32) -> String? {
+    static func controllingTTY(for pid: Int32) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
         process.arguments = ["-p", String(pid), "-o", "tty="]

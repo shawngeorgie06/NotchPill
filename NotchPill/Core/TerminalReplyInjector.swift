@@ -76,7 +76,7 @@ enum TerminalReplyInjector {
     @discardableResult
     static func send(text: String, bundleId: String?, appendReturn: Bool = true,
                      delivery: Delivery = .paste, returnFocus: Bool = false,
-                     directory: String? = nil,
+                     directory: String? = nil, agent: String? = nil,
                      completion: ((ReplyError?) -> Void)? = nil) -> ReplyError? {
         let app = (bundleId?.isEmpty == false)
             ? NSRunningApplication.runningApplications(withBundleIdentifier: bundleId!).first
@@ -98,7 +98,8 @@ enum TerminalReplyInjector {
         // from. Falls through to the paste path whenever it declines.
         if TerminalDirectDelivery.send(text: text, bundleId: bundleId,
                                        directory: directory,
-                                       appendReturn: appendReturn) {
+                                       appendReturn: appendReturn,
+                                       agent: agent) {
             completion?(nil)
             return nil
         }

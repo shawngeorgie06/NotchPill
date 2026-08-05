@@ -19,7 +19,21 @@ import AppKit
 /// arrives with a flicker beats one that goes to the wrong window.
 enum TerminalDirectDelivery {
     /// Terminals that can be written to without being focused.
-    static let supportedBundleIds: Set<String> = ["com.cmuxterm.app"]
+    ///
+    /// Terminal and iTerm both expose a write-to-a-specific-session command,
+    /// so they get the same treatment as cmux — which matters because most
+    /// people are not on cmux, and everyone else was still watching their
+    /// screen flick away and back on every reply.
+    static let supportedBundleIds: Set<String> = [
+        "com.cmuxterm.app", "com.apple.Terminal", "com.googlecode.iterm2",
+    ]
+
+    /// Terminals located by the agent's controlling tty rather than by working
+    /// directory. cmux exposes a panel's directory but not its tty; these two
+    /// are the other way round.
+    static let ttyAddressedBundleIds: Set<String> = [
+        "com.apple.Terminal", "com.googlecode.iterm2",
+    ]
 
     static func supports(bundleId: String?) -> Bool {
         guard let bundleId else { return false }
@@ -90,15 +104,86 @@ enum TerminalDirectDelivery {
         """
     }
 
+    /// Terminal.app addresses a tab by its tty and `do script … in` writes to
+    /// it without focusing anything.
+    ///
+    /// `do script` with no target opens a *new window*, so the tab clause is
+    /// not optional here — it is the difference between answering an agent and
+    /// spawning a window with your reply typed into a fresh shell.
+    static func terminalScript(text: String, tty: String, appendReturn: Bool) -> String? {
+        guard canRepresent(text), !tty.isEmpty else { return nil }
+        // Terminal submits what `do script` sends; there is no way to type
+        // without a return, so a reply that must not submit cannot use it.
+        guard appendReturn else { return nil }
+        return """
+        tell application "Terminal"
+            repeat with aWindow in windows
+                repeat with aTab in tabs of aWindow
+                    if tty of aTab is "\(escaped(tty))" then
+                        do script "\(escaped(text))" in aTab
+                        return true
+                    end if
+                end repeat
+            end repeat
+            return false
+        end tell
+        """
+    }
+
+    /// iTerm2's `write text` goes to one session, chosen by tty, and does not
+    /// bring the window forward.
+    static func iTermScript(text: String, tty: String, appendReturn: Bool) -> String? {
+        guard canRepresent(text), !tty.isEmpty else { return nil }
+        // `write text` always ends with a newline; `write text … newline no`
+        // is the form that does not.
+        let newline = appendReturn ? "" : " newline no"
+        return """
+        tell application "iTerm2"
+            repeat with aWindow in windows
+                repeat with aTab in tabs of aWindow
+                    repeat with aSession in sessions of aTab
+                        if tty of aSession is "\(escaped(tty))" then
+                            tell aSession to write text "\(escaped(text))"\(newline)
+                            return true
+                        end if
+                    end repeat
+                end repeat
+            end repeat
+            return false
+        end tell
+        """
+    }
+
     /// Attempts focus-free delivery. `false` means "not handled" — never
     /// "handled badly": the script returns false rather than guessing whenever
     /// the target is ambiguous.
     @MainActor
     static func send(text: String, bundleId: String?, directory: String?,
-                     appendReturn: Bool) -> Bool {
-        guard supports(bundleId: bundleId),
-              let source = cmuxScript(text: text, directory: directory,
-                                      appendReturn: appendReturn) else { return false }
+                     appendReturn: Bool,
+                     agent: String? = nil,
+                     resolveTTY: (String?, String?) -> String? = { directory, agent in
+                         AgentSessionLocator.tty(forDirectory: directory, agent: agent,
+                                                 in: AgentSessionLocator.processTable())
+                     }) -> Bool {
+        guard let bundleId, supports(bundleId: bundleId) else { return false }
+        let source: String?
+        if ttyAddressedBundleIds.contains(bundleId) {
+            // No tty means no way to name the tab. Declining here is the whole
+            // safety story for these two: unlike cmux there is no "only one
+            // terminal open" fallback, because a stray Terminal window is
+            // ordinary and writing a reply into someone's shell is not.
+            guard let tty = resolveTTY(directory, agent), !tty.isEmpty else {
+                TerminalReplyInjector.log("direct delivery declined "
+                                          + "(no tty for \(bundleId)) — falling back")
+                return false
+            }
+            source = bundleId == "com.apple.Terminal"
+                ? terminalScript(text: text, tty: tty, appendReturn: appendReturn)
+                : iTermScript(text: text, tty: tty, appendReturn: appendReturn)
+        } else {
+            source = cmuxScript(text: text, directory: directory, appendReturn: appendReturn)
+        }
+        guard let source else { return false }
         var error: NSDictionary?
         let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
         if let error {

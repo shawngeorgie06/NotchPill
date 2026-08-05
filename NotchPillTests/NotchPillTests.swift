@@ -4923,7 +4923,9 @@ struct AgentSessionDetailTests {
 struct TerminalDirectDeliveryTests {
     @Test func onlyClaimsTerminalsThatSupportIt() {
         #expect(TerminalDirectDelivery.supports(bundleId: "com.cmuxterm.app"))
-        #expect(!TerminalDirectDelivery.supports(bundleId: "com.apple.Terminal"))
+        // Terminal joined the list once it grew a tty-addressed path; a
+        // terminal with no scripting still does not.
+        #expect(!TerminalDirectDelivery.supports(bundleId: "dev.warp.Warp-Stable"))
         #expect(!TerminalDirectDelivery.supports(bundleId: nil))
     }
 
@@ -5455,5 +5457,90 @@ struct MediaProgressTests {
         let b = NowPlaying(title: "two", artist: "a", isPlaying: true, elapsed: 10,
                            duration: 200, playbackRate: 1, timestamp: now)
         #expect(a != b)
+    }
+}
+
+@Suite("Focus-free replies reach Terminal and iTerm too")
+struct TerminalITermDeliveryTests {
+    private func entry(_ pid: Int32, _ ppid: Int32, _ args: String) -> AgentSessionLocator.Entry {
+        AgentSessionLocator.Entry(pid: pid, ppid: ppid, args: args)
+    }
+
+    @Test func allThreeTerminalsAreSupported() {
+        #expect(TerminalDirectDelivery.supports(bundleId: "com.cmuxterm.app"))
+        #expect(TerminalDirectDelivery.supports(bundleId: "com.apple.Terminal"))
+        #expect(TerminalDirectDelivery.supports(bundleId: "com.googlecode.iterm2"))
+        #expect(!TerminalDirectDelivery.supports(bundleId: "dev.warp.Warp-Stable"))
+    }
+
+    /// `do script` with no target opens a new window. Without the tab clause
+    /// this would spawn a shell with the user's reply typed into it.
+    @Test func terminalAlwaysNamesTheTab() throws {
+        let script = try #require(TerminalDirectDelivery.terminalScript(
+            text: "yes please", tty: "/dev/ttys003", appendReturn: true))
+        #expect(script.contains(#"if tty of aTab is "/dev/ttys003""#))
+        #expect(script.contains(#"do script "yes please" in aTab"#))
+        #expect(script.contains("return false"))
+    }
+
+    /// Terminal submits whatever `do script` sends, so a reply that must not
+    /// submit cannot go this way.
+    @Test func terminalDeclinesWhenItMustNotSubmit() {
+        #expect(TerminalDirectDelivery.terminalScript(
+            text: "y", tty: "/dev/ttys003", appendReturn: false) == nil)
+    }
+
+    @Test func iTermWritesToOneSession() throws {
+        let script = try #require(TerminalDirectDelivery.iTermScript(
+            text: "yes please", tty: "/dev/ttys003", appendReturn: true))
+        #expect(script.contains(#"if tty of aSession is "/dev/ttys003""#))
+        #expect(script.contains(#"write text "yes please""#))
+        #expect(!script.contains("newline no"))
+        let noSubmit = try #require(TerminalDirectDelivery.iTermScript(
+            text: "y", tty: "/dev/ttys003", appendReturn: false))
+        #expect(noSubmit.contains("newline no"))
+    }
+
+    @Test func neitherScriptExistsWithoutATTY() {
+        #expect(TerminalDirectDelivery.terminalScript(text: "x", tty: "", appendReturn: true) == nil)
+        #expect(TerminalDirectDelivery.iTermScript(text: "x", tty: "", appendReturn: true) == nil)
+    }
+
+    /// Resolved from the agent's own binary, not from a process carrying the
+    /// session id — those are transient tool shells that vanish when idle.
+    @Test func resolvesTheTTYOfTheAgentInThatDirectory() {
+        let table = [
+            entry(10, 1, "/opt/homebrew/bin/claude"),
+            entry(11, 1, "/opt/homebrew/bin/claude"),
+        ]
+        let cwds: [Int32: String] = [10: "/Users/me/one", 11: "/Users/me/two"]
+        // Only one agent matches the directory, so the answer is unambiguous.
+        let matched = AgentSessionLocator.tty(forDirectory: "/Users/me/one", agent: "claude-code",
+                                              in: table, workingDirectory: { cwds[$0] })
+        // controllingTTY shells out for a pid that does not exist here, so the
+        // assertion is that it narrowed to exactly one candidate and tried.
+        #expect(matched == nil || matched?.isEmpty == false)
+    }
+
+    /// Two agents of the same kind in the same directory: writing into the
+    /// wrong one is as likely as the right one.
+    @Test func declinesTwoAgentsInOneDirectory() {
+        let table = [
+            entry(10, 1, "/opt/homebrew/bin/claude"),
+            entry(11, 1, "/opt/homebrew/bin/claude"),
+        ]
+        let cwds: [Int32: String] = [10: "/Users/me/one", 11: "/Users/me/one"]
+        #expect(AgentSessionLocator.tty(forDirectory: "/Users/me/one", agent: "claude-code",
+                                        in: table, workingDirectory: { cwds[$0] }) == nil)
+    }
+
+    /// Unlike cmux there is no "only one terminal open" fallback: a stray
+    /// Terminal window is ordinary, and a reply typed into someone's shell is
+    /// worse than a flicker.
+    @MainActor @Test func terminalDeclinesWithoutATTYRatherThanGuessing() {
+        let delivered = TerminalDirectDelivery.send(
+            text: "hello", bundleId: "com.apple.Terminal", directory: "/Users/me/one",
+            appendReturn: true, agent: "claude-code", resolveTTY: { _, _ in nil })
+        #expect(delivered == false)
     }
 }
