@@ -46,10 +46,17 @@ enum AgentSessionLocator {
         let located = candidateEntries.lazy.compactMap { entry in
             bundleId(walkingUpFrom: entry.pid, in: table).map { (entry, $0) }
         }.first
-        // Last resort before giving up: the terminal that is demonstrably
-        // hosting agents right now.
-        let target: String? = located?.1 ?? fallbackBundleId
-            ?? soleTerminalHost(agent: agent, in: table)
+        // Measured evidence outranks the static guess. `fallbackBundleId` is
+        // per-*kind* — Codex claims `com.openai.codex` whether or not the
+        // desktop app is anywhere on the machine — so consulting it before the
+        // process tree meant a Codex CLI running in a terminal resolved to an
+        // app that was not installed, failed the running-app check at the
+        // bottom, and did nothing at all. Walking the tree first places it in
+        // the terminal it is actually running in; a genuine desktop session has
+        // no CLI process, so `soleTerminalHost` returns nil there and the
+        // fallback still gets its turn.
+        let terminalHost = soleTerminalHost(agent: agent, in: table)
+        let target: String? = located?.1 ?? terminalHost ?? fallbackBundleId
         guard let target, !target.isEmpty else {
             // Silent until now, and it is the likeliest outcome: a terminal
             // agent writes no bundle id anywhere, so it can only be placed by
@@ -65,13 +72,21 @@ enum AgentSessionLocator {
         LogStore.log("focus", "session \(sessionId ?? "-") hosted by \(target) "
                      + "(\(located == nil ? "fallback" : "process tree"))")
 
+        // The tty is what names the exact tab, and it had exactly one source:
+        // a process carrying the session id. For Claude Code those are the
+        // transient shells spawned to run tools, so an idle agent — the row you
+        // most want to jump to — had none, and Terminal and iTerm fell through
+        // to merely activating the app. Falling back to the agent's own
+        // long-lived process fixes that; it declines on ambiguity exactly as
+        // the reply path does.
+        let sessionTTY = located.flatMap { controllingTTY(for: $0.0.pid) }
+            ?? tty(forDirectory: directory, agent: agent, in: table)
+
         // Inside tmux the terminal has one tab and every pane shares it, so
         // focusing the tab alone leaves you on whichever pane was last active.
         // Selecting the pane first means the terminal focus below then brings
         // the right thing forward. No-ops when this session is not in tmux.
-        if let pid = located?.0.pid, let tty = controllingTTY(for: pid) {
-            TmuxLocator.focusPane(tty: tty)
-        }
+        if let sessionTTY { TmuxLocator.focusPane(tty: sessionTTY) }
 
         // Terminal exposes each tab's TTY to AppleScript. That lets us return
         // to the exact agent pane rather than merely bringing every Terminal
@@ -79,16 +94,12 @@ enum AgentSessionLocator {
         // process, so this is intentionally best-effort and falls through to
         // the normal focus path in every failure case.
         if target == "com.apple.Terminal",
-           let pid = located?.0.pid,
-           let tty = controllingTTY(for: pid),
-           focusTerminalTab(tty: tty) {
+           let sessionTTY, focusTerminalTab(tty: sessionTTY) {
             return true
         }
 
         if target == "com.googlecode.iterm2",
-           let pid = located?.0.pid,
-           let tty = controllingTTY(for: pid),
-           focusITermSession(tty: tty) {
+           let sessionTTY, focusITermSession(tty: sessionTTY) {
             return true
         }
 
@@ -105,7 +116,13 @@ enum AgentSessionLocator {
         // they are unaffected. This last-resort branch is the one that used to
         // report success while leaving focus exactly where it was.
         guard NSRunningApplication
-            .runningApplications(withBundleIdentifier: target).first != nil else { return false }
+            .runningApplications(withBundleIdentifier: target).first != nil else {
+            // Reached when the only candidate was a per-kind fallback for an
+            // app that is not running. Silence here read exactly like a tap
+            // that never fired.
+            LogStore.log("focus", "\(target) is not running — nothing to jump to")
+            return false
+        }
         DispatchQueue.main.async { AppActivator.activate(bundleId: target) }
         // "Asked, and the app is running." The escalation is asynchronous, so
         // this cannot report the observed outcome; `AppActivator` logs it.
@@ -212,8 +229,12 @@ enum AgentSessionLocator {
     static func candidates(forSessionId sessionId: String, in table: [Entry]) -> [Entry] {
         guard !sessionId.isEmpty else { return [] }
         let matches = table.filter { $0.args.contains(sessionId) }
+        // OpenCode and Cursor's CLI were missing here, so a process merely
+        // mentioning their session id — a grep, an editor with the transcript
+        // open — ranked equal to the agent itself and could win the walk.
         let agentish = matches.filter { entry in
-            ["/claude", "/codex", "claude ", "codex "].contains { entry.args.contains($0) }
+            ["claude", "codex", "opencode", "cursor-agent"]
+                .contains { isProcess(entry.args, named: $0) }
         }
         return agentish + matches.filter { candidate in !agentish.contains { $0.pid == candidate.pid } }
     }

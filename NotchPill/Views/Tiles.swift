@@ -949,6 +949,54 @@ struct ExpandedActivityCard: View {
         .system(size: size * textScale, weight: weight)
     }
 
+    /// The width every card's header icon is laid out in.
+    ///
+    /// SF Symbols differ enormously in intrinsic width —
+    /// `chevron.left.forwardslash.chevron.right` on the Codex card is roughly
+    /// three times `asterisk` on Claude's — so a header sized to its own icon
+    /// started its title at a different x on every page. Paging left and right
+    /// slid the heading back and forth underneath a pill that was otherwise
+    /// holding perfectly still. A fixed slot costs a few points and buys a
+    /// column.
+    private var headerIconWidth: CGFloat { s(13) }
+
+    /// And the height, so the first line of body copy also shares a baseline
+    /// from card to card. The agents card carries a 13pt status dot where the
+    /// others carry a 9pt glyph; left to themselves those two headers are
+    /// different heights, and everything below them inherits the difference.
+    private var headerHeight: CGFloat { s(14) }
+
+    /// Every card's first line. `trailing` is whatever that particular card
+    /// puts on the right — a count, a hint — and stays out of the aligned
+    /// leading run.
+    private func cardHeader<Icon: View, Trailing: View>(
+        @ViewBuilder icon: () -> Icon,
+        title: String,
+        titleFont: Font? = nil,
+        tracking: CGFloat = 0,
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+    ) -> some View {
+        HStack(spacing: s(4)) {
+            icon().frame(width: headerIconWidth)
+            Text(title)
+                .font(titleFont ?? font(size: 10, weight: .semibold))
+                .tracking(tracking)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            trailing()
+        }
+        .foregroundStyle(.white.opacity(0.45))
+        .frame(height: headerHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The common case: an SF Symbol and a title.
+    private func cardHeader(symbol: String, title: String) -> some View {
+        cardHeader(icon: {
+            Image(systemName: symbol).font(.system(size: s(9)))
+        }, title: title)
+    }
+
     var body: some View {
         Group {
             switch activity {
@@ -1003,7 +1051,7 @@ struct ExpandedActivityCard: View {
     /// while the line below answers what they are doing right now.
     private func agentsCard(_ sessions: [AgentSession]) -> some View {
         VStack(alignment: .leading, spacing: s(4)) {
-            HStack(spacing: s(5)) {
+            cardHeader(icon: {
                 ZStack {
                     Circle()
                         .fill(Color.green.opacity(0.16))
@@ -1012,9 +1060,9 @@ struct ExpandedActivityCard: View {
                         .fill(Color.green)
                         .frame(width: s(5), height: s(5))
                 }
-                Text("LIVE AGENTS")
-                    .font(font(size: 9, weight: .bold))
-                    .tracking(0.7 * textScale)
+            }, title: "LIVE AGENTS",
+               titleFont: font(size: 9, weight: .bold),
+               tracking: 0.7 * textScale) {
                 Text(sessions.count == 1 ? "1 active" : "\(sessions.count) active")
                     .font(font(size: 9, weight: .medium))
                     .foregroundStyle(.white.opacity(0.38))
@@ -1023,7 +1071,6 @@ struct ExpandedActivityCard: View {
                     .font(font(size: 8, weight: .medium))
                     .foregroundStyle(.white.opacity(0.28))
             }
-            .foregroundStyle(.white.opacity(0.45))
 
             // Scrolls rather than truncating. The header counts every session,
             // so silently showing three of four made the card contradict
@@ -1043,13 +1090,7 @@ struct ExpandedActivityCard: View {
     /// A local total, intentionally not an account quota or reset estimate.
     private func openCodeUsageCard(_ usage: OpenCodeUsage) -> some View {
         VStack(alignment: .leading, spacing: s(3)) {
-            HStack(spacing: s(4)) {
-                Image(systemName: "curlybraces")
-                    .font(.system(size: s(9)))
-                Text("OpenCode · today")
-                    .font(font(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(.white.opacity(0.45))
+            cardHeader(symbol: "curlybraces", title: "OpenCode · today")
 
             Text(usage.tokenLabel)
                 .font(font(size: 15, weight: .semibold))
@@ -1065,13 +1106,7 @@ struct ExpandedActivityCard: View {
 
     private func codexQuotaCard(_ quota: CodexQuota) -> some View {
         VStack(alignment: .leading, spacing: s(3)) {
-            HStack(spacing: s(4)) {
-                Image(systemName: "chevron.left.forwardslash.chevron.right")
-                    .font(.system(size: s(9)))
-                Text("Codex · current window")
-                    .font(font(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(.white.opacity(0.45))
+            cardHeader(symbol: "chevron.left.forwardslash.chevron.right", title: "Codex · current window")
             HStack(spacing: s(5)) {
                 Text(quota.usageLabel)
                     .font(font(size: 15, weight: .semibold))
@@ -1098,13 +1133,7 @@ struct ExpandedActivityCard: View {
     /// weekly hides the one that stops you mid-afternoon.
     private func claudeQuotaCard(_ quota: ClaudeQuota) -> some View {
         VStack(alignment: .leading, spacing: s(3)) {
-            HStack(spacing: s(4)) {
-                Image(systemName: "asterisk")
-                    .font(.system(size: s(9)))
-                Text("Claude · limits")
-                    .font(font(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(.white.opacity(0.45))
+            cardHeader(symbol: "asterisk", title: "Claude · limits")
 
             // Each window carries its own reset. Naming only the nearer one
             // hid the session reset whenever the weekly figure happened to be
@@ -1134,13 +1163,7 @@ struct ExpandedActivityCard: View {
     /// percentage alone cannot distinguish "100% of 500" from "100% of 9201".
     private func cursorQuotaCard(_ quota: CursorQuota) -> some View {
         VStack(alignment: .leading, spacing: s(3)) {
-            HStack(spacing: s(4)) {
-                Image(systemName: "cursorarrow")
-                    .font(.system(size: s(9)))
-                Text("Cursor · limits")
-                    .font(font(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(.white.opacity(0.45))
+            cardHeader(symbol: "cursorarrow", title: "Cursor · limits")
 
             if quota.isUnlimited {
                 Text("unlimited")
@@ -1207,13 +1230,7 @@ struct ExpandedActivityCard: View {
     /// GitHub Actions for the repos you have agents working in.
     private func ciCard(_ runs: [CIRun]) -> some View {
         VStack(alignment: .leading, spacing: s(3)) {
-            HStack(spacing: s(4)) {
-                Image(systemName: "checkmark.seal")
-                    .font(.system(size: s(9)))
-                Text("CI")
-                    .font(font(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(.white.opacity(0.45))
+            cardHeader(symbol: "checkmark.seal", title: "CI")
 
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: s(3)) {

@@ -1983,6 +1983,35 @@ struct LocatorChoiceTests {
                 == Bundle(path: "/Applications/cmux.app")?.bundleIdentifier)
     }
 
+    // The agentish filter listed only claude and codex, and matched on a bare
+    // substring. So an OpenCode session ranked its own binary no higher than a
+    // `tail` on its transcript — and whichever `ps` happened to list first won.
+    @Test("opencode's own process outranks a bystander holding its transcript")
+    func prefersOpenCodeProcess() {
+        let table = AgentSessionLocator.parse("""
+        900 901 /usr/bin/tail -f /tmp/SESSION-42.jsonl
+        901 902 /Applications/Notes.app/Contents/MacOS/Notes
+        800 801 /Users/me/.local/bin/opencode --session SESSION-42
+        801 504 /bin/zsh -lic x
+        504   1 /Applications/cmux.app/Contents/MacOS/cmux
+        """)
+        #expect(AgentSessionLocator.hostingBundleId(forSessionId: sid, in: table)
+                == Bundle(path: "/Applications/cmux.app")?.bundleIdentifier)
+    }
+
+    // Substring matching also counted a process whose *arguments* named the
+    // binary. `codex` appearing in a path is not a codex process.
+    @Test("a path merely containing an agent name is not an agent")
+    func argumentMentionIsNotTheBinary() {
+        let table = AgentSessionLocator.parse("""
+        900 504 /usr/bin/vim /Users/me/codex/notes-SESSION-42.md
+        504   1 /Applications/cmux.app/Contents/MacOS/cmux
+        """)
+        let ranked = AgentSessionLocator.candidates(forSessionId: sid, in: table)
+        #expect(ranked.count == 1)
+        #expect(!AgentSessionLocator.isProcess(ranked[0].args, named: "codex"))
+    }
+
     @Test("a bystander is still used when it is the only match")
     func fallsBackToAnyMatch() {
         let table = AgentSessionLocator.parse("""

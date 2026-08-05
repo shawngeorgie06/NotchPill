@@ -71,6 +71,25 @@ struct NotchRootView: View {
         reduceMotion ? .linear(duration: 0.01) : .easeOut(duration: 0.1)
     }
 
+    /// How the expanded card's copy fades against the surface growing behind
+    /// it. Deliberately asymmetric.
+    ///
+    /// Opening, it waits: for the first third of the growth the pill is still
+    /// close to notch width, and copy drawn into it can only be clipped or
+    /// squeezed. Letting the surface open the room first, then filling it,
+    /// reads as one movement rather than two racing.
+    ///
+    /// Closing, it leaves ahead of the surface, and faster — text that stays
+    /// crisp while its container shrinks underneath is the same clipping seen
+    /// backwards, and it is the more noticeable of the two.
+    private var contentFadeAnimation: Animation {
+        if reduceMotion { return .linear(duration: 0.01) }
+        let full = NotchState.hoverAnimationDuration
+        return state.isExpanded
+            ? .easeOut(duration: full * 0.6).delay(full * 0.34)
+            : .easeIn(duration: full * 0.4)
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             if state.isExpanded || state.isCollapsing || !state.renderedDevReadyAlerts.isEmpty || state.updateProgress != nil || state.replyCompose != nil {
@@ -97,13 +116,31 @@ struct NotchRootView: View {
                 devReadyContent(alerts: state.renderedDevReadyAlerts)
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else if state.isExpanded || state.isCollapsing {
+                // Tied to the surface rather than to `isExpanded`. The
+                // transition below never had an animation in scope for that
+                // flag, so the whole card was inserted at full opacity on the
+                // frame hover began — one frame *before* the pill started
+                // growing. You saw the content first and the container catching
+                // up to it, which is the "pop" on open; on close the reverse,
+                // full-size copy held sharp inside a shrinking surface until it
+                // was cut off.
                 expandedContent
-                    .transition(.opacity)
+                    .opacity(Double(state.expansionProgress))
+                    .animation(contentFadeAnimation, value: state.expansionProgress)
+                    .transition(.identity)
             } else if !collapsedChips.isEmpty {
                 collapsedContent
                     .transition(.opacity)
             }
         }
+        // Scoped to the overlay, not the outer layout — the note above about a
+        // sideways pop still stands, and this must not reach the frame.
+        //
+        // Without it the collapsed chips were *also* removed instantly, so
+        // pairing them with a card that now fades in left a gap of empty pill
+        // between the two. With it they fade out on the same curve the card
+        // fades in on, and the swap becomes a crossfade.
+        .animation(contentFadeAnimation, value: state.isExpanded)
         .overlay {
             VStack(spacing: 8) {
                 if settings.showVolumeHUD, let level = state.volumeLevel {
@@ -456,15 +493,11 @@ struct ExpandedView: View {
 
                     Spacer(minLength: 0)
 
-                    Button { selectPreviousPage() } label: {
-                        Image(systemName: "chevron.left")
-                            .frame(width: 26, height: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.45))
-                    .accessibilityLabel("Previous notch card")
-
+                    // No chevrons. They were the last of the arrows: two tap
+                    // targets restating what the dots already show and the
+                    // swipe already does, spending 52pt of a strip that is
+                    // narrow to begin with. The dots stay tappable, so nothing
+                    // that could be reached by an arrow became unreachable.
                     HStack(spacing: 4) {
                         ForEach(Array(activities.indices), id: \.self) { index in
                             Button { state.selectExpandedDeckPage(index, kinds: activityKinds) } label: {
@@ -479,14 +512,6 @@ struct ExpandedView: View {
                         }
                     }
 
-                    Button { selectNextPage() } label: {
-                        Image(systemName: "chevron.right")
-                            .frame(width: 26, height: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.45))
-                    .accessibilityLabel("Next notch card")
                 }
                 .font(.system(size: 9 * textScale, weight: .semibold))
             }
