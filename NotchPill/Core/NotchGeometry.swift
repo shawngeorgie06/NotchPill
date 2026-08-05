@@ -8,6 +8,23 @@ struct NotchGeometry {
     let screen: NSScreen
     /// Notch rectangle in global screen coordinates (matches the black cutout).
     let notchRect: CGRect
+    /// Whether `notchRect` was measured from the display or assumed.
+    ///
+    /// This matters visually, not just diagnostically. The pill is drawn
+    /// starting at the *lower edge of the hardware cutout* and never paints
+    /// above it, so every one of its dimensions is trusted to match the real
+    /// notch. When the measurement is a guess and the guess is wrong, the neck
+    /// is the wrong width and the shoulders start at the wrong depth — the pill
+    /// stops reading as an extension of the notch and starts reading as a
+    /// separate panel hanging under it. That is the bug reported from another
+    /// machine, and until now nothing anywhere said which of the two paths a
+    /// given Mac had taken.
+    var source: Source = .measured
+
+    enum Source: String {
+        case measured
+        case assumed
+    }
 
     // Expanded overlay *design* dimensions (before shrink). The pill hangs below
     // the notch, wider than it. `expandedScale` shrinks the whole pill uniformly.
@@ -82,8 +99,9 @@ struct NotchGeometry {
         for screen in NSScreen.screens {
             guard screen.safeAreaInsets.top > 0 else { continue }
             guard isBuiltIn(screen) else { continue }
-            guard let rect = notchRect(for: screen) else { continue }
-            return NotchGeometry(screen: screen, notchRect: rect)
+            guard let resolved = resolvedNotch(for: screen) else { continue }
+            return NotchGeometry(screen: screen, notchRect: resolved.rect,
+                                 source: resolved.source)
         }
         return nil
     }
@@ -99,10 +117,14 @@ struct NotchGeometry {
 
     /// Computes the notch rect from the two auxiliary top areas that flank it.
     private static func notchRect(for screen: NSScreen) -> CGRect? {
-        notchRect(inFrame: screen.frame,
-                  safeTop: screen.safeAreaInsets.top,
-                  left: screen.auxiliaryTopLeftArea,
-                  right: screen.auxiliaryTopRightArea)
+        resolvedNotch(for: screen)?.rect
+    }
+
+    static func resolvedNotch(for screen: NSScreen) -> (rect: CGRect, source: Source)? {
+        resolveNotch(inFrame: screen.frame,
+                     safeTop: screen.safeAreaInsets.top,
+                     left: screen.auxiliaryTopLeftArea,
+                     right: screen.auxiliaryTopRightArea)
     }
 
     /// The rule on its own, so the awkward inputs can be fed to it directly.
@@ -125,6 +147,21 @@ struct NotchGeometry {
                           safeTop: CGFloat,
                           left: CGRect?,
                           right: CGRect?) -> CGRect? {
+        resolveNotch(inFrame: frame, safeTop: safeTop, left: left, right: right)?.rect
+    }
+
+    /// The same rule, saying which branch it took.
+    ///
+    /// The assumed branch is a real guess — 200 points wide because that is
+    /// close to a 14"/16" Pro — and on a Mac whose notch is not that, every
+    /// dimension the pill derives from it is wrong in a way that shows. It used
+    /// to be indistinguishable from a measurement from the outside, including
+    /// in the diagnostics report, which is why a "the pill is floating" report
+    /// had nothing to check against.
+    static func resolveNotch(inFrame frame: CGRect,
+                             safeTop: CGFloat,
+                             left: CGRect?,
+                             right: CGRect?) -> (rect: CGRect, source: Source)? {
         guard safeTop > 0, frame.width > 0 else { return nil }
 
         if let left, let right,
@@ -136,15 +173,16 @@ struct NotchGeometry {
                                    y: frame.maxY - safeTop,
                                    width: width,
                                    height: safeTop)
-            if isPlausibleNotch(candidate, in: frame) { return candidate }
+            if isPlausibleNotch(candidate, in: frame) { return (candidate, .measured) }
         }
 
         // Fallback: assume a centered notch of a typical width.
         let assumedWidth: CGFloat = 200
-        return CGRect(x: frame.midX - assumedWidth / 2,
-                      y: frame.maxY - safeTop,
-                      width: assumedWidth,
-                      height: safeTop)
+        return (CGRect(x: frame.midX - assumedWidth / 2,
+                       y: frame.maxY - safeTop,
+                       width: assumedWidth,
+                       height: safeTop),
+                .assumed)
     }
 
     /// A notch is narrow and sits near the middle. Bounds chosen wide enough to

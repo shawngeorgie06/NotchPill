@@ -119,9 +119,16 @@ enum DiagnosticsReport {
                 }
                 let r = geo.notchRect
                 let onMain = geo.screen == NSScreen.main
-                return String(format: "%.0f,%.0f %.0f×%.0f on %@display",
+                // `source` is the line that matters when someone reports the
+                // pill hanging detached from the notch: "assumed" means these
+                // numbers are a 200pt guess rather than a reading, and the
+                // pill's neck and shoulders are built on them.
+                let note = geo.source == .assumed
+                    ? " · ASSUMED (could not read the display — pill may not line up)"
+                    : " · measured"
+                return String(format: "%.0f,%.0f %.0f×%.0f on %@display%@",
                               r.origin.x, r.origin.y, r.width, r.height,
-                              onMain ? "main " : "secondary ")
+                              onMain ? "main " : "secondary ", note)
             }())
         return build(facts)
     }

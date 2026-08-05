@@ -3002,6 +3002,50 @@ struct NotchRectTests {
         NotchGeometry.notchRect(inFrame: frame, safeTop: safeTop, left: left, right: right)
     }
 
+    private func source(left: CGRect?, right: CGRect?) -> NotchGeometry.Source? {
+        NotchGeometry.resolveNotch(inFrame: frame, safeTop: safeTop,
+                                   left: left, right: right)?.source
+    }
+
+    // On a 14" Pro the guess and the measurement are both 200pt wide, so every
+    // assertion in this suite passed either way and nothing distinguished "read
+    // the display" from "could not read the display". That is what made a
+    // report of the pill hanging detached from the notch impossible to check:
+    // the fallback is silent, and on a Mac whose notch is not 200pt it is also
+    // wrong.
+    @Test("a real reading is reported as measured")
+    func measuredIsLabelled() {
+        let left = CGRect(x: 0, y: 945, width: 656, height: 37)
+        let right = CGRect(x: 856, y: 945, width: 656, height: 37)
+        #expect(source(left: left, right: right) == .measured)
+    }
+
+    @Test("every rejected reading is reported as assumed")
+    func fallbacksAreLabelled() {
+        // Degenerate, off-centre, absurdly wide, and absent — the four ways the
+        // rule declines. All of them are guesses and must say so.
+        #expect(source(left: CGRect(x: 0, y: 945, width: 656, height: 37),
+                       right: CGRect(x: 1512, y: 945, width: 0, height: 0)) == .assumed)
+        #expect(source(left: CGRect(x: 0, y: 945, width: 1100, height: 37),
+                       right: CGRect(x: 1350, y: 945, width: 162, height: 37)) == .assumed)
+        #expect(source(left: CGRect(x: 0, y: 945, width: 200, height: 37),
+                       right: CGRect(x: 1312, y: 945, width: 200, height: 37)) == .assumed)
+        #expect(source(left: nil, right: nil) == .assumed)
+    }
+
+    // A narrower notch than the guess is the case that shows: the pill's neck
+    // is built from this width, so a 200pt guess on a 160pt notch paints black
+    // proud of the cutout on both sides.
+    @Test("a narrower real notch is measured, not rounded up to the guess")
+    func narrowNotchIsMeasured() {
+        let left = CGRect(x: 0, y: 945, width: 676, height: 37)
+        let right = CGRect(x: 836, y: 945, width: 676, height: 37)
+        let resolved = NotchGeometry.resolveNotch(inFrame: frame, safeTop: safeTop,
+                                                  left: left, right: right)
+        #expect(resolved?.rect.width == 160)
+        #expect(resolved?.source == .measured)
+    }
+
     @Test("a normal pair of auxiliary areas gives a centred notch")
     func normalCase() {
         let left = CGRect(x: 0, y: 945, width: 656, height: 37)

@@ -409,6 +409,15 @@ final class NotchController {
             return
         }
 
+        if self.geometry?.notchRect != geometry.notchRect
+            || self.geometry?.source != geometry.source {
+            LogStore.log("notch", "\(geometry.source.rawValue) "
+                         + "\(Int(geometry.notchRect.width))×\(Int(geometry.notchRect.height)) "
+                         + "on \(Int(geometry.screen.frame.width))×"
+                         + "\(Int(geometry.screen.frame.height)) display"
+                         + (geometry.source == .assumed
+                            ? " — could not read the notch, the pill may not line up" : ""))
+        }
         self.geometry = geometry
 
         metrics = NotchMetrics(notchWidth: geometry.notchRect.width,
