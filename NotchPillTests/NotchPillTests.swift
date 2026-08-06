@@ -4204,6 +4204,43 @@ struct AgentModelLabelTests {
     }
 }
 
+/// `~/.claude/projects` holds every Claude Code run, not every terminal
+/// session. SDK-driven runs write transcripts there too, and each one that
+/// lands inside the live window used to become a Live Agents row for an agent
+/// nobody started — on whatever model the SDK caller picked.
+@Suite("Only interactive sessions reach the card")
+struct InteractiveSessionTests {
+    @Test("A terminal session is interactive")
+    func terminalCounts() {
+        #expect(AgentSessionScanner.claudeIsInteractive(entrypoint: "cli"))
+    }
+
+    @Test("SDK-driven runs are not")
+    func sdkRunsExcluded() {
+        #expect(!AgentSessionScanner.claudeIsInteractive(entrypoint: "sdk-py"))
+        #expect(!AgentSessionScanner.claudeIsInteractive(entrypoint: "sdk-cli"))
+        // Whatever the next binding is called.
+        #expect(!AgentSessionScanner.claudeIsInteractive(entrypoint: "sdk-ts"))
+        #expect(!AgentSessionScanner.claudeIsInteractive(entrypoint: "SDK-PY"))
+    }
+
+    /// Hiding a running agent is a worse failure than showing an odd one, so
+    /// anything we cannot classify stays on the card.
+    @Test("An unknown or missing entrypoint stays visible")
+    func unknownStaysVisible() {
+        #expect(AgentSessionScanner.claudeIsInteractive(entrypoint: nil))
+        #expect(AgentSessionScanner.claudeIsInteractive(entrypoint: ""))
+        #expect(AgentSessionScanner.claudeIsInteractive(entrypoint: "   "))
+        #expect(AgentSessionScanner.claudeIsInteractive(entrypoint: "vscode"))
+    }
+
+    @Test("The entrypoint is read from the transcript's own records")
+    func readFromTranscript() {
+        let text = #"{"type":"attachment","entrypoint":"sdk-py","cwd":"/tmp"}"#
+        #expect(AgentSessionScanner.firstValue(in: text, key: "entrypoint") == "sdk-py")
+    }
+}
+
 @Suite("Follow-up reminders")
 struct FollowUpReminderTests {
     private let t0 = Date(timeIntervalSince1970: 1_000_000)

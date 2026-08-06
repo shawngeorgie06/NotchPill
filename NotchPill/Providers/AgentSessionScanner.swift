@@ -70,6 +70,8 @@ actor AgentSessionScanner {
             // user is working with; it also writes more recently than the
             // actual task and could push that useful row below the fold.
             if isCodex, codexIsApprovalReviewer(url) { return nil }
+            // An SDK-driven run is not a session the user can tab to.
+            if !isCodex, !claudeIsInteractive(url) { return nil }
             let sidechain = Self.subagentId(from: url)
             let info = sidechain.flatMap { subagentInfo(for: $0, sidechain: url) }
             let modelInfo = currentModel(in: url, isCodex: isCodex)
@@ -238,6 +240,33 @@ actor AgentSessionScanner {
     private func codexLastPrompt(_ url: URL) -> String? {
         guard let text = text(of: url, tail: 262_144) else { return nil }
         return Self.codexLastPrompt(in: text)
+    }
+
+    /// Whether a Claude Code transcript belongs to a session someone is sitting
+    /// in front of.
+    ///
+    /// `~/.claude/projects` is not a list of terminal sessions — it is a list of
+    /// every Claude Code run on the machine, and anything driven through the SDK
+    /// writes a transcript there exactly like an interactive session does. On
+    /// this machine 260 of 286 transcripts are SDK runs; only 22 are `cli`. Each
+    /// one that gets written inside the two-hour `liveWindow` becomes a row in
+    /// Live Agents for an agent the user never started and cannot tab to, on
+    /// whatever model the SDK caller chose — which is one way a model you are
+    /// not using appears on the card.
+    ///
+    /// Unknown or missing entrypoints count as interactive. Older Claude Code
+    /// versions wrote no `entrypoint` at all, and this codebase would rather
+    /// show an imperfect row than silently hide a running agent.
+    nonisolated static func claudeIsInteractive(entrypoint: String?) -> Bool {
+        guard let entrypoint = entrypoint?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !entrypoint.isEmpty else { return true }
+        // `sdk-py`, `sdk-cli`, and whatever the next binding is called.
+        return !entrypoint.hasPrefix("sdk")
+    }
+
+    private func claudeIsInteractive(_ url: URL) -> Bool {
+        Self.claudeIsInteractive(entrypoint: firstValue(in: url, key: "entrypoint"))
     }
 
     private func codexIsApprovalReviewer(_ url: URL) -> Bool {
