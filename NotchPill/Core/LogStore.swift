@@ -70,11 +70,20 @@ final class LogStore: ObservableObject {
         // stderr, not stdout: unbuffered, so a line is readable the moment it
         // happens rather than whenever a 4KB block fills. Chasing a timing bug
         // through a buffer is how you conclude the wrong thing.
+        let line = entry.line(formatter: Self.lineFormatter)
         if Self.mirrorsToStdout {
-            FileHandle.standardError.write(
-                Data((entry.line(formatter: Self.lineFormatter) + "\n").utf8))
+            FileHandle.standardError.write(Data((line + "\n").utf8))
+        }
+        // Opt-in, and off the main thread: this is the notch's own actor, and a
+        // slow disk must never be able to stutter an animation. Serial, so
+        // lines land in the order they happened.
+        if AppSettings.shared.persistLog {
+            Self.fileQueue.async { LogFile.append(line) }
         }
     }
+
+    private static let fileQueue = DispatchQueue(label: "com.local.notchpill.logfile",
+                                                 qos: .utility)
 
     func clear() {
         entries.removeAll()

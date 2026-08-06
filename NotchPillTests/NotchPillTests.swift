@@ -4298,6 +4298,46 @@ struct TypingGuardTests {
     }
 }
 
+/// The in-memory log cannot help with a bug on someone else's Mac, which is
+/// the case that keeps costing real time. These cover the parts of the on-disk
+/// copy that fail quietly if they are wrong.
+@Suite("On-disk log")
+struct LogFileTests {
+    @Test("An empty file never rotates")
+    func emptyDoesNotRotate() {
+        #expect(!LogFile.shouldRotate(currentBytes: 0, adding: 10))
+        // Not even a line larger than the cap: rotating here would throw away
+        // nothing and leave an empty file behind.
+        #expect(!LogFile.shouldRotate(currentBytes: 0, adding: LogFile.maxBytes * 2))
+    }
+
+    @Test("Rotation happens at the cap, not past it")
+    func rotatesAtCap() {
+        #expect(!LogFile.shouldRotate(currentBytes: LogFile.maxBytes - 10, adding: 10))
+        #expect(LogFile.shouldRotate(currentBytes: LogFile.maxBytes - 10, adding: 11))
+        #expect(LogFile.shouldRotate(currentBytes: LogFile.maxBytes, adding: 1))
+    }
+
+    /// The whole point of writing to disk is that the file gets sent to
+    /// somebody. A token in it would be a worse bug than the one being chased.
+    @Test("Secrets never reach the file")
+    func redactsSecrets() {
+        let line = "12:00:00 · [focus] token ghp_0123456789abcdefghijABCDEFGHIJ0123 used"
+        let safe = SecretRedactor.redact(line)
+        #expect(!safe.contains("ghp_0123456789abcdefghijABCDEFGHIJ0123"))
+        #expect(safe.contains(SecretRedactor.placeholder))
+        // The rest of the line survives, or the file is useless.
+        #expect(safe.contains("[focus]"))
+    }
+
+    @Test("Both generations live under the private root, not the home directory")
+    func staysPrivate() {
+        #expect(LogFile.url.path.contains(".notchpill/log"))
+        #expect(LogFile.previousURL.path.contains(".notchpill/log"))
+        #expect(LogFile.url != LogFile.previousURL)
+    }
+}
+
 @Suite("Scan reconciliation")
 struct ScanLedgerTests {
     @Test("A clean scan states the arithmetic and nothing else")

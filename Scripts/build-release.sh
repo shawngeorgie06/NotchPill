@@ -56,7 +56,13 @@ chmod +x "$STAGE/Install NotchPill.command"
 ZIP="dist/NotchPill-${VERSION}-macOS-arm64.zip"
 rm -f "$ZIP"
 ditto -c -k --keepParent "$STAGE" "$ZIP"
-shasum -a 256 "$ZIP" | tee dist/SHA256SUMS.txt
+# Record the bare filename, not "dist/…". The checksum file ships next to the
+# zip on the releases page, so a user who downloads both and runs the obvious
+# `shasum -a 256 -c SHA256SUMS.txt` is standing in a directory where no `dist/`
+# exists — and shasum answers "FAILED open or read" for a file whose hash is
+# perfectly correct. That reads as a broken download of a security artifact,
+# which is the opposite of what publishing checksums is for.
+(cd dist && shasum -a 256 "$(basename "$ZIP")" | tee SHA256SUMS.txt)
 
 echo ""
 echo "Done: $ZIP"

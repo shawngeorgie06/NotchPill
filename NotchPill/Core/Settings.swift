@@ -221,6 +221,16 @@ final class AppSettings: ObservableObject {
     @Published var showDevReadyPings: Bool {
         didSet { defaults.set(showDevReadyPings, forKey: Keys.showDevReadyPings) }
     }
+    /// Keeps a copy of the log on disk so a problem can be reported after the
+    /// fact instead of reproduced on demand. Off by default: the in-memory log
+    /// is a deliberate privacy choice, and this is the user's decision to
+    /// reverse, not ours. Turning it off also deletes what was written.
+    @Published var persistLog: Bool {
+        didSet {
+            defaults.set(persistLog, forKey: Keys.persistLog)
+            if !persistLog { LogFile.clear() }
+        }
+    }
     @Published var devReadyDuration: Double {
         didSet { defaults.set(devReadyDuration, forKey: Keys.devReadyDuration) }
     }
@@ -327,6 +337,7 @@ final class AppSettings: ObservableObject {
         static let cardWeights = "cardWeights"
         static let notchScale = "notchScale"
         static let showDevReadyPings = "showDevReadyPings"
+        static let persistLog = "persistLog"
         static let devReadyDuration = "devReadyDuration"
         static let devReadyPlaySound = "devReadyPlaySound"
         static let devReadySound = "devReadySound"
@@ -373,6 +384,7 @@ final class AppSettings: ObservableObject {
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
+            Keys.persistLog: false,
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
             Keys.devReadySound: DevReadySound.glass.rawValue,
@@ -413,6 +425,7 @@ final class AppSettings: ObservableObject {
         cardWeights = (defaults.dictionary(forKey: Keys.cardWeights) as? [String: Double]) ?? [:]
         notchScale = AppSettings.clampNotchScale(defaults.double(forKey: Keys.notchScale))
         showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
+        persistLog = defaults.object(forKey: Keys.persistLog) as? Bool ?? false
         let storedDuration = defaults.double(forKey: Keys.devReadyDuration)
         devReadyDuration = storedDuration > 0 ? storedDuration : AppSettings.defaultDevReadyDuration
         devReadyPlaySound = defaults.object(forKey: Keys.devReadyPlaySound) as? Bool ?? true
@@ -471,6 +484,7 @@ final class AppSettings: ObservableObject {
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
+            Keys.persistLog: false,
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
             Keys.devReadySound: DevReadySound.glass.rawValue,

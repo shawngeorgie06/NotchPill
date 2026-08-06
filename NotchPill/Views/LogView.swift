@@ -8,6 +8,7 @@ import SwiftUI
 /// were looking elsewhere are indistinguishable without this.
 struct LogView: View {
     @ObservedObject private var log = LogStore.shared
+    @ObservedObject private var settings = AppSettings.shared
     @State private var showErrorsOnly = false
     @State private var copiedReport = false
     @State private var search = ""
@@ -54,8 +55,33 @@ struct LogView: View {
         VStack(spacing: 8) {
             controls
             if availableCategories.count > 1 { categoryFilter }
+            persistence
         }
         .padding(12)
+    }
+
+    /// The log is in memory, which is right when you can reproduce a problem
+    /// and useless when it is happening on someone else's Mac. This is the
+    /// escape hatch for the second case, and it stays off until asked.
+    private var persistence: some View {
+        HStack(spacing: 10) {
+            Toggle("Keep a copy on disk", isOn: Binding(
+                get: { settings.persistLog },
+                set: { settings.persistLog = $0 }))
+                .toggleStyle(.checkbox)
+            Text(settings.persistLog
+                 ? "Survives restarts. Owner-only, secrets redacted."
+                 : "Off — the log is lost when NotchPill quits.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            if settings.persistLog {
+                Button("Show File") {
+                    NSWorkspace.shared.activateFileViewerSelecting([LogFile.url])
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var categoryFilter: some View {
