@@ -25,6 +25,23 @@ pkill -x NotchPill 2>/dev/null || true
 rm -rf "$DEST"
 ditto "$APP" "$DEST"
 
+# There is exactly one NotchPill. Anything else in /Applications whose name
+# starts with "NotchPill" is a leftover: a versioned copy, a ".previous-*" or
+# ".backup" rename from a hand-rolled install, or an unpacked release folder.
+# Sweeping them here means an upgrade cleans up after every earlier one instead
+# of adding to the pile. "NotchPill Dev.app" is spared — it is a separate app
+# someone may be running on purpose, not a stale version of this one. The match
+# is anchored to "NotchPill." or "NotchPill-" rather than a bare NotchPill*
+# prefix, so an unrelated app that merely starts with those letters
+# (NotchPillow.app) is not swept up with them.
+shopt -s nullglob
+for stale in /Applications/NotchPill.* /Applications/NotchPill-*; do
+  [[ "$stale" == "$DEST" ]] && continue
+  echo "Removing leftover $(basename "$stale")…"
+  rm -rf "$stale"
+done
+shopt -u nullglob
+
 # The release build is already validly signed; just clear quarantine so it can
 # launch. We avoid re-signing so the code identity stays stable and macOS keeps
 # any Accessibility/Calendar permissions. Re-sign only if the signature is broken.

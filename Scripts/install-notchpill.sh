@@ -34,6 +34,26 @@ xattr -cr "$STAGE"
 rm -rf "$DEST"
 ditto "$APP" "$DEST"
 
+# There is exactly one NotchPill. Anything else in /Applications whose name
+# starts with "NotchPill" is a leftover: a versioned copy, a ".previous-*" or
+# ".backup" rename from a hand-rolled install, or an unpacked release folder.
+# Sweeping them here means an upgrade cleans up after every earlier one instead
+# of adding to the pile.
+#
+# "NotchPill Dev.app" is deliberately spared — it is a separate app someone may
+# be running on purpose, not a stale version of this one.
+#
+# The match is anchored to "NotchPill." or "NotchPill-" rather than a bare
+# NotchPill* prefix, so an unrelated app that merely starts with those letters
+# (NotchPillow.app) is not swept up with them.
+shopt -s nullglob
+for stale in /Applications/NotchPill.* /Applications/NotchPill-*; do
+  [[ "$stale" == "$DEST" ]] && continue
+  echo "    removing leftover $(basename "$stale")"
+  rm -rf "$stale"
+done
+shopt -u nullglob
+
 # Strip the Gatekeeper quarantine flag so the app launches. The release build
 # already carries a valid signature (self-signed or ad-hoc), so we do NOT
 # re-sign here — re-signing would change the code identity and macOS would drop
