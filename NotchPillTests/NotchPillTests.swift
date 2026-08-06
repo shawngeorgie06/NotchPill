@@ -4243,6 +4243,61 @@ struct InteractiveSessionTests {
 
 /// The log records what the app did; these record what it declined to do,
 /// which is where every real bug so far has lived.
+/// The hot-zone shortcuts are swallowed by an event tap, so a false positive
+/// does not merely trigger playback — it stops the key reaching the app you
+/// are typing in.
+@Suite("Typing keeps the keyboard")
+struct TypingGuardTests {
+    private let space: UInt16 = 49
+
+    @Test("A space mid-sentence belongs to the sentence")
+    func typingReleasesSpace() {
+        var guard0 = TypingGuard()
+        guard0.observe(isShortcut: false, now: 100)     // "k"
+        #expect(guard0.isTyping(now: 100.1))
+        // Still typing a quarter second later — this is the failing case.
+        #expect(guard0.isTyping(now: 100.25))
+    }
+
+    @Test("Shortcuts alone never mark you as typing")
+    func shortcutsDoNotArm() {
+        var guard0 = TypingGuard()
+        guard0.observe(isShortcut: true, now: 100)
+        #expect(!guard0.isTyping(now: 100.01))
+    }
+
+    @Test("A pause hands the keys back to the notch")
+    func graceExpires() {
+        var guard0 = TypingGuard()
+        guard0.observe(isShortcut: false, now: 100)
+        #expect(!guard0.isTyping(now: 100 + TypingGuard.grace))
+        #expect(!guard0.isTyping(now: 105))
+    }
+
+    @Test("A fresh guard is not typing")
+    func startsIdle() {
+        #expect(!TypingGuard().isTyping(now: 100))
+    }
+
+    @Test("Reaching for the notch clears the sentence behind you")
+    func resetOnEntry() {
+        var guard0 = TypingGuard()
+        guard0.observe(isShortcut: false, now: 100)
+        #expect(guard0.isTyping(now: 100.1))
+        guard0.reset()
+        #expect(!guard0.isTyping(now: 100.1))
+    }
+
+    /// A backwards clock jump must not wedge the guard on and mute the
+    /// shortcuts indefinitely.
+    @Test("A clock going backwards does not stick")
+    func backwardsClock() {
+        var guard0 = TypingGuard()
+        guard0.observe(isShortcut: false, now: 100)
+        #expect(!guard0.isTyping(now: 50))
+    }
+}
+
 @Suite("Scan reconciliation")
 struct ScanLedgerTests {
     @Test("A clean scan states the arithmetic and nothing else")

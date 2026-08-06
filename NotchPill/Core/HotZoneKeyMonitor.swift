@@ -21,6 +21,18 @@ final class HotZoneKeyMonitor {
     private let lock = NSLock()
     private var cachedInHotZone = false
     private var lastDispatch: (keyCode: UInt16, time: CFAbsoluteTime)?
+    /// Guarded by `lock`: written from the event-tap thread, read from both it
+    /// and the main thread.
+    private var typing = TypingGuard()
+
+    /// Records the key, and reports whether the user is mid-typing.
+    private func noteKeyAndCheckTyping(keyCode: UInt16) -> Bool {
+        let now = CFAbsoluteTimeGetCurrent()
+        return lock.withLock {
+            typing.observe(isShortcut: isShortcut(keyCode), now: now)
+            return typing.isTyping(now: now)
+        }
+    }
 
     private var eventTap: CFMachPort?
     private var tapRunLoopSource: CFRunLoopSource?
@@ -67,7 +79,15 @@ final class HotZoneKeyMonitor {
     }
 
     func updatePointerInHotZone(_ inside: Bool) {
-        lock.withLock { cachedInHotZone = inside }
+        lock.withLock {
+            let wasInside = cachedInHotZone
+            cachedInHotZone = inside
+            // Arriving at the notch is a deliberate act and a clean slate; a
+            // sentence finished on the way there should not mute the first
+            // press. Only on the transition — re-resetting every tick while
+            // parked would undo the guard entirely.
+            if inside, !wasInside { typing.reset() }
+        }
         if inside {
             ensureShortcutCaptureReady()
         }
@@ -219,6 +239,10 @@ final class HotZoneKeyMonitor {
 
     private func handleObservedKeyDown(_ event: NSEvent) {
         guard !event.isARepeat else { return }
+        // The monitors cannot swallow a key, but they can still fire the
+        // action — so a space typed elsewhere would toggle playback even
+        // though it reached the app. Same guard, same reason.
+        guard !noteKeyAndCheckTyping(keyCode: event.keyCode) else { return }
         _ = dispatchIfNeeded(keyCode: event.keyCode)
     }
 
@@ -240,7 +264,11 @@ final class HotZoneKeyMonitor {
         }
 
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-        guard isShortcut(keyCode), isPointerInHotZoneLive() else {
+        // Every key is observed, not just the shortcuts — the letters are the
+        // evidence that the next Space belongs to a sentence. This runs before
+        // the shortcut check so ordinary typing still feeds the guard.
+        let wasTyping = noteKeyAndCheckTyping(keyCode: keyCode)
+        guard isShortcut(keyCode), !wasTyping, isPointerInHotZoneLive() else {
             return Unmanaged.passUnretained(event)
         }
 
@@ -329,6 +357,7 @@ final class HotZoneKeyMonitor {
         guard localMonitor == nil else { return }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, !event.isARepeat else { return event }
+            guard !self.noteKeyAndCheckTyping(keyCode: event.keyCode) else { return event }
             if self.dispatchIfNeeded(keyCode: event.keyCode) { return nil }
             return event
         }
