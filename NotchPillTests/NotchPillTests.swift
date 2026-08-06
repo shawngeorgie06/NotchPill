@@ -4346,6 +4346,42 @@ struct CaptionSizingTests {
 
     /// Shrinking is what turns "needs 8.2 lines" into smaller text rather than
     /// lost words, and it must never apply to ordinary one-line peek titles.
+    /// Height was never the scarce resource — width was. At the ordinary
+    /// ceiling a line holds ~47 characters, so no height budget could rescue a
+    /// paragraph.
+    @Test("A wrapping peek is given more width than an ordinary one")
+    func wrappingPeekIsWider() {
+        let metrics = NotchMetrics(notchWidth: 179, notchHeight: 32,
+                                   designExpandedWidth: 720, designExpandedHeight: 128,
+                                   scale: 0.54, screenWidth: 1470)
+        let ordinary = NotchContentLayout.peekWidthCeiling(metrics: metrics, wrapping: false)
+        let wrapping = NotchContentLayout.peekWidthCeiling(metrics: metrics, wrapping: true)
+        // 720 * 0.54 — the ordinary expanded ceiling, asserted by value rather
+        // than by widening the property's access just for a test.
+        #expect(abs(ordinary - 388.8) < 0.01)
+        #expect(wrapping > ordinary * 1.5)
+        // Never wider than the display it sits on.
+        #expect(wrapping < metrics.screenWidth)
+    }
+
+    @Test("An unknown screen width still widens, and never narrows")
+    func unknownScreenIsSafe() {
+        let metrics = NotchMetrics(notchWidth: 179, notchHeight: 32,
+                                   designExpandedWidth: 720, designExpandedHeight: 128,
+                                   scale: 0.54)          // screenWidth defaults to 0
+        let wrapping = NotchContentLayout.peekWidthCeiling(metrics: metrics, wrapping: true)
+        #expect(wrapping >= 388.8)
+    }
+
+    /// The whole point of the extra width: the same sentence needs fewer lines.
+    @Test("Widening the peek cuts the lines a paragraph needs")
+    func widerNeedsFewerLines() {
+        let paragraph = String(repeating: "word ", count: 80)   // ~400 chars
+        let narrow = NotchContentLayout.titleLines(for: paragraph, width: 389)
+        let wide = NotchContentLayout.titleLines(for: paragraph, width: 760)
+        #expect(wide < narrow)
+    }
+
     @Test("Only wrapping titles are allowed to shrink")
     func shrinkIsScopedToCaptions() {
         #expect(NotchContentLayout.titleMinimumScale < 1)

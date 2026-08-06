@@ -336,7 +336,11 @@ final class NotchController {
         // installed and the user switched it on, so there is no cost to
         // everyone else: the file simply never exists.
         dictation.onCaption = { [weak self] caption in
-            self?.presentDevReady(Self.alert(for: caption), origin: "dictation")
+            guard let self else { return }
+            let width = NotchContentLayout.peekWidthCeiling(metrics: self.metrics,
+                                                            wrapping: true)
+            self.presentDevReady(Self.alert(for: caption, width: width),
+                                 origin: "dictation")
         }
         dictation.start()
         // Hookless finished peeks. Emits the same title/subtitle/sessionId as the
@@ -436,7 +440,8 @@ final class NotchController {
                                    * CGFloat(AppSettings.shared.notchScale),
                                topGap: NotchGeometry.contentTopGap,
                                userScale: CGFloat(AppSettings.shared.notchScale),
-                               hasPhysicalNotch: geometry.hasPhysicalNotch)
+                               hasPhysicalNotch: geometry.hasPhysicalNotch,
+                               screenWidth: geometry.screen.frame.width)
 
         let root = makeRootView()
 
@@ -1067,7 +1072,8 @@ final class NotchController {
     /// what `SecretRedactor` is for — and dictation is a worse case than a
     /// transcript, because people read tokens aloud and the result lands on an
     /// overlay that sits above every window and gets screen-shared.
-    nonisolated static func alert(for caption: DictationCaption) -> DevReadyAlert {
+    nonisolated static func alert(for caption: DictationCaption,
+                                  width: CGFloat = NotchContentLayout.devReadyMinWidth) -> DevReadyAlert {
         let safe = SecretRedactor.redact(caption.text)
         return DevReadyAlert(
             // Timestamped, so two identical dictations are two peeks rather
@@ -1087,7 +1093,9 @@ final class NotchController {
             deliverySpec: "none",
             // A caption is a sentence, not a label, so the peek grows to fit
             // what was actually said instead of truncating it.
-            titleLines: NotchContentLayout.titleLines(for: safe))
+            // Measured at the width the peek will actually get, so the height
+            // budget matches the text instead of leaving a gap under it.
+            titleLines: NotchContentLayout.titleLines(for: safe, width: width))
     }
 
     private func presentDevReady(_ alert: DevReadyAlert, origin: String = "?") {

@@ -196,6 +196,37 @@ enum NotchContentLayout {
     /// the `VStack(spacing: 3)` the row draws between lines.
     static let titleLineHeight: CGFloat = 17
 
+    /// Width a peek gets when its title wraps.
+    ///
+    /// Ordinary peeks are capped at `maxExpandedRenderedWidth` — 720 × 0.54 ≈
+    /// 389pt here — which with `devReadyMinWidth` at 380 leaves them barely a
+    /// character of slack. That is right for an agent peek, whose title is a
+    /// label and whose job is to stay notch-shaped.
+    ///
+    /// It is the wrong ceiling for a caption. At ~389pt a line holds about 47
+    /// characters, so a spoken paragraph needs eight of them and anything
+    /// longer truncates no matter how the height budget is tuned. Height was
+    /// never the scarce resource; **width** was. Doubling the width halves the
+    /// lines, which is the only change here with real headroom in it.
+    ///
+    /// Bounded by the actual screen rather than a constant, so this cannot
+    /// produce a peek wider than the display on hardware I cannot test. 60% of
+    /// the screen keeps it recognisably a notch element rather than a banner,
+    /// and it never returns less than the ordinary cap.
+    static func peekWidthCeiling(metrics: NotchMetrics, wrapping: Bool) -> CGFloat {
+        let ordinary = metrics.maxExpandedRenderedWidth
+        guard wrapping else { return ordinary }
+        guard metrics.screenWidth > 0 else { return max(ordinary, 620) }
+        return max(ordinary, min(metrics.screenWidth * 0.6, 760))
+    }
+
+    /// Characters that fit on one line of the 13pt semibold title at `width`.
+    static func titleCharactersPerLine(width: CGFloat) -> Int {
+        // The row spends width on the status dot, the source icon and controls.
+        let textWidth = width - (dismissControlWidth + 70)
+        return max(8, Int(textWidth / 6.6))
+    }
+
     /// Lines a title of this length needs.
     ///
     /// Estimated from `devReadyMinWidth` rather than the peek's final width,
@@ -203,11 +234,10 @@ enum NotchContentLayout {
     /// the minimum, so a wider one needs fewer lines than this predicts. The
     /// error therefore only ever runs toward reserving height that goes unused,
     /// never toward text drawn outside the window.
-    static func titleLines(for text: String, maxLines: Int = titleMaxLines) -> Int {
-        // 13pt semibold averages a little over 6pt per character; the row also
-        // spends width on the status dot, the source icon and the controls.
-        let textWidth = devReadyMinWidth - (dismissControlWidth + 70)
-        let perLine = max(8, Int(textWidth / 6.6))
+    static func titleLines(for text: String,
+                           width: CGFloat = devReadyMinWidth,
+                           maxLines: Int = titleMaxLines) -> Int {
+        let perLine = titleCharactersPerLine(width: width)
         let needed = Int(ceil(Double(text.count) / Double(perLine)))
         return min(maxLines, max(1, needed))
     }
@@ -240,8 +270,10 @@ enum NotchContentLayout {
         let anyReplyable = alerts.contains { $0.canReplyFromNotch(replyEnabled: replyEnabled) }
         let controls = dismissControlWidth + (anyReplyable ? replyControlWidth : 0)
         let contentWidth = 300 + controls + max(labelLen, titleLen) * 2.5
+        // A wrapping title is content, not a label, and gets the wider ceiling.
+        let wrapping = alerts.contains { ($0.titleLines ?? 1) > 1 }
         let width = min(
-            metrics.maxExpandedRenderedWidth,
+            peekWidthCeiling(metrics: metrics, wrapping: wrapping),
             max(metrics.notchWidth + 168, devReadyMinWidth, contentWidth)
         )
         let height = metrics.notchHeight + metrics.topGap + headerHeight + listHeight + 4

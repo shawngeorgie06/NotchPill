@@ -22,6 +22,10 @@ struct NotchMetrics: Equatable {
     /// deliberate floating capsule rather than as an extension of hardware
     /// that does not exist.
     var hasPhysicalNotch: Bool = true
+    /// Width of the screen the pill lives on, so a peek that needs room can ask
+    /// for it without guessing how much room exists. Zero when unknown, which
+    /// callers treat as "stay inside the usual expanded width".
+    var screenWidth: CGFloat = 0
 
     /// Rendered (post-shrink) pill dimensions below the notch.
     var expandedWidth: CGFloat { designExpandedWidth * scale }
