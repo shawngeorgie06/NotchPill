@@ -103,6 +103,25 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// field. Set for finished peeks, where there is no question but there is
     /// still something you are replying *to*.
     var agentMessage: String?
+    /// How many lines the title may wrap to, when one is not enough.
+    ///
+    /// Peek titles are a single line because an agent's is a short label —
+    /// "Tests passed", "Permission needed". A dictated caption is a *sentence*,
+    /// as long as the user cared to speak, and one line truncated it to a
+    /// fragment ending in an ellipsis: the thing you turned the feature on to
+    /// read is exactly the part that got cut.
+    ///
+    /// This is the single number the row's `lineLimit` and the layout's height
+    /// budget both read. Deliberately stored rather than recomputed on each
+    /// side — `waitingRowExtra` documents what happens when a budget mirrors a
+    /// view instead of sharing with it: the peek reserved space for buttons it
+    /// never drew. Under-budgeting is worse than cosmetic here, because a
+    /// single-alert peek pins its list to the window height and anything past
+    /// it draws outside the NSWindow, clipped and not hit-testable.
+    ///
+    /// Optional so signals written by older hooks — which carry no such key —
+    /// still decode, and nil means the one-line behaviour everything else has.
+    var titleLines: Int?
 
     static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
 
@@ -186,7 +205,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         deliverySpec: String? = nil,
         requestId: String? = nil,
         permissionPayload: String? = nil,
-        agentMessage: String? = nil
+        agentMessage: String? = nil,
+        titleLines: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -203,6 +223,7 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         self.deliverySpec = Self.normalized(deliverySpec)
         self.requestId = Self.normalized(requestId)
         self.permissionPayload = Self.normalized(permissionPayload)
+        self.titleLines = titleLines
     }
 
     enum CodingKeys: String, CodingKey {

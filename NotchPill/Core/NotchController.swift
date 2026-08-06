@@ -1084,7 +1084,10 @@ final class NotchController {
             sessionId: nil,
             // No agent to answer and nowhere to send it.
             answerSpec: nil,
-            deliverySpec: "none")
+            deliverySpec: "none",
+            // A caption is a sentence, not a label, so the peek grows to fit
+            // what was actually said instead of truncating it.
+            titleLines: NotchContentLayout.titleLines(for: safe))
     }
 
     private func presentDevReady(_ alert: DevReadyAlert, origin: String = "?") {

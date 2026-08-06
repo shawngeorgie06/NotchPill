@@ -164,6 +164,42 @@ enum NotchContentLayout {
         return devReadyRowHeight * CGFloat(visible) + CGFloat(dividers)
     }
 
+    /// Ceiling on how tall a caption may push the peek. Four lines is roughly a
+    /// long spoken sentence; past that the notch stops being a glance and
+    /// becomes a document, and the text is on the clipboard anyway.
+    static let titleMaxLines = 4
+
+    /// Height of one wrapped title line at the peek's 13pt semibold, including
+    /// the `VStack(spacing: 3)` the row draws between lines.
+    static let titleLineHeight: CGFloat = 17
+
+    /// Lines a title of this length needs.
+    ///
+    /// Estimated from `devReadyMinWidth` rather than the peek's final width,
+    /// and that choice is deliberate: the real peek is never *narrower* than
+    /// the minimum, so a wider one needs fewer lines than this predicts. The
+    /// error therefore only ever runs toward reserving height that goes unused,
+    /// never toward text drawn outside the window.
+    static func titleLines(for text: String, maxLines: Int = titleMaxLines) -> Int {
+        // 13pt semibold averages a little over 6pt per character; the row also
+        // spends width on the status dot, the source icon and the controls.
+        let textWidth = devReadyMinWidth - (dismissControlWidth + 70)
+        let perLine = max(8, Int(textWidth / 6.6))
+        let needed = Int(ceil(Double(text.count) / Double(perLine)))
+        return min(maxLines, max(1, needed))
+    }
+
+    /// Extra height the wrapped titles add, over the one line already inside
+    /// `devReadyRowHeight`. Summed over the rows actually shown, largest first,
+    /// on the same reasoning as `waitingExtraHeight`.
+    static func titleExtraHeight(alerts: [DevReadyAlert]) -> CGFloat {
+        alerts
+            .map { CGFloat(max(1, $0.titleLines ?? 1) - 1) * titleLineHeight }
+            .sorted(by: >)
+            .prefix(devReadyMaxVisibleRows)
+            .reduce(0, +)
+    }
+
     @MainActor
     static func devReadyLayout(metrics: NotchMetrics, alerts: [DevReadyAlert],
                                answerEnabled: Bool? = nil) -> NotchContentLayoutMetrics {
@@ -186,6 +222,7 @@ enum NotchContentLayout {
             max(metrics.notchWidth + 168, devReadyMinWidth, contentWidth)
         )
         let height = metrics.notchHeight + metrics.topGap + headerHeight + listHeight + 4
+            + titleExtraHeight(alerts: alerts)
         return NotchContentLayoutMetrics(
             size: CGSize(width: width, height: height),
             readability: 1.05,

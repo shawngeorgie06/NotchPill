@@ -534,7 +534,11 @@ struct DevReadyPeekRow: View {
                         Text(alert.displayTitle)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white)
-                            .lineLimit(1)
+                            // The same number the layout budgeted height for.
+                            // Raising one without the other either clips the
+                            // text or leaves a gap under it.
+                            .lineLimit(alert.titleLines ?? 1)
+                            .fixedSize(horizontal: false, vertical: true)
 
                         HStack(spacing: 5) {
                             // Lead with the app you would switch back to. A

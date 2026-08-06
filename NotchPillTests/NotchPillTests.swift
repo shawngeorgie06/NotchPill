@@ -4303,6 +4303,74 @@ struct TypingGuardTests {
 /// copy that fail quietly if they are wrong.
 /// Murmur writes a caption file that persists across restarts. Treating a file
 /// as an event is the whole risk here.
+/// A truncated caption defeats the feature: the sentence you switched it on to
+/// read is exactly the part that gets cut. Height must follow the text, and the
+/// budget must never run short — a single-alert peek pins its list to the
+/// window, so unbudgeted rows draw outside it.
+@Suite("Caption peeks grow with the text")
+struct CaptionSizingTests {
+    @Test("A short caption stays one line")
+    func shortStaysOneLine() {
+        #expect(NotchContentLayout.titleLines(for: "Hello there") == 1)
+    }
+
+    @Test("A spoken sentence wraps")
+    func sentenceWraps() {
+        let sentence = String(repeating: "word ", count: 30)   // ~150 chars
+        #expect(NotchContentLayout.titleLines(for: sentence) > 1)
+    }
+
+    @Test("Growth is capped rather than unbounded")
+    func cappedAtMax() {
+        let essay = String(repeating: "a", count: 5000)
+        #expect(NotchContentLayout.titleLines(for: essay) == NotchContentLayout.titleMaxLines)
+    }
+
+    @Test("Empty text still occupies a line")
+    func emptyIsOneLine() {
+        #expect(NotchContentLayout.titleLines(for: "") == 1)
+    }
+
+    @Test("More lines means a taller peek, and one line adds nothing")
+    func heightFollowsLines() {
+        func alert(lines: Int?) -> DevReadyAlert {
+            DevReadyAlert(id: "a", title: "t", titleLines: lines)
+        }
+        #expect(NotchContentLayout.titleExtraHeight(alerts: [alert(lines: nil)]) == 0)
+        #expect(NotchContentLayout.titleExtraHeight(alerts: [alert(lines: 1)]) == 0)
+        let three = NotchContentLayout.titleExtraHeight(alerts: [alert(lines: 3)])
+        #expect(three == 2 * NotchContentLayout.titleLineHeight)
+    }
+
+    /// The layout must actually spend the allowance, or the extra lines draw
+    /// outside the window.
+    @Test("The peek is taller for a wrapped caption than a one-line one")
+    @MainActor
+    func layoutIsTaller() {
+        let metrics = NotchMetrics(notchWidth: 179, notchHeight: 32,
+                                   designExpandedWidth: 720, designExpandedHeight: 128,
+                                   scale: 0.54)
+        let short = DevReadyAlert(id: "a", title: "Hi", titleLines: 1)
+        let long = DevReadyAlert(id: "a", title: "Hi", titleLines: 4)
+        let shortHeight = NotchContentLayout.devReadyLayout(
+            metrics: metrics, alerts: [short], answerEnabled: false).size.height
+        let longHeight = NotchContentLayout.devReadyLayout(
+            metrics: metrics, alerts: [long], answerEnabled: false).size.height
+        #expect(longHeight > shortHeight)
+        #expect(longHeight - shortHeight == 3 * NotchContentLayout.titleLineHeight)
+    }
+
+    @Test("A dictated sentence reaches the peek with room to show it")
+    func captionAlertWraps() {
+        let spoken = "Okay so I am currently speaking right now through the Murmur app "
+            + "and this is speech to text and I want to see the whole sentence."
+        let alert = NotchController.alert(for:
+            DictationCaption(text: spoken, timestamp: Date()))
+        #expect((alert.titleLines ?? 1) > 1)
+        #expect(alert.title == spoken)
+    }
+}
+
 @Suite("Dictation captions")
 struct DictationCaptionTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
