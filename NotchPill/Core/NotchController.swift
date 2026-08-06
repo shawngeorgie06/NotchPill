@@ -558,6 +558,11 @@ final class NotchController {
         return NotchContentLayout.devReadyLayout(metrics: metrics, alerts: alerts).size
     }
 
+    /// A shrink waiting for the collapse animation to finish. Cancelled by any
+    /// later frame change, so a peek arriving mid-collapse resizes at once
+    /// rather than being clipped by a stale pending shrink.
+    private var pendingShrink: DispatchWorkItem?
+
     private func applyWindowFrame(animated: Bool) {
         guard let geometry, let window else { return }
         // `replyCompose` must be here: the SwiftUI tree and `contentLayout` both
@@ -575,6 +580,35 @@ final class NotchController {
             expandedContentSize: expandedContentSize()
         )
         updateHotZones(geometry: geometry, windowFrame: frame)
+        // Growing is applied at once — SwiftUI needs the room before it can
+        // animate into it, which is why opening always looked right.
+        //
+        // Shrinking has to wait for that animation to finish. The window is the
+        // clip rect for everything SwiftUI draws, so cutting it to the collapsed
+        // size on the same runloop turn amputates the surface mid-collapse: the
+        // caption vanishes instantly and the pill appears to snap rather than
+        // retract. Invisible while the width barely moved between states;
+        // captions swing it from ~389 to ~1058 and made the snap obvious.
+        pendingShrink?.cancel()
+        pendingShrink = nil
+        let current = window.frame
+        let shrinking = frame.width < current.width - 0.5 || frame.height < current.height - 0.5
+        if shrinking, animated {
+            let item = DispatchWorkItem { [weak self] in
+                guard let self, let window = self.window else { return }
+                self.pendingShrink = nil
+                window.setFrame(frame, display: true)
+                self.updateMousePassthrough(
+                    pointerInHotZone: self.expandHoverScreenRect().contains(NSEvent.mouseLocation))
+            }
+            pendingShrink = item
+            // The peek's own animation, and the longer of the two the pill
+            // uses, so this is never cut short by the hover curve either.
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + NotchState.devReadyAnimationDuration, execute: item)
+            MotionTrace.record("defer shrink to \(MotionTrace.rect(frame))")
+            return
+        }
         // Keep the overlay's coordinate space fixed while SwiftUI animates the
         // surface. Animating the NSWindow as well makes the starting notch move
         // underneath the path, which is why previous attempts looked like a
