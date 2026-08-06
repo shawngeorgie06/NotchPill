@@ -10,9 +10,30 @@ struct LogView: View {
     @ObservedObject private var log = LogStore.shared
     @State private var showErrorsOnly = false
     @State private var copiedReport = false
+    @State private var search = ""
+    /// Nil means every category. A set rather than a single selection: chasing
+    /// a jump means watching `focus` and `agents` together, and reading them in
+    /// one interleaved timeline is the whole point.
+    @State private var categories: Set<String> = []
+
+    /// Categories actually present, so the filter never offers a dead option.
+    private var availableCategories: [String] {
+        Array(Set(log.entries.map(\.category))).sorted()
+    }
+
+    static func matches(_ entry: LogEntry, search: String) -> Bool {
+        let query = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return true }
+        return entry.message.lowercased().contains(query)
+            || entry.category.lowercased().contains(query)
+    }
 
     private var visible: [LogEntry] {
-        showErrorsOnly ? log.entries.filter { $0.level != .info } : log.entries
+        log.entries.filter { entry in
+            if showErrorsOnly, entry.level == .info { return false }
+            if !categories.isEmpty, !categories.contains(entry.category) { return false }
+            return Self.matches(entry, search: search)
+        }
     }
 
     var body: some View {
@@ -30,11 +51,54 @@ struct LogView: View {
     }
 
     private var toolbar: some View {
+        VStack(spacing: 8) {
+            controls
+            if availableCategories.count > 1 { categoryFilter }
+        }
+        .padding(12)
+    }
+
+    private var categoryFilter: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                chip("all", active: categories.isEmpty) { categories.removeAll() }
+                ForEach(availableCategories, id: \.self) { name in
+                    chip(name, active: categories.contains(name)) {
+                        if categories.contains(name) { categories.remove(name) }
+                        else { categories.insert(name) }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func chip(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: active ? .semibold : .regular,
+                              design: .monospaced))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(active ? NotchDesign.accent.opacity(0.22)
+                                   : Color.secondary.opacity(0.12),
+                            in: Capsule())
+                .foregroundStyle(active ? NotchDesign.accent : Color.secondary)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var controls: some View {
         HStack(spacing: 12) {
             Toggle("Problems only", isOn: $showErrorsOnly)
                 .toggleStyle(.checkbox)
+            TextField("Search", text: $search)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 200)
             Spacer()
-            Text("\(log.entries.count) / \(LogStore.capacity)")
+            // Both numbers, because a filter that hides everything and an empty
+            // log look identical otherwise.
+            Text(countLabel)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             Button("Clear") { log.clear() }
@@ -50,12 +114,23 @@ struct LogView: View {
             }
             .buttonStyle(.borderedProminent)
         }
-        .padding(12)
+    }
+
+    /// Hoisted out of the view builder: interpolation inside a ternary inside
+    /// a `Text` inside an `HStack` is enough to stall the type-checker.
+    private var countLabel: String {
+        visible.count == log.entries.count
+            ? "\(log.entries.count) / \(LogStore.capacity)"
+            : "\(visible.count) of \(log.entries.count)"
     }
 
     private var empty: some View {
         VStack(spacing: 8) {
-            Text(showErrorsOnly ? "No problems recorded." : "Nothing recorded yet.")
+            // A filter that matches nothing and a log with nothing in it are
+            // very different situations, and looked identical before.
+            Text(log.entries.isEmpty
+                 ? (showErrorsOnly ? "No problems recorded." : "Nothing recorded yet.")
+                 : "No lines match the current filter.")
                 .font(.headline)
             Text("The log starts empty at launch and fills as the notch does things — "
                  + "peeks arriving, agent scans, CI polls.")

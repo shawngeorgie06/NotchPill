@@ -44,15 +44,48 @@ actor AgentSessionScanner {
         // Aged out here rather than at render time, so an emptied card can take
         // itself off the row — and so the task cache above is pruned against
         // what actually got scanned, not what survives.
-        return AgentSession.ordered(AgentSession.current(found, now: now))
+        let current = AgentSession.current(found, now: now)
+        // The other invisible exclusion, and a confusing one: a session can be
+        // scanned successfully and still not appear, because `idleWindow` is
+        // thirty seconds. Without this line the card and the disk disagree for
+        // a reason nothing anywhere states.
+        if current.count != found.count {
+            var aging = ScanLedger(unit: "sessions")
+            for session in found {
+                if current.contains(where: { $0.id == session.id }) {
+                    aging.keep()
+                } else {
+                    aging.drop("idle>\(Int(AgentSession.idleWindow))s")
+                }
+            }
+            if aging.differs(from: lastAgingLedger) { LogStore.log("scan", aging.summary) }
+            lastAgingLedger = aging
+        } else {
+            lastAgingLedger = nil
+        }
+        return AgentSession.ordered(current)
     }
 
     private var blockedSessions: [String: Date] = [:]
 
+    /// The last reconciliations, so an unchanged scan stays silent.
+    private var lastLedger: ScanLedger?
+    private var lastAgingLedger: ScanLedger?
+
     private func transcriptSessions(now: Date) -> [AgentSession] {
-        transcripts(now: now).compactMap { url in
+        var ledger = ScanLedger(unit: "transcripts")
+        defer {
+            if ledger.differs(from: lastLedger) {
+                LogStore.log("scan", ledger.summary)
+            }
+            lastLedger = ledger
+        }
+        return transcripts(now: now).compactMap { url -> AgentSession? in
             let isCodex = url.path.contains("/.codex/")
-            guard let mod = modified(url) else { return nil }
+            guard let mod = modified(url) else {
+                ledger.drop("unreadable")
+                return nil
+            }
             let sessionId = url.deletingPathExtension().lastPathComponent
             // Never drop a live session just because it could not be named.
             //
@@ -69,9 +102,16 @@ actor AgentSessionScanner {
             // escalation. It is protocol machinery, not a conversation the
             // user is working with; it also writes more recently than the
             // actual task and could push that useful row below the fold.
-            if isCodex, codexIsApprovalReviewer(url) { return nil }
+            if isCodex, codexIsApprovalReviewer(url) {
+                ledger.drop("codex-approval-reviewer")
+                return nil
+            }
             // An SDK-driven run is not a session the user can tab to.
-            if !isCodex, !claudeIsInteractive(url) { return nil }
+            if !isCodex, !claudeIsInteractive(url) {
+                ledger.drop("sdk-run")
+                return nil
+            }
+            ledger.keep()
             let sidechain = Self.subagentId(from: url)
             let info = sidechain.flatMap { subagentInfo(for: $0, sidechain: url) }
             let modelInfo = currentModel(in: url, isCodex: isCodex)

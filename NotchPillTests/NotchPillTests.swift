@@ -4241,6 +4241,92 @@ struct InteractiveSessionTests {
     }
 }
 
+/// The log records what the app did; these record what it declined to do,
+/// which is where every real bug so far has lived.
+@Suite("Scan reconciliation")
+struct ScanLedgerTests {
+    @Test("A clean scan states the arithmetic and nothing else")
+    func allKept() {
+        var ledger = ScanLedger(unit: "transcripts")
+        ledger.keep(); ledger.keep()
+        #expect(ledger.summary == "2 transcripts → 2 shown")
+        #expect(ledger.dropped == 0)
+    }
+
+    @Test("Drops are tallied by reason")
+    func tallies() {
+        var ledger = ScanLedger(unit: "transcripts")
+        ledger.keep()
+        ledger.drop("sdk-run"); ledger.drop("sdk-run"); ledger.drop("unreadable")
+        #expect(ledger.dropped == 3)
+        // Commonest reason first — that is the one that explains the surprise.
+        #expect(ledger.summary
+                == "4 transcripts → 1 shown (3 dropped: sdk-run 2, unreadable 1)")
+    }
+
+    /// Dictionary order is not stable, and an unstable summary would make every
+    /// scan look like news and flood the buffer.
+    @Test("The same scan always renders the same line")
+    func summaryIsStable() {
+        func build() -> String {
+            var l = ScanLedger(unit: "transcripts")
+            for r in ["a", "b", "c", "d", "e", "f"] { l.drop(r) }
+            return l.summary
+        }
+        #expect(build() == build())
+    }
+
+    @Test("Ties break by name so equal counts stay ordered")
+    func tiesAreOrdered() {
+        var ledger = ScanLedger(unit: "transcripts")
+        ledger.drop("zebra"); ledger.drop("alpha")
+        #expect(ledger.summary == "2 transcripts → 0 shown (2 dropped: alpha 1, zebra 1)")
+    }
+
+    /// The scan runs every three seconds; logging each one would bury the log
+    /// it is meant to improve.
+    @Test("An unchanged scan is not news")
+    func silentWhenUnchanged() {
+        var first = ScanLedger(unit: "transcripts")
+        first.keep(); first.drop("sdk-run")
+        var same = ScanLedger(unit: "transcripts")
+        same.keep(); same.drop("sdk-run")
+        var different = ScanLedger(unit: "transcripts")
+        different.keep(); different.keep(); different.drop("sdk-run")
+
+        #expect(first.differs(from: nil))
+        #expect(!same.differs(from: first))
+        #expect(different.differs(from: first))
+    }
+
+    @Test("An empty first scan says nothing")
+    func emptyIsSilent() {
+        #expect(!ScanLedger(unit: "transcripts").differs(from: nil))
+    }
+}
+
+@Suite("Log filtering")
+struct LogFilterTests {
+    private func entry(_ category: String, _ message: String) -> LogEntry {
+        LogEntry(id: 1, date: Date(), level: .info,
+                 category: category, message: message)
+    }
+
+    @Test("Search matches message or category, case-insensitively")
+    func searchMatches() {
+        let e = entry("focus", "com.apple.Terminal is not running")
+        #expect(LogView.matches(e, search: ""))
+        #expect(LogView.matches(e, search: "terminal"))
+        #expect(LogView.matches(e, search: "FOCUS"))
+        #expect(!LogView.matches(e, search: "cursor"))
+    }
+
+    @Test("Whitespace-only search is not a filter")
+    func blankSearch() {
+        #expect(LogView.matches(entry("scan", "2 transcripts → 2 shown"), search: "   "))
+    }
+}
+
 @Suite("Follow-up reminders")
 struct FollowUpReminderTests {
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
