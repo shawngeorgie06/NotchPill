@@ -4331,6 +4331,27 @@ struct CaptionSizingTests {
         #expect(NotchContentLayout.titleLines(for: "") == 1)
     }
 
+    /// The four-line cap still truncated ordinary speech — roughly two
+    /// sentences at the peek's width. A dictated paragraph has to fit whole.
+    @Test("A spoken paragraph fits without hitting the cap")
+    func paragraphFits() {
+        let paragraph = "Okay so I am currently speaking right now through the Murmur "
+            + "app and this is speech to text, and what I want to check is that a "
+            + "reasonably long thought like this one shows up in the notch without "
+            + "an ellipsis cutting off the end of it."
+        let lines = NotchContentLayout.titleLines(for: paragraph)
+        #expect(lines > 4)                                   // the old cap was not enough
+        #expect(lines < NotchContentLayout.titleMaxLines)    // and the new one is not hit
+    }
+
+    /// Shrinking is what turns "needs 8.2 lines" into smaller text rather than
+    /// lost words, and it must never apply to ordinary one-line peek titles.
+    @Test("Only wrapping titles are allowed to shrink")
+    func shrinkIsScopedToCaptions() {
+        #expect(NotchContentLayout.titleMinimumScale < 1)
+        #expect(NotchContentLayout.titleMinimumScale >= 0.7)  // still readable
+    }
+
     @Test("More lines means a taller peek, and one line adds nothing")
     func heightFollowsLines() {
         func alert(lines: Int?) -> DevReadyAlert {

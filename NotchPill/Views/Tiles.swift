@@ -538,6 +538,13 @@ struct DevReadyPeekRow: View {
                             // Raising one without the other either clips the
                             // text or leaves a gap under it.
                             .lineLimit(alert.titleLines ?? 1)
+                            // Only where the title is allowed to wrap. A
+                            // one-line agent label still truncates as it always
+                            // has — shrinking those would make every long peek
+                            // title a different size than its neighbours for no
+                            // gain, since they are labels rather than content.
+                            .minimumScaleFactor((alert.titleLines ?? 1) > 1
+                                                ? NotchContentLayout.titleMinimumScale : 1)
                             .fixedSize(horizontal: false, vertical: true)
 
                         HStack(spacing: 5) {

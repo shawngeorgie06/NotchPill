@@ -164,10 +164,33 @@ enum NotchContentLayout {
         return devReadyRowHeight * CGFloat(visible) + CGFloat(dividers)
     }
 
-    /// Ceiling on how tall a caption may push the peek. Four lines is roughly a
-    /// long spoken sentence; past that the notch stops being a glance and
-    /// becomes a document, and the text is on the clipboard anyway.
-    static let titleMaxLines = 4
+    /// Ceiling on how tall a caption may push the peek.
+    ///
+    /// Was four, which still truncated ordinary dictation: the peek is capped
+    /// near 416pt wide, so a line holds roughly 47 characters and four lines
+    /// ran out inside two spoken sentences — the ellipsis was back. Eight
+    /// covers a paragraph (~375 characters) and still leaves the peek shorter
+    /// than the screen.
+    ///
+    /// A ceiling stays, rather than growing without limit: past a paragraph the
+    /// notch stops being a glance and becomes a document, and the full text is
+    /// already on the clipboard. Where the estimate falls short the title
+    /// shrinks to fit instead of truncating — see `titleMinimumScale`.
+    static let titleMaxLines = 8
+
+    /// How far a wrapped title may shrink to avoid an ellipsis.
+    ///
+    /// The line estimate is a character-count approximation — real glyph widths
+    /// vary, so a caption that needs 8.2 lines by measurement would truncate at
+    /// an 8-line limit no matter how carefully the constant is tuned. Allowing
+    /// the type to drop to 80% (13pt → ~10.4pt, still comfortably readable)
+    /// turns that class of near-miss into slightly smaller text rather than
+    /// lost words, which is the better trade for something you enabled in order
+    /// to read.
+    ///
+    /// It also absorbs the estimator's error in the one direction the height
+    /// budget cannot: shrinking never needs more height than was reserved.
+    static let titleMinimumScale: CGFloat = 0.8
 
     /// Height of one wrapped title line at the peek's 13pt semibold, including
     /// the `VStack(spacing: 3)` the row draws between lines.
