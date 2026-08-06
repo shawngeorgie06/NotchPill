@@ -4301,6 +4301,86 @@ struct TypingGuardTests {
 /// The in-memory log cannot help with a bug on someone else's Mac, which is
 /// the case that keeps costing real time. These cover the parts of the on-disk
 /// copy that fail quietly if they are wrong.
+/// Murmur writes a caption file that persists across restarts. Treating a file
+/// as an event is the whole risk here.
+@Suite("Dictation captions")
+struct DictationCaptionTests {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func json(_ text: String, _ millis: Double) -> Data {
+        Data(#"{"text": "\#(text)", "timestamp": \#(Int(millis))}"#.utf8)
+    }
+
+    @Test("Murmur's format parses, milliseconds and all")
+    func parses() {
+        let caption = DictationCaption.parse(json("hello there", 1_800_000_000_000))
+        #expect(caption?.text == "hello there")
+        #expect(caption?.timestamp == Date(timeIntervalSince1970: 1_800_000_000))
+    }
+
+    @Test("Junk, empty text and missing timestamps are skipped, not fatal")
+    func tolerant() {
+        #expect(DictationCaption.parse(Data("not json".utf8)) == nil)
+        #expect(DictationCaption.parse(json("   ", 1_800_000_000_000)) == nil)
+        #expect(DictationCaption.parse(Data(#"{"text":"hi"}"#.utf8)) == nil)
+        #expect(DictationCaption.parse(Data(#"{"timestamp":123}"#.utf8)) == nil)
+    }
+
+    /// The caption sitting on this machine was written in July. Without this
+    /// rule the first launch would pop a months-old sentence as if it had just
+    /// been spoken.
+    @Test("A caption from months ago is not news")
+    func staleIsIgnored() {
+        let old = DictationCaption(text: "old", timestamp: now.addingTimeInterval(-86_400 * 30))
+        #expect(!DictationCaption.shouldPresent(old, lastPresented: nil, now: now))
+    }
+
+    @Test("Something just said is shown")
+    func freshIsShown() {
+        let fresh = DictationCaption(text: "new", timestamp: now.addingTimeInterval(-1))
+        #expect(DictationCaption.shouldPresent(fresh, lastPresented: nil, now: now))
+    }
+
+    @Test("The same caption is never shown twice")
+    func noRepeats() {
+        let caption = DictationCaption(text: "once", timestamp: now.addingTimeInterval(-1))
+        #expect(!DictationCaption.shouldPresent(caption,
+                                                lastPresented: caption.timestamp, now: now))
+        let next = DictationCaption(text: "twice", timestamp: now)
+        #expect(DictationCaption.shouldPresent(next,
+                                               lastPresented: caption.timestamp, now: now))
+    }
+
+    /// Murmur's clock running microseconds ahead must not silently mute it.
+    @Test("A caption from the near future still counts as fresh")
+    func futureIsFresh() {
+        let ahead = DictationCaption(text: "ahead", timestamp: now.addingTimeInterval(2))
+        #expect(DictationCaption.shouldPresent(ahead, lastPresented: nil, now: now))
+    }
+
+    @Test("A spoken secret never reaches the overlay")
+    func redactsSpokenSecrets() {
+        let caption = DictationCaption(
+            text: "the token is ghp_0123456789abcdefghijABCDEFGHIJ0123 ok",
+            timestamp: now)
+        let alert = NotchController.alert(for: caption)
+        #expect(!alert.title.contains("ghp_0123456789abcdefghijABCDEFGHIJ0123"))
+        #expect(alert.title.contains(SecretRedactor.placeholder))
+    }
+
+    /// A caption is not a question: answer buttons would type into whatever
+    /// terminal happened to be focused.
+    @Test("A caption peek carries no answer path")
+    func notAnswerable() {
+        let alert = NotchController.alert(for:
+            DictationCaption(text: "hello", timestamp: now))
+        #expect(alert.kind == .finished)
+        #expect(alert.answerSpec == nil)
+        #expect(alert.deliverySpec == "none")
+        #expect(alert.source == "Murmur")
+    }
+}
+
 @Suite("On-disk log")
 struct LogFileTests {
     @Test("An empty file never rotates")

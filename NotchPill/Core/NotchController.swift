@@ -28,6 +28,7 @@ final class NotchController {
     private let systemStats = SystemStatsProvider()
     private let battery = BatteryProvider()
     private let devReady = DevReadyProvider()
+    private let dictation = DictationCaptionProvider()
     private let transcripts = AgentTranscriptProvider()
     private let cursorActivity = CursorActivityProvider()
     private let agentSessions = AgentSessionsProvider()
@@ -331,6 +332,13 @@ final class NotchController {
         brightness.start()
         microphone.start()
         devReady.onDevReady = { [weak self] alert in self?.presentDevReady(alert, origin: "signal") }
+        // Murmur's opt-in caption mirror. Nothing appears unless that app is
+        // installed and the user switched it on, so there is no cost to
+        // everyone else: the file simply never exists.
+        dictation.onCaption = { [weak self] caption in
+            self?.presentDevReady(Self.alert(for: caption), origin: "dictation")
+        }
+        dictation.start()
         // Hookless finished peeks. Emits the same title/subtitle/sessionId as the
         // hooks, so DevReadyDedup collapses the pair when both are active.
         transcripts.onDevReady = { [weak self] alert in self?.presentDevReady(alert, origin: "transcript") }
@@ -1047,6 +1055,36 @@ final class NotchController {
                 self.state.setAgentMessage(message, forAlert: alert.id)
             }
         }
+    }
+
+    /// Renders a dictated caption as a peek.
+    ///
+    /// `.finished`, never `.waiting`: a caption is something that happened, not
+    /// a question, and a waiting peek carries answer buttons that would type
+    /// into whatever terminal was last focused.
+    ///
+    /// The text is redacted first. This is the display path, which is exactly
+    /// what `SecretRedactor` is for — and dictation is a worse case than a
+    /// transcript, because people read tokens aloud and the result lands on an
+    /// overlay that sits above every window and gets screen-shared.
+    nonisolated static func alert(for caption: DictationCaption) -> DevReadyAlert {
+        let safe = SecretRedactor.redact(caption.text)
+        return DevReadyAlert(
+            // Timestamped, so two identical dictations are two peeks rather
+            // than one that dedup swallows.
+            id: "dictation-\(Int(caption.timestamp.timeIntervalSince1970 * 1000))",
+            title: safe,
+            subtitle: nil,
+            source: "Murmur",
+            agent: "murmur",
+            bundleId: nil,
+            kind: .finished,
+            message: safe,
+            createdAt: caption.timestamp.timeIntervalSince1970,
+            sessionId: nil,
+            // No agent to answer and nowhere to send it.
+            answerSpec: nil,
+            deliverySpec: "none")
     }
 
     private func presentDevReady(_ alert: DevReadyAlert, origin: String = "?") {
