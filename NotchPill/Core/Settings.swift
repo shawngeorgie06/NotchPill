@@ -212,6 +212,19 @@ final class AppSettings: ObservableObject {
     /// lifecycle so an agent cannot be stranded after this interval.
     nonisolated static let defaultDevReadyDuration: Double = 4.0
     nonisolated static let notchScaleRange: ClosedRange<Double> = 0.7...1.3
+
+    /// How much room a dictated caption may take.
+    ///
+    /// Separate from `notchScale`, which sizes the whole pill including the
+    /// hover cards. This scales only the ceiling a wrapping caption is allowed
+    /// to grow into, because the right answer is personal: how much you want to
+    /// read before pasting depends on how long you speak and how much screen
+    /// you are willing to give a transient overlay.
+    nonisolated static let captionScaleRange: ClosedRange<Double> = 0.6...2.0
+    nonisolated static func clampCaptionScale(_ value: Double) -> Double {
+        guard value.isFinite else { return 1.0 }
+        return min(max(value, captionScaleRange.lowerBound), captionScaleRange.upperBound)
+    }
     /// `nonisolated` so the clamp can be tested without hopping to the main actor.
     nonisolated static func clampNotchScale(_ value: Double) -> Double {
         guard value.isFinite else { return 1.0 }
@@ -225,6 +238,15 @@ final class AppSettings: ObservableObject {
     /// fact instead of reproduced on demand. Off by default: the in-memory log
     /// is a deliberate privacy choice, and this is the user's decision to
     /// reverse, not ours. Turning it off also deletes what was written.
+    /// Multiplier on the caption peek's width and line ceilings (1.0 = default).
+    @Published var captionScale: Double {
+        didSet {
+            let clamped = AppSettings.clampCaptionScale(captionScale)
+            if clamped != captionScale { captionScale = clamped; return }
+            defaults.set(captionScale, forKey: Keys.captionScale)
+        }
+    }
+
     @Published var persistLog: Bool {
         didSet {
             defaults.set(persistLog, forKey: Keys.persistLog)
@@ -338,6 +360,7 @@ final class AppSettings: ObservableObject {
         static let notchScale = "notchScale"
         static let showDevReadyPings = "showDevReadyPings"
         static let persistLog = "persistLog"
+        static let captionScale = "captionScale"
         static let devReadyDuration = "devReadyDuration"
         static let devReadyPlaySound = "devReadyPlaySound"
         static let devReadySound = "devReadySound"
@@ -385,6 +408,7 @@ final class AppSettings: ObservableObject {
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
             Keys.persistLog: false,
+            Keys.captionScale: 1.0,
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
             Keys.devReadySound: DevReadySound.glass.rawValue,
@@ -426,6 +450,9 @@ final class AppSettings: ObservableObject {
         notchScale = AppSettings.clampNotchScale(defaults.double(forKey: Keys.notchScale))
         showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
         persistLog = defaults.object(forKey: Keys.persistLog) as? Bool ?? false
+        let storedCaptionScale = defaults.double(forKey: Keys.captionScale)
+        captionScale = storedCaptionScale > 0
+            ? AppSettings.clampCaptionScale(storedCaptionScale) : 1.0
         let storedDuration = defaults.double(forKey: Keys.devReadyDuration)
         devReadyDuration = storedDuration > 0 ? storedDuration : AppSettings.defaultDevReadyDuration
         devReadyPlaySound = defaults.object(forKey: Keys.devReadyPlaySound) as? Bool ?? true
@@ -485,6 +512,7 @@ final class AppSettings: ObservableObject {
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
             Keys.persistLog: false,
+            Keys.captionScale: 1.0,
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
             Keys.devReadySound: DevReadySound.glass.rawValue,

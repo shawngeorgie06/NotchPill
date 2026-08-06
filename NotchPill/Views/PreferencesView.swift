@@ -135,6 +135,34 @@ struct PreferencesView: View {
         }
     }
 
+    /// Separate from the pill's Size slider on purpose: that one scales the
+    /// hover cards, while this only raises the ceiling a dictated caption may
+    /// grow into. How much you want to read before pasting is personal, and it
+    /// is the one thing that trades screen space for not having to trust an
+    /// ellipsis.
+    private var captionSizeSlider: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Caption size")
+                Spacer()
+                Text("\(Int((settings.captionScale * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Button("Reset") { settings.captionScale = 1.0 }
+                    .buttonStyle(.link)
+                    .disabled(settings.captionScale == 1.0)
+            }
+            Slider(value: $settings.captionScale,
+                   in: AppSettings.captionScaleRange,
+                   step: 0.1)
+            Text("How large a dictated caption may grow before it truncates. "
+                 + "Wider and taller shows more of what you said; the peek never "
+                 + "exceeds your screen.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var expandedSection: some View {
         SettingsPanel(title: "Expanded Pill", subtitle: "Cards when you hover the notch") {
             sizeSlider
@@ -245,6 +273,7 @@ struct PreferencesView: View {
     private var devReadySection: some View {
         SettingsPanel(title: "Dev Ready Pings", subtitle: "Peek the notch when a terminal or IDE finishes") {
             Toggle("Show dev-ready notifications", isOn: $settings.showDevReadyPings)
+            captionSizeSlider
             Toggle("Play a sound", isOn: $settings.devReadyPlaySound)
                 .disabled(!settings.showDevReadyPings)
             HStack {

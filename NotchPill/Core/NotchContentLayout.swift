@@ -176,7 +176,15 @@ enum NotchContentLayout {
     /// notch stops being a glance and becomes a document, and the full text is
     /// already on the clipboard. Where the estimate falls short the title
     /// shrinks to fit instead of truncating — see `titleMinimumScale`.
-    static let titleMaxLines = 8
+    static let baseTitleMaxLines = 12
+
+    /// The ceiling after the user's caption-size preference is applied.
+    static func titleMaxLines(scale: Double = 1) -> Int {
+        max(1, Int((Double(baseTitleMaxLines) * scale).rounded()))
+    }
+
+    /// Kept for callers that do not scale (and for the default argument below).
+    static var titleMaxLines: Int { baseTitleMaxLines }
 
     /// How far a wrapped title may shrink to avoid an ellipsis.
     ///
@@ -213,11 +221,19 @@ enum NotchContentLayout {
     /// produce a peek wider than the display on hardware I cannot test. 60% of
     /// the screen keeps it recognisably a notch element rather than a banner,
     /// and it never returns less than the ordinary cap.
-    static func peekWidthCeiling(metrics: NotchMetrics, wrapping: Bool) -> CGFloat {
+    static func peekWidthCeiling(metrics: NotchMetrics, wrapping: Bool,
+                                 scale: Double = 1) -> CGFloat {
         let ordinary = metrics.maxExpandedRenderedWidth
         guard wrapping else { return ordinary }
-        guard metrics.screenWidth > 0 else { return max(ordinary, 620) }
-        return max(ordinary, min(metrics.screenWidth * 0.6, 760))
+        let fraction = min(0.94, 0.72 * scale)
+        guard metrics.screenWidth > 0 else {
+            return max(ordinary, min(760 * CGFloat(scale), 1200))
+        }
+        // Never wider than the screen, whatever the preference says: the peek
+        // is centred on the notch, so an over-wide one would hang off both
+        // edges rather than simply looking large.
+        return max(ordinary, min(metrics.screenWidth * CGFloat(fraction),
+                                 metrics.screenWidth - 24))
     }
 
     /// Characters that fit on one line of the 13pt semibold title at `width`.
@@ -236,7 +252,7 @@ enum NotchContentLayout {
     /// never toward text drawn outside the window.
     static func titleLines(for text: String,
                            width: CGFloat = devReadyMinWidth,
-                           maxLines: Int = titleMaxLines) -> Int {
+                           maxLines: Int = baseTitleMaxLines) -> Int {
         let perLine = titleCharactersPerLine(width: width)
         let needed = Int(ceil(Double(text.count) / Double(perLine)))
         return min(maxLines, max(1, needed))
@@ -273,7 +289,8 @@ enum NotchContentLayout {
         // A wrapping title is content, not a label, and gets the wider ceiling.
         let wrapping = alerts.contains { ($0.titleLines ?? 1) > 1 }
         let width = min(
-            peekWidthCeiling(metrics: metrics, wrapping: wrapping),
+            peekWidthCeiling(metrics: metrics, wrapping: wrapping,
+                             scale: AppSettings.shared.captionScale),
             max(metrics.notchWidth + 168, devReadyMinWidth, contentWidth)
         )
         let height = metrics.notchHeight + metrics.topGap + headerHeight + listHeight + 4

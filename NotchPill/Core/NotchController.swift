@@ -337,10 +337,13 @@ final class NotchController {
         // everyone else: the file simply never exists.
         dictation.onCaption = { [weak self] caption in
             guard let self else { return }
+            let scale = AppSettings.shared.captionScale
             let width = NotchContentLayout.peekWidthCeiling(metrics: self.metrics,
-                                                            wrapping: true)
-            self.presentDevReady(Self.alert(for: caption, width: width),
-                                 origin: "dictation")
+                                                            wrapping: true, scale: scale)
+            self.presentDevReady(
+                Self.alert(for: caption, width: width,
+                           maxLines: NotchContentLayout.titleMaxLines(scale: scale)),
+                origin: "dictation")
         }
         dictation.start()
         // Hookless finished peeks. Emits the same title/subtitle/sessionId as the
@@ -1073,7 +1076,8 @@ final class NotchController {
     /// transcript, because people read tokens aloud and the result lands on an
     /// overlay that sits above every window and gets screen-shared.
     nonisolated static func alert(for caption: DictationCaption,
-                                  width: CGFloat = NotchContentLayout.devReadyMinWidth) -> DevReadyAlert {
+                                  width: CGFloat = NotchContentLayout.devReadyMinWidth,
+                                  maxLines: Int = NotchContentLayout.baseTitleMaxLines) -> DevReadyAlert {
         let safe = SecretRedactor.redact(caption.text)
         return DevReadyAlert(
             // Timestamped, so two identical dictations are two peeks rather
@@ -1095,7 +1099,8 @@ final class NotchController {
             // what was actually said instead of truncating it.
             // Measured at the width the peek will actually get, so the height
             // budget matches the text instead of leaving a gap under it.
-            titleLines: NotchContentLayout.titleLines(for: safe, width: width))
+            titleLines: NotchContentLayout.titleLines(for: safe, width: width,
+                                                      maxLines: maxLines))
     }
 
     private func presentDevReady(_ alert: DevReadyAlert, origin: String = "?") {
