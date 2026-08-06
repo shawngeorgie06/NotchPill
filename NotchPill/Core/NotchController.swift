@@ -456,7 +456,7 @@ final class NotchController {
             container.collapsedContentSizeProvider = { [weak self] in self?.collapsedContentSize() ?? .zero }
             container.expandedContentSizeProvider = { [weak self] in self?.expandedContentSize() ?? .zero }
             container.onSpacePressed = { [weak self] in self?.nowPlaying.togglePlayPause() }
-            container.onPillEngaged = { [weak self] in self?.engagePill() }
+            container.onPillEngaged = { [weak self] in self?.engagePill(takeKey: true) }
             container.onDropFiles = { [weak self] urls in self?.shelf.add(urls: urls) }
             container.onDragTargetingChanged = { [weak self] targeting in
                 guard let self else { return }
@@ -626,7 +626,20 @@ final class NotchController {
         updateMousePassthrough(pointerInHotZone: inZone)
     }
 
-    private func engagePill() {
+    /// Opens the pill.
+    ///
+    /// - Parameter takeKey: whether to pull keyboard focus to the overlay.
+    ///   Only ever true for a click, and the distinction is the whole point.
+    ///   `NotchWindow.canBecomeKey` is true so SwiftUI buttons can be clicked
+    ///   without activating the app — but `makeKey()` on a peek *arriving*
+    ///   takes the keyboard away from whatever the user is typing in, for a
+    ///   notification they did not ask for and may not have looked at. Typing
+    ///   stops dead until the peek fades. Nobody clicked, so nobody asked for
+    ///   the keyboard.
+    ///
+    ///   The reply composer still takes key explicitly when it opens, which is
+    ///   the one place typing into the notch is meant to happen.
+    private func engagePill(takeKey: Bool) {
         collapseWorkItem?.cancel()
         collapseWorkItem = nil
         expandWorkItem?.cancel()
@@ -638,7 +651,7 @@ final class NotchController {
         hotZoneKeys.ensureShortcutCaptureReady()
         applyWindowFrame(animated: true)
         window?.orderFrontRegardless()
-        window?.makeKey()
+        if takeKey { window?.makeKey() }
     }
 
     /// When the compact island is open, Left/Right navigate its pages. The
@@ -1066,7 +1079,8 @@ final class NotchController {
             state.enqueueWaiting(alert)   // replace-per-session, no fingerprint dedup
             enrichAgentMessage(for: alert)
             scheduleWaitingDismiss(for: alert)
-            engagePill()
+            // A peek nobody asked for must not take the keyboard.
+            engagePill(takeKey: false)
             if AppSettings.shared.devReadyPlaySound {
                 NSSound(named: AppSettings.shared.devReadySound)?.play()
             }
@@ -1093,7 +1107,8 @@ final class NotchController {
         // Hook signals carry no transcript text; fill it in behind the peek so
         // the reply composer has something to show.
         for queued in batch { enrichAgentMessage(for: queued) }
-        engagePill()
+        // A peek nobody asked for must not take the keyboard.
+        engagePill(takeKey: false)
         if AppSettings.shared.devReadyPlaySound {
             NSSound(named: AppSettings.shared.devReadySound)?.play()
         }
