@@ -1192,11 +1192,25 @@ struct ExpandedActivityCard: View {
             // hid the session reset whenever the weekly figure happened to be
             // a few points higher — and the session window is the one that
             // stops you this afternoon.
+            // Extra columns, not extra rows. A per-model window is worth
+            // showing to whoever runs into one, and worth nothing to everyone
+            // else — so it is opt-in, and when it does appear it divides the
+            // width the card already has rather than making the pill taller.
+            // Screen space is unchanged either way.
             HStack(spacing: s(8)) {
                 quotaMeter(label: "session", percent: quota.sessionPercent,
                            footnote: ClaudeQuota.resetClock(for: quota.sessionResetsAt))
                 quotaMeter(label: "week", percent: quota.weeklyPercent,
                            footnote: ClaudeQuota.resetClock(for: quota.weeklyResetsAt))
+                if AppSettings.shared.showModelUsageMeters {
+                    // Capped at one: three columns already halve the room a
+                    // number gets, and a fourth would make the percentages
+                    // smaller than the labels under them.
+                    ForEach(quota.modelWindows.prefix(1), id: \.name) { window in
+                        quotaMeter(label: window.name, percent: window.percent,
+                                   footnote: ClaudeQuota.resetClock(for: window.resetsAt))
+                    }
+                }
             }
 
             if let extra = quota.extraSpendLabel {
@@ -1222,9 +1236,17 @@ struct ExpandedActivityCard: View {
                 Text("unlimited")
                     .font(font(size: 15, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.92))
-            } else if let auto = quota.autoPercentUsed, let api = quota.apiPercentUsed {
+            } else if let auto = quota.autoPercentUsed, let api = quota.apiPercentUsed,
+                      auto > 0 || api > 0 {
                 // Two pools, shown apart. They diverge, and a single averaged
                 // number would hide whichever one is closer to biting.
+                //
+                // Only while the split says something, though. Cursor reports
+                // these as whole numbers, so early in a cycle both read 0 while
+                // the pool itself is genuinely used — the card showed "0% / 0%"
+                // above "38 of 2000", which is two empty bars contradicting the
+                // line under them. When neither pool has moved, the total is
+                // the accurate answer rather than the less detailed one.
                 HStack(spacing: s(8)) {
                     quotaMeter(label: "auto", percent: auto)
                     quotaMeter(label: "API", percent: api)

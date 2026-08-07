@@ -17,7 +17,22 @@ struct ClaudeQuota: Equatable {
     var extraSpentMinor: Int?
     var extraLimitMinor: Int?
     var extraCurrency: String?
+    /// Extra per-model weekly windows the API reports alongside the two
+    /// account-wide ones.
+    ///
+    /// Keyed rather than hard-coded because the set is not ours to fix:
+    /// Anthropic already reports `seven_day_opus`, and any newer model with its
+    /// own allowance arrives as another key. Naming a specific model here would
+    /// mean shipping a release to show a window that is already in the payload.
+    var modelWindows: [ModelWindow] = []
     var updatedAt: Date?
+
+    struct ModelWindow: Equatable {
+        /// Display label derived from the key: `seven_day_opus` → `opus`.
+        var name: String
+        var percent: Int
+        var resetsAt: Date?
+    }
 
     /// The window closest to its limit — the one worth a glance.
     var headlinePercent: Int { max(sessionPercent, weeklyPercent) }
@@ -164,6 +179,19 @@ enum ClaudeUsageFetcher {
         let weekly = window("seven_day")
         guard session != nil || weekly != nil else { return nil }
 
+        // Everything else shaped like a window is a per-model allowance.
+        // Sorted by name so the card's third column does not reorder itself
+        // between refreshes.
+        let accountWide: Set<String> = ["five_hour", "seven_day"]
+        let models = root.keys
+            .filter { !accountWide.contains($0) }
+            .compactMap { key -> ClaudeQuota.ModelWindow? in
+                guard let w = window(key) else { return nil }
+                return ClaudeQuota.ModelWindow(name: Self.modelWindowLabel(for: key),
+                                               percent: w.percent, resetsAt: w.resets)
+            }
+            .sorted { $0.name < $1.name }
+
         var spent: Int?, limit: Int?, currency: String?
         if let spend = root["spend"] as? [String: Any],
            (spend["enabled"] as? Bool) == true {
@@ -186,7 +214,18 @@ enum ClaudeUsageFetcher {
             extraSpentMinor: spent,
             extraLimitMinor: limit,
             extraCurrency: currency,
+            modelWindows: models,
             updatedAt: now)
+    }
+
+    /// `seven_day_opus` → `opus`. Unknown shapes keep their key, which is
+    /// better than a blank label and says exactly what the API called it.
+    nonisolated static func modelWindowLabel(for key: String) -> String {
+        let trimmed = key
+            .replacingOccurrences(of: "seven_day_", with: "")
+            .replacingOccurrences(of: "five_hour_", with: "")
+            .replacingOccurrences(of: "_", with: " ")
+        return trimmed.isEmpty ? key : trimmed
     }
 
     /// `resets_at` carries fractional seconds and an offset; the plain ISO8601

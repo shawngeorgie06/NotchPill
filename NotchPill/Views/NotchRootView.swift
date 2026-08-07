@@ -594,11 +594,21 @@ struct ExpandedView: View {
 
     private func activityLabel(_ activity: ExpandedActivity) -> String {
         switch activity.kind {
-        case "agents": return "Live agents"
+        // Two deliberate departures from `kindLabel`: on the card footer these
+        // read better as what you are looking *at* than as the settings row's
+        // name for the toggle.
         case "codexQuota": return "Codex usage"
-        case "openCodeUsage": return "OpenCode usage"
         case "recentAlerts": return "Recent notifications"
-        default: return activity.kind.capitalized
+        // Everything else takes the model's own label.
+        //
+        // The default used to be `kind.capitalized`, and `kind` is camelCase —
+        // so `claudeQuota` rendered as "Claudequota". Swift's `capitalized`
+        // uppercases the first letter of each *word* and lowercases the rest,
+        // and a camelCase identifier is one word to it. Same bug on
+        // `cursorQuota`, `activeApp`, `systemStats`, and `ci` ("Ci"). Deriving
+        // display text from an identifier was the mistake; `kindLabel` exists
+        // for exactly this and is written by hand.
+        default: return activity.kindLabel
         }
     }
 

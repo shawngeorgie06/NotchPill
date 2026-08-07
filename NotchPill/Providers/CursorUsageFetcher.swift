@@ -144,8 +144,17 @@ enum CursorUsageFetcher {
         let breakdown = plan["breakdown"] as? [String: Any]
         // Prefer the server's own percentage: at 1999/2000 a locally computed
         // 99.95 rounds to 100 and claims a limit that has not been reached.
-        let percent = int(plan["totalPercentUsed"])
-            ?? (limit > 0 ? Int((Double(used) / Double(limit) * 100).rounded(.down)) : 0)
+        // Rounding down is right at the top of the range and wrong at the
+        // bottom: 38 of 2000 is 1.9%, which floors to 0 and draws an empty bar
+        // for a pool that has genuinely been used. Zero should mean untouched.
+        // Same rule at both ends — never claim a limit that has not been hit,
+        // never claim nothing has been spent when something has.
+        let computed = limit > 0
+            ? max(used > 0 ? 1 : 0, Int((Double(used) / Double(limit) * 100).rounded(.down)))
+            : 0
+        let percent = int(plan["totalPercentUsed"]).map { server in
+            used > 0 ? max(1, server) : server
+        } ?? computed
         let onDemand = (root["individualUsage"] as? [String: Any])?["onDemand"] as? [String: Any]
 
         return CursorQuota(

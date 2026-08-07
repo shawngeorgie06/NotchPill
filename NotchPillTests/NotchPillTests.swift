@@ -6847,3 +6847,172 @@ struct CaptionConsumptionTests {
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 }
+
+@Suite("Deck labels read as words, not identifiers")
+struct ActivityKindLabelTests {
+    /// The footer used to derive its text from `kind`, which is camelCase, via
+    /// `String.capitalized` — and that treats a camelCase identifier as one
+    /// word, so `claudeQuota` rendered as "Claudequota". `kindLabel` is written
+    /// by hand for exactly this reason.
+    @Test("Every kind has a label with no run-together words")
+    func kindLabelsAreReadable() {
+        let quota = ClaudeQuota(sessionPercent: 1, weeklyPercent: 2)
+        let cursor = CursorQuota(used: 1, limit: 10, included: nil, bonus: nil,
+                                 percentUsed: 10, autoPercentUsed: nil, apiPercentUsed: nil,
+                                 cycleEnd: nil, membership: nil, isUnlimited: false,
+                                 onDemandEnabled: false, updatedAt: nil)
+        let cases: [ExpandedActivity] = [
+            .claudeQuota(quota), .cursorQuota(cursor), .activeApp(name: "x"),
+            .systemStats(SystemStats(cpuPercent: 1, memoryPercent: 1)),
+            .ci([]), .agents([]), .clock, .shelf(count: 1, names: ["a"]),
+        ]
+        for activity in cases {
+            let label = activity.kindLabel
+            #expect(!label.isEmpty)
+            // The bug's signature: the identifier's own spelling surviving into
+            // display text.
+            #expect(label != activity.kind.capitalized || !activity.kind.contains(where: \.isUppercase),
+                    "\(activity.kind) still reads like its identifier: \(label)")
+        }
+        #expect(ExpandedActivity.claudeQuota(quota).kindLabel == "Claude quota")
+        #expect(ExpandedActivity.cursorQuota(cursor).kindLabel == "Cursor quota")
+    }
+}
+
+@Suite("The deck's page dots are never clipped")
+struct DeckChromeTests {
+    private var metrics: NotchMetrics {
+        NotchMetrics(notchWidth: 179, notchHeight: 32,
+                     designExpandedWidth: 720, designExpandedHeight: 128,
+                     scale: 0.54, screenWidth: 1512)
+    }
+
+    /// The strip is a 22pt row of tap targets with a 5pt gap above it. Budget
+    /// only the row and the gap comes out of the card — which lands on the same
+    /// edge as the card's own overflow and clips the dots.
+    @Test("Chrome covers the dot row and the gap above it")
+    func chromeCoversTheStrip() {
+        #expect(NotchContentLayout.deckChromeHeight >= 27)
+    }
+
+    /// Two cards were budgeted 56pt while rendering a header, a meter and a
+    /// trailing detail line — one line over, every time they had that line.
+    @Test("A quota card's budget covers what it draws")
+    @MainActor
+    func quotaCardsFitTheirBudget() {
+        let quota = ClaudeQuota(sessionPercent: 18, weeklyPercent: 42,
+                                extraSpentMinor: 500, extraCurrency: "USD")
+        let cursor = CursorQuota(used: 38, limit: 2000, included: 2000, bonus: nil,
+                                 percentUsed: 2, autoPercentUsed: 0, apiPercentUsed: 0,
+                                 cycleEnd: Date().addingTimeInterval(27 * 86_400),
+                                 membership: "pro_student", isUnlimited: false,
+                                 onDemandEnabled: false, updatedAt: Date())
+        // header 13 + 3 + meter 37 + 3 + trailing line 13
+        let drawn: CGFloat = 69
+        for activity in [ExpandedActivity.claudeQuota(quota), .cursorQuota(cursor)] {
+            let deck = NotchContentLayout.expandedDeckLayout(
+                metrics: metrics, activities: [activity, .clock], page: 0)
+            let contentRoom = deck.size.height - metrics.notchHeight - metrics.topGap
+                - NotchContentLayout.deckChromeHeight - 10
+            #expect(contentRoom >= drawn,
+                    "\(activity.kind) gets \(contentRoom)pt for \(drawn)pt of content")
+        }
+    }
+}
+
+@Suite("Cursor's meter matches Cursor's own numbers")
+struct CursorAccuracyTests {
+    private func payload(used: Int, limit: Int, total: Int?) -> Data {
+        var plan: [String: Any] = ["used": used, "limit": limit]
+        if let total { plan["totalPercentUsed"] = total }
+        return try! JSONSerialization.data(withJSONObject: [
+            "individualUsage": ["plan": plan],
+        ])
+    }
+
+    /// The reported bug: "0%" over "38 of 2000". Flooring 1.9 gives 0, which
+    /// draws an empty bar for a pool that has genuinely been used.
+    @Test("Real usage never reports as zero")
+    func smallUsageIsNotZero() {
+        let quota = CursorUsageFetcher.quota(in: payload(used: 38, limit: 2000, total: nil))
+        #expect(quota?.percentUsed == 1)
+    }
+
+    @Test("Untouched really is zero")
+    func zeroUsageStaysZero() {
+        let quota = CursorUsageFetcher.quota(in: payload(used: 0, limit: 2000, total: nil))
+        #expect(quota?.percentUsed == 0)
+    }
+
+    /// The original reason for flooring: 1999 of 2000 must not claim a limit
+    /// that has not been reached.
+    @Test("Almost-full never rounds up to the cap")
+    func nearlyFullIsNotFull() {
+        let quota = CursorUsageFetcher.quota(in: payload(used: 1999, limit: 2000, total: nil))
+        #expect(quota?.percentUsed == 99)
+    }
+
+    @Test("A server zero is corrected when usage exists")
+    func serverZeroWithUsage() {
+        let quota = CursorUsageFetcher.quota(in: payload(used: 38, limit: 2000, total: 0))
+        #expect(quota?.percentUsed == 1)
+    }
+}
+
+@Suite("Per-model limits come from the payload, not a hard-coded list")
+struct ModelWindowTests {
+    private func payload(_ extra: [String: Any]) -> Data {
+        var root: [String: Any] = [
+            "five_hour": ["utilization": 18.0],
+            "seven_day": ["utilization": 42.0],
+        ]
+        for (k, v) in extra { root[k] = v }
+        return try! JSONSerialization.data(withJSONObject: root)
+    }
+
+    /// Naming models in code would mean shipping a release to display a window
+    /// that is already in the response.
+    @Test("Any extra window is picked up, whatever it is called")
+    func unknownModelWindowsAreKept() {
+        let quota = ClaudeUsageFetcher.quota(in: payload([
+            "seven_day_opus": ["utilization": 61.0],
+            "seven_day_fable": ["utilization": 7.0],
+        ]))
+        #expect(quota?.modelWindows.map(\.name) == ["fable", "opus"])
+        #expect(quota?.modelWindows.first(where: { $0.name == "opus" })?.percent == 61)
+    }
+
+    @Test("A plan with no per-model window reports none")
+    func noExtraWindows() {
+        let quota = ClaudeUsageFetcher.quota(in: payload([:]))
+        #expect(quota?.modelWindows.isEmpty == true)
+        #expect(quota?.sessionPercent == 18)
+    }
+
+    /// Sorted so the third column does not swap models between refreshes.
+    @Test("Order is stable")
+    func orderIsStable() {
+        let quota = ClaudeUsageFetcher.quota(in: payload([
+            "seven_day_zeta": ["utilization": 1.0],
+            "seven_day_alpha": ["utilization": 2.0],
+        ]))
+        #expect(quota?.modelWindows.map(\.name) == ["alpha", "zeta"])
+    }
+
+    @Test("Labels drop the window prefix")
+    func labelsAreTidied() {
+        #expect(ClaudeUsageFetcher.modelWindowLabel(for: "seven_day_opus") == "opus")
+        #expect(ClaudeUsageFetcher.modelWindowLabel(for: "seven_day_fable") == "fable")
+        #expect(ClaudeUsageFetcher.modelWindowLabel(for: "odd_key") == "odd key")
+    }
+
+    /// Anything without a utilization figure is not a window and must not
+    /// become a meter — `spend` sits at the same level in the payload.
+    @Test("Non-window keys are ignored")
+    func spendIsNotAWindow() {
+        let quota = ClaudeUsageFetcher.quota(in: payload([
+            "spend": ["enabled": true, "used": ["amount_minor": 500, "currency": "USD"]],
+        ]))
+        #expect(quota?.modelWindows.isEmpty == true)
+    }
+}

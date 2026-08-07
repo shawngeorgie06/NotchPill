@@ -112,7 +112,7 @@ enum NotchContentLayout {
                              max(56, expandedContentBaseHeight(activities, page: page)))
         // Header / page controls live inside ExpandedView below the physical
         // notch, rather than stealing vertical space from a card.
-        let deckChrome: CGFloat = activities.count > 1 ? 22 : 0
+        let deckChrome: CGFloat = activities.count > 1 ? deckChromeHeight : 0
         return NotchContentLayoutMetrics(
             size: CGSize(width: width,
                          height: metrics.notchHeight + metrics.topGap + cardHeight + deckChrome + 10),
@@ -749,6 +749,15 @@ enum NotchContentLayout {
         return min(expandedContentCeiling, max(48, measured))
     }
 
+    /// Height the deck's footer strip needs: the page dots' 22pt tap targets
+    /// plus the 5pt `VStack` gap above them.
+    ///
+    /// Was 22 — the strip's own height with the gap forgotten. Five points is
+    /// not much until a card is also over its own budget, and then the two
+    /// shortfalls land on the same edge and clip the row that tells you which
+    /// page you are on and how many there are.
+    static let deckChromeHeight: CGFloat = 27
+
     /// Rows a card renders before it starts scrolling. Beyond this the card's
     /// own `ScrollView` takes over, so the pill must not keep growing.
     private static let expandedMaxCardRows = 3
@@ -780,8 +789,14 @@ enum NotchContentLayout {
                                                       count: sessions.count)
         case .openCodeUsage: return 56
         case .codexQuota: return 56
-        case .claudeQuota: return 56
-        case .cursorQuota: return 56
+        // Header (13) + 3 + meter (15pt value 18, 2, bar 4, 2, 9pt caption 11
+        // = 37) + 3 + a 10pt trailing line (13). The trailing line is the
+        // "extra $x" on Claude and the "38 of 2000 · renews in 27d" on Cursor;
+        // both were budgeted as if it were not there, so the card overflowed
+        // its allowance by exactly one line and pushed the deck's page dots off
+        // the bottom of the pill.
+        case .claudeQuota: return 70
+        case .cursorQuota: return 70
         case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)
         case .recentAlerts(let alerts): return rowsHeight(header: 18, row: 22, count: alerts.count)
         // Everything else is a label over a value.

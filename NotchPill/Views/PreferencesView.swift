@@ -187,6 +187,21 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if settings.showClaudeUsage {
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Show per-model limits (Opus, Fable…)",
+                           isOn: $settings.showModelUsageMeters)
+                    Text("Adds a third bar for whichever model-specific weekly "
+                         + "window your plan reports, beside session and week. "
+                         + "The card stays the same height — the bars share its "
+                         + "width. Nothing appears if your plan has no separate "
+                         + "per-model limit.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.leading, 18)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Toggle("Cursor usage limits", isOn: $settings.showCursorUsage)
                 Text("Reads the session token the Cursor app saved on this Mac. "
