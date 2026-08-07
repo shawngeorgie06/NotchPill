@@ -123,6 +123,10 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// still decode, and nil means the one-line behaviour everything else has.
     var titleLines: Int?
 
+    /// A missing timestamp comes from an older hook. Treat it as arriving now:
+    /// it must remain visible rather than sorting beneath every dated session.
+    var date: Date { Date(timeIntervalSince1970: createdAt ?? Date().timeIntervalSince1970) }
+
     static let notificationName = Notification.Name("com.shawngeorgie06.NotchPill.devReady")
 
     /// The agent's question, when this alert is one. Single source of truth for

@@ -1099,24 +1099,42 @@ struct ExpandedActivityCard: View {
         .layoutPriority(expandToFill ? 1 : 0)
     }
 
-    /// The live-agents card is the expanded notch's work surface. It is
-    /// intentionally console-like: the name/status establishes who is active,
-    /// while the line below answers what they are doing right now.
+    /// The agent-sessions card joins live transcript state with recent terminal
+    /// events, so a finished or blocked conversation does not masquerade as a
+    /// running process or disappear the instant it goes quiet.
     private func agentsCard(_ sessions: [AgentSession]) -> some View {
-        VStack(alignment: .leading, spacing: s(4)) {
+        let waiting = sessions.filter(\.isWaiting).count
+        let working = sessions.filter {
+            if case .working = $0.state { return true }
+            return false
+        }.count
+        let idle = sessions.filter {
+            if case .idle = $0.state { return true }
+            return false
+        }.count
+        let completed = sessions.filter(\.isCompleted).count
+        let summary = [
+            waiting == 0 ? nil : "\(waiting) needs you",
+            working == 0 ? nil : "\(working) working",
+            idle == 0 ? nil : "\(idle) idle",
+            completed == 0 ? nil : "\(completed) completed"
+        ].compactMap { $0 }.joined(separator: " · ")
+        let headerColor: Color = waiting > 0 ? .orange
+            : (working > 0 ? .green : .white.opacity(0.35))
+        return VStack(alignment: .leading, spacing: s(4)) {
             cardHeader(icon: {
                 ZStack {
                     Circle()
-                        .fill(Color.green.opacity(0.16))
+                        .fill(headerColor.opacity(0.16))
                         .frame(width: s(13), height: s(13))
                     Circle()
-                        .fill(Color.green)
+                        .fill(headerColor)
                         .frame(width: s(5), height: s(5))
                 }
-            }, title: "LIVE AGENTS",
+            }, title: "AGENT SESSIONS",
                titleFont: font(size: 9, weight: .bold),
                tracking: 0.7 * textScale) {
-                Text(sessions.count == 1 ? "1 active" : "\(sessions.count) active")
+                Text(summary.isEmpty ? "\(sessions.count) recent" : summary)
                     .font(font(size: 9, weight: .medium))
                     .foregroundStyle(.white.opacity(0.38))
                 Spacer(minLength: s(2))
@@ -1554,6 +1572,7 @@ struct ExpandedActivityCard: View {
         case .waiting: return .orange
         case .working: return .green
         case .idle: return .white.opacity(0.35)
+        case .completed: return .white.opacity(0.28)
         }
     }
 

@@ -1727,6 +1727,56 @@ struct AgentSessionTests {
         #expect(ordered.map(\.id) == ["blocked", "fresh", "old"])
     }
 
+    @Test("the card keeps completed turns without calling them live")
+    func completedTurnsAreShownAsCompleted() {
+        let now = Date()
+        let completed = DevReadyAlert(
+            id: "done", title: "Release", subtitle: "finished", source: "Codex",
+            agent: "codex", bundleId: nil, kind: .finished,
+            createdAt: now.addingTimeInterval(-60).timeIntervalSince1970,
+            sessionId: "done")
+        let rows = AgentSession.displaySessions(
+            live: [session("working", .working, at: now)], waitingAlerts: [],
+            completedAlerts: [completed])
+        #expect(rows.map(\.id) == ["working", "done"])
+        #expect(rows.last?.isCompleted == true)
+        #expect(rows.last?.statusLabel.hasPrefix("completed") == true)
+    }
+
+    @Test("an unanswered prompt wins over a completed turn for the same session")
+    func waitingPromptReplacesCompletedTurn() {
+        let now = Date()
+        let completed = DevReadyAlert(
+            id: "done", title: "Release", subtitle: "finished", source: "Codex",
+            agent: "codex", bundleId: nil, kind: .finished,
+            createdAt: now.addingTimeInterval(-60).timeIntervalSince1970,
+            sessionId: "session")
+        let waiting = DevReadyAlert(
+            id: "question", title: "Release", subtitle: nil, source: "Codex",
+            agent: "codex", bundleId: nil, kind: .waiting,
+            message: "Ship it?", createdAt: now.timeIntervalSince1970,
+            sessionId: "session")
+        let rows = AgentSession.displaySessions(live: [], waitingAlerts: [waiting],
+                                                completedAlerts: [completed])
+        #expect(rows.count == 1)
+        #expect(rows[0].isWaiting)
+    }
+
+    @Test("a newer live transcript beats an older completion")
+    func resumedSessionBeatsOldCompletion() {
+        let now = Date()
+        let completed = DevReadyAlert(
+            id: "done", title: "Release", subtitle: "finished", source: "Codex",
+            agent: "codex", bundleId: nil, kind: .finished,
+            createdAt: now.addingTimeInterval(-60).timeIntervalSince1970,
+            sessionId: "session")
+        let rows = AgentSession.displaySessions(
+            live: [session("session", .working, at: now)], waitingAlerts: [],
+            completedAlerts: [completed])
+        #expect(rows.count == 1)
+        #expect(rows[0].state == .working)
+    }
+
     @Test("durations stay short enough for a notch row")
     func durationsAreCompact() {
         let now = Date()
@@ -6893,6 +6943,22 @@ struct DeckChromeTests {
     @Test("Chrome covers the dot row and the gap above it")
     func chromeCoversTheStrip() {
         #expect(NotchContentLayout.deckChromeHeight >= 27)
+    }
+
+    @Test("Every enabled deck page gets a footer, even when it is the only page")
+    func singlePageAlsoReservesTheDot() {
+        let onePage = [ExpandedActivity.clock]
+        #expect(NotchContentLayout.showsDeckChrome(for: onePage))
+        let deck = NotchContentLayout.expandedDeckLayout(metrics: metrics, activities: onePage)
+        let expectedHeight = metrics.notchHeight + metrics.topGap
+            + max(CGFloat(56), NotchContentLayout.expandedContentBaseHeight(onePage))
+            + NotchContentLayout.deckChromeHeight + 10
+        #expect(deck.size.height == expectedHeight)
+    }
+
+    @Test("An empty deck has no footer to reserve")
+    func emptyDeckHasNoDot() {
+        #expect(!NotchContentLayout.showsDeckChrome(for: []))
     }
 
     /// Two cards were budgeted 56pt while rendering a header, a meter and a

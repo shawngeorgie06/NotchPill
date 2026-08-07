@@ -110,9 +110,12 @@ enum NotchContentLayout {
         let width = min(maxW, max(metrics.notchWidth + 112, preferredWidth))
         let cardHeight = min(expandedContentCeiling,
                              max(56, expandedContentBaseHeight(activities, page: page)))
-        // Header / page controls live inside ExpandedView below the physical
-        // notch, rather than stealing vertical space from a card.
-        let deckChrome: CGFloat = activities.count > 1 ? deckChromeHeight : 0
+        // The page dot is part of the deck's frame of reference, even when
+        // there is only one card. A consistent footer says "this is page 1"
+        // rather than making media, active app, or any other one-page setup
+        // look like a different kind of notch. Its space is reserved here,
+        // alongside the card, so it cannot hang below the pill.
+        let deckChrome: CGFloat = showsDeckChrome(for: activities) ? deckChromeHeight : 0
         return NotchContentLayoutMetrics(
             size: CGSize(width: width,
                          height: metrics.notchHeight + metrics.topGap + cardHeight + deckChrome + 10),
@@ -124,6 +127,13 @@ enum NotchContentLayout {
     static func expandedDeckSize(metrics: NotchMetrics, activities: [ExpandedActivity],
                                  page: Int? = nil) -> CGSize {
         expandedDeckLayout(metrics: metrics, activities: activities, page: page).size
+    }
+
+    /// Every nonempty deck gets its footer, including a single-page deck. This
+    /// is shared by the SwiftUI view and the sizing code: splitting the rule is
+    /// how the dots once rendered outside the window reserved for them.
+    static func showsDeckChrome(for activities: [ExpandedActivity]) -> Bool {
+        !activities.isEmpty
     }
 
     // MARK: - Dev ready peek

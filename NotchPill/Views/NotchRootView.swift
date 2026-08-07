@@ -534,7 +534,7 @@ struct ExpandedView: View {
             )
             .animation(.easeOut(duration: 0.16), value: clampedPage)
 
-            if activities.count > 1 {
+            if NotchContentLayout.showsDeckChrome(for: activities) {
                 HStack(spacing: 7) {
                     Label(activityLabel(activities[clampedPage]), systemImage: activityIcon(activities[clampedPage]))
                         .font(.system(size: 9 * textScale, weight: .semibold))

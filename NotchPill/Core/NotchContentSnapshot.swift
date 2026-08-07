@@ -37,6 +37,14 @@ enum NotchContentSnapshot {
         timer: TimerStore,
         settings: AppSettings
     ) -> [ExpandedActivity] {
+        // The live scanner knows which transcripts are still changing; agent
+        // alerts know about completed turns and questions that need an answer.
+        // The expanded card needs both, otherwise a just-finished conversation
+        // vanishes and a pending question is only visible while its peek is up.
+        let agentSessions = AgentSession.displaySessions(
+            live: state.agentSessions,
+            waitingAlerts: state.devReadyAlerts,
+            completedAlerts: state.recentDevReadyAlerts)
         let all = ExpandedActivityBuilder.prioritizing(ExpandedActivityBuilder.activities(
             nowPlaying: state.nowPlaying,
             nextEvent: state.nextEvent,
@@ -48,7 +56,7 @@ enum NotchContentSnapshot {
             battery: state.battery,
             shelfCount: shelf.items.count,
             shelfNames: shelf.items.prefix(3).map(\.name),
-            agentSessions: state.agentSessions,
+            agentSessions: agentSessions,
             openCodeUsage: state.openCodeUsage,
             codexQuota: state.codexQuota,
             claudeQuota: state.claudeQuota,

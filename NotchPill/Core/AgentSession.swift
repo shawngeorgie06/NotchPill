@@ -27,6 +27,10 @@ struct AgentSession: Equatable, Identifiable {
         case waiting(since: Date?)
         /// Alive but quiet. `since` is when it went quiet, so the row can age.
         case idle(since: Date)
+        /// A turn ended. Unlike `.idle`, this is an explicit completion signal,
+        /// so it remains in the session card as recent history rather than
+        /// pretending the agent is still running.
+        case completed(since: Date)
 
         /// Name without the payload — for logging, where the timestamp inside
         /// `.idle` would make every entry look different.
@@ -35,6 +39,7 @@ struct AgentSession: Equatable, Identifiable {
             case .working: return "working"
             case .waiting: return "waiting"
             case .idle: return "idle"
+            case .completed: return "completed"
             }
         }
     }
@@ -275,6 +280,8 @@ struct AgentSession: Equatable, Identifiable {
     /// How the row reads on the right-hand side.
     var isWaiting: Bool { if case .waiting = state { return true }; return false }
 
+    var isCompleted: Bool { if case .completed = state { return true }; return false }
+
     var statusLabel: String {
         switch state {
         case .working: return "working"
@@ -284,6 +291,7 @@ struct AgentSession: Equatable, Identifiable {
             guard let since else { return "waiting" }
             return "waiting " + Self.shortDuration(since: since)
         case .idle(let since): return "idle " + Self.shortDuration(since: since)
+        case .completed(let since): return "completed " + Self.shortDuration(since: since)
         }
     }
 
@@ -295,6 +303,7 @@ struct AgentSession: Equatable, Identifiable {
         case .working: return "Working on"
         case .waiting: return "Needs your reply about"
         case .idle: return "Last worked on"
+        case .completed: return "Completed"
         }
     }
 
@@ -373,10 +382,86 @@ struct AgentSession: Equatable, Identifiable {
     /// row you can actually act on.
     static func ordered(_ sessions: [AgentSession]) -> [AgentSession] {
         sessions.sorted { a, b in
-            let aw = a.isWaiting, bw = b.isWaiting
-            if aw != bw { return aw }
+            let ar = stateRank(a.state), br = stateRank(b.state)
+            if ar != br { return ar < br }
             return a.lastActivity > b.lastActivity
         }
+    }
+
+    /// The card has two evidence streams: transcripts tell us what is alive;
+    /// peeks tell us a turn completed or is blocked on a question. Keep the
+    /// streams separate until this boundary, then reconcile them by session id.
+    /// A newer transcript wins over an older completion, while a waiting prompt
+    /// wins immediately because it is actionable and may not be in a transcript
+    /// yet.
+    static func displaySessions(live: [AgentSession],
+                                waitingAlerts: [DevReadyAlert],
+                                completedAlerts: [DevReadyAlert]) -> [AgentSession] {
+        // A provider can briefly report the same session through two discovery
+        // paths while an app is moving its transcript. Prefer the newer one;
+        // never let a duplicate id turn a dashboard refresh into a crash.
+        var byID: [String: AgentSession] = [:]
+        for session in live {
+            guard (byID[session.id]?.lastActivity ?? .distantPast) < session.lastActivity else {
+                continue
+            }
+            byID[session.id] = session
+        }
+        var extras: [AgentSession] = []
+
+        for alert in completedAlerts where isAgentAlert(alert) {
+            let session = session(for: alert, state: .completed(since: alert.date))
+            if let existing = byID[session.id] {
+                // A transcript written after the completion means the agent has
+                // started another turn; it is more current than the old event.
+                if existing.lastActivity <= session.lastActivity { byID[session.id] = session }
+            } else {
+                extras.append(session)
+            }
+        }
+        for alert in waitingAlerts where alert.kind == .waiting && isAgentAlert(alert) {
+            let session = session(for: alert, state: .waiting(since: alert.date))
+            if var existing = byID[session.id] {
+                existing.state = session.state
+                existing.lastActivity = max(existing.lastActivity, session.lastActivity)
+                byID[session.id] = existing
+            } else if let index = extras.firstIndex(where: { $0.id == session.id }) {
+                extras[index] = session
+            } else {
+                extras.append(session)
+            }
+        }
+        return ordered(Array(byID.values) + extras)
+    }
+
+    private static func stateRank(_ state: State) -> Int {
+        switch state {
+        case .waiting: return 0
+        case .working: return 1
+        case .idle: return 2
+        case .completed: return 3
+        }
+    }
+
+    private static func isAgentAlert(_ alert: DevReadyAlert) -> Bool {
+        alert.knownAgent != nil || !(alert.agent ?? "").isEmpty
+    }
+
+    private static func session(for alert: DevReadyAlert, state: State) -> AgentSession {
+        let date = alert.date
+        let agent: String
+        switch alert.knownAgent {
+        case .claudeCode: agent = "claude-code"
+        case .codex: agent = "codex"
+        case .cursor: agent = "cursor"
+        case .openCode: agent = "opencode"
+        case nil: agent = alert.agent ?? "agent"
+        }
+        return AgentSession(
+            id: alert.sessionId ?? "alert-\(alert.id)", agent: agent,
+            project: alert.displayTitle, state: state, lastActivity: date,
+            locatorId: alert.sessionId, directory: nil, subagent: nil,
+            task: summarize(alert.agentMessage ?? alert.message), toolActivity: nil)
     }
 }
 
