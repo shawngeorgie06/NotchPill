@@ -388,6 +388,26 @@ enum NotchContentLayout {
         func lines(for alert: DevReadyAlert) -> Int { lines[alert.id] ?? 1 }
     }
 
+    /// Last computed answer, kept because this is called from a view body.
+    ///
+    /// Sizing a peek now measures text rather than counting characters, and
+    /// `fittedCaptionWidth` probes a dozen widths to find the narrowest fit —
+    /// so one call can lay out a long caption fifteen times. SwiftUI re-renders
+    /// this view on hover ticks, which run at display rate, and the peek's
+    /// contents almost never change while it is on screen. A single-entry memo
+    /// therefore removes essentially all of the repeat work; without it the
+    /// cost scales with the length of what you dictated, on every frame.
+    @MainActor private static var memo: (key: PeekTitleKey, value: PeekTitleLayout)?
+
+    private struct PeekTitleKey: Equatable {
+        var titles: [String]
+        var ids: [String]
+        var ordinary: CGFloat
+        var ceiling: CGFloat
+        var maxLines: Int
+        var replyable: Bool
+    }
+
     @MainActor
     static func peekTitleLayout(metrics: NotchMetrics, alerts: [DevReadyAlert],
                                 answerEnabled: Bool? = nil) -> PeekTitleLayout {
@@ -404,6 +424,13 @@ enum NotchContentLayout {
             peekWidthCeiling(metrics: metrics, wrapping: false),
             max(metrics.notchWidth + 168, devReadyMinWidth, contentWidth)
         )
+        let ceilingForKey = peekWidthCeiling(metrics: metrics, wrapping: true,
+                                             scale: AppSettings.shared.captionScale)
+        let key = PeekTitleKey(titles: alerts.map(\.displayTitle), ids: alerts.map(\.id),
+                               ordinary: ordinary, ceiling: ceilingForKey,
+                               maxLines: maxLines, replyable: anyReplyable)
+        if let memo, memo.key == key { return memo.value }
+
         // Wrapping is decided by measuring at that width, not by guessing from
         // length. Anything that does not fit on one line there is content
         // rather than a label, and content gets the wider ceiling outright —
@@ -413,8 +440,7 @@ enum NotchContentLayout {
             measuredTitleLines(for: $0.displayTitle, width: ordinary,
                                maxLines: maxLines, replyable: anyReplyable) > 1
         }
-        let ceiling = peekWidthCeiling(metrics: metrics, wrapping: true,
-                                       scale: AppSettings.shared.captionScale)
+        let ceiling = ceilingForKey
         let width = wrapping
             ? fittedCaptionWidth(titles: alerts.map(\.displayTitle),
                                  ordinary: ordinary, ceiling: ceiling,
@@ -428,7 +454,9 @@ enum NotchContentLayout {
             lines[alert.id] = measuredTitleLines(for: alert.displayTitle, width: width,
                                                  maxLines: maxLines, replyable: anyReplyable)
         }
-        return PeekTitleLayout(width: width, lines: lines)
+        let result = PeekTitleLayout(width: width, lines: lines)
+        memo = (key, result)
+        return result
     }
 
     @MainActor

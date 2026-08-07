@@ -112,9 +112,15 @@ final class NotchState: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: Self.notificationHistoryKey),
               let stored = try? JSONDecoder().decode([DevReadyAlert].self, from: data)
         else { return }
-        recentDevReadyAlerts = Array(stored.filter { $0.kind == .finished }
+        let kept = stored.filter { $0.kind == .finished && !Self.isTranscribedSpeech($0) }
+        recentDevReadyAlerts = Array(kept
             .sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
             .prefix(Self.notificationHistoryLimit))
+        // Captions stopped being persisted, but anything already written stays
+        // written. Rewrite the store on the first launch that finds some, so
+        // the transcripts already on disk are actually removed rather than
+        // merely hidden from the UI.
+        if kept.count != stored.count { persistNotificationHistory() }
     }
 
     // MARK: - Hover
@@ -212,7 +218,7 @@ final class NotchState: ObservableObject {
         departingDevReadyAlerts = []
         isDismissingDevReady = false
         for alert in alerts {
-            if alert.kind == .finished {
+            if alert.kind == .finished, !Self.isTranscribedSpeech(alert) {
                 recentDevReadyAlerts.removeAll { $0.id == alert.id }
                 recentDevReadyAlerts.insert(Self.historyEntry(for: alert), at: 0)
                 recentDevReadyAlerts = Array(recentDevReadyAlerts.prefix(Self.notificationHistoryLimit))
@@ -242,6 +248,25 @@ final class NotchState: ObservableObject {
 
     /// Removes fields that could invoke or describe a past agent prompt before
     /// saving it. A history entry can only reopen its source app.
+    /// A dictation caption: the alert's title *is* a verbatim record of speech.
+    ///
+    /// Notification history is written to `UserDefaults`, so every peek title
+    /// is kept on disk in the preferences plist until twelve more arrive. That
+    /// is proportionate for "Agent finished" and not for a transcript of what
+    /// was said out loud — Murmur hands these over under a privacy-first
+    /// contract, and its own copy is owner-only and overwritten each time.
+    /// Keeping a rolling transcript of the last dozen dictations somewhere the
+    /// user never agreed to, that outlives the peek and rides along in backups,
+    /// is not ours to do. The peek still shows it; nothing persists it.
+    ///
+    /// Matches the source rather than the agent id so a rename upstream cannot
+    /// silently start persisting speech.
+    nonisolated static func isTranscribedSpeech(_ alert: DevReadyAlert) -> Bool {
+        let agent = (alert.agent ?? "").lowercased()
+        let source = (alert.source ?? "").lowercased()
+        return agent == "murmur" || source == "murmur" || agent == "dictation"
+    }
+
     nonisolated static func historyEntry(for alert: DevReadyAlert) -> DevReadyAlert {
         DevReadyAlert(
             id: alert.id,

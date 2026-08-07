@@ -6649,3 +6649,107 @@ struct PeekMotionTests {
     }
 }
 
+
+@Suite("Dictated speech is not written to disk")
+struct CaptionPrivacyTests {
+    private func caption(_ text: String) -> DevReadyAlert {
+        DevReadyAlert(id: "dictation-1", title: text, source: "Murmur",
+                      agent: "murmur", kind: .finished)
+    }
+
+    /// Notification history lives in UserDefaults, so a persisted peek title is
+    /// a transcript of speech kept in the preferences plist. Proportionate for
+    /// "Agent finished"; not for what someone said out loud.
+    @Test("A caption is recognised as speech")
+    func captionIsSpeech() {
+        #expect(NotchState.isTranscribedSpeech(caption("what I said out loud")))
+        #expect(NotchState.isTranscribedSpeech(
+            DevReadyAlert(id: "d", title: "x", source: "Murmur", agent: nil, kind: .finished)))
+    }
+
+    /// Matching on source as well as agent, so a rename upstream cannot quietly
+    /// start persisting transcripts.
+    @Test("Agent pings are not mistaken for speech")
+    func agentPingsAreNotSpeech() {
+        #expect(!NotchState.isTranscribedSpeech(
+            DevReadyAlert(id: "a", title: "Agent finished", source: "Claude Code",
+                          agent: "claude-code", kind: .finished)))
+        #expect(!NotchState.isTranscribedSpeech(
+            DevReadyAlert(id: "b", title: "done", source: nil, agent: nil, kind: .finished)))
+    }
+
+    /// `NotchState` reads and writes the real notification history in
+    /// `UserDefaults`, and the test host *is* the app — so these two tests
+    /// would otherwise leave fabricated entries in the developer's own
+    /// preferences. Snapshot the key and put it back.
+    @MainActor
+    private func withPreservedHistory(_ body: () -> Void) {
+        let key = "recentDevReadyNotificationHistory"
+        let saved = UserDefaults.standard.data(forKey: key)
+        defer {
+            if let saved {
+                UserDefaults.standard.set(saved, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        body()
+    }
+
+    /// Counted as a delta: `NotchState()` loads the real notification history
+    /// from `UserDefaults`, so this machine's own stored pings are already in
+    /// the list. Asserting an absolute count would pass or fail depending on
+    /// what the developer happened to be notified about.
+    @Test("A caption never reaches the history list")
+    @MainActor
+    func captionsStayOutOfHistory() {
+        withPreservedHistory {
+        let state = NotchState()
+        let before = state.recentDevReadyAlerts.count
+        state.enqueueDevReady([caption("this is what I dictated")])
+        #expect(state.recentDevReadyAlerts.count == before)
+        #expect(!state.recentDevReadyAlerts.contains { $0.id == "dictation-1" })
+        // ...while still being shown.
+        #expect(state.devReadyAlerts.contains { $0.id == "dictation-1" })
+        }
+    }
+
+    @Test("An agent ping still reaches history")
+    @MainActor
+    func agentPingsStillRecorded() {
+        withPreservedHistory {
+        let state = NotchState()
+        state.enqueueDevReady([DevReadyAlert(id: "agent-ping-test", title: "Agent finished",
+                                             source: "Claude Code", agent: "claude-code",
+                                             kind: .finished)])
+        #expect(state.recentDevReadyAlerts.contains { $0.id == "agent-ping-test" })
+        }
+    }
+}
+
+@Suite("A caption from the file is bounded")
+struct CaptionBoundsTests {
+    /// The file sits at a fixed path under Application Support, so any process
+    /// running as the user can write it. Sizing the peek now measures the text
+    /// with TextKit, several times per layout pass — unbounded input would burn
+    /// that on every frame.
+    @Test("An enormous caption is truncated at ingest")
+    func longCaptionIsCapped() throws {
+        let huge = String(repeating: "a", count: 200_000)
+        let json = try JSONSerialization.data(withJSONObject: [
+            "text": huge, "timestamp": 1_754_500_000_000.0,
+        ])
+        let parsed = try #require(DictationCaption.parse(json))
+        #expect(parsed.text.count == DictationCaption.maxLength)
+    }
+
+    @Test("An ordinary caption is untouched")
+    func ordinaryCaptionIsIntact() throws {
+        let spoken = "This is an ordinary thing to say out loud."
+        let json = try JSONSerialization.data(withJSONObject: [
+            "text": spoken, "timestamp": 1_754_500_000_000.0,
+        ])
+        let parsed = try #require(DictationCaption.parse(json))
+        #expect(parsed.text == spoken)
+    }
+}

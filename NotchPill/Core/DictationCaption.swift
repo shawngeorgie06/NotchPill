@@ -34,9 +34,24 @@ struct DictationCaption: Equatable {
         let millis = (object["timestamp"] as? Double)
             ?? (object["timestamp"] as? Int).map(Double.init)
         guard let millis, millis > 0 else { return nil }
-        return DictationCaption(text: trimmed,
+        return DictationCaption(text: String(trimmed.prefix(maxLength)),
                                 timestamp: Date(timeIntervalSince1970: millis / 1000))
     }
+
+    /// Longest caption we will take from the file.
+    ///
+    /// Nothing bounded this. The peek caps its own *lines*, so an enormous
+    /// caption did not visibly overflow — it just quietly cost: the title is
+    /// now measured with TextKit to size the peek, and that measurement runs
+    /// over the whole string several times per layout pass. A multi-megabyte
+    /// value would have burned that on every frame the peek was on screen.
+    ///
+    /// Worth bounding on principle as well as cost. The file lives at a fixed
+    /// path under the user's own Application Support, so any process running as
+    /// the user can write it — Murmur is the expected author, not a guaranteed
+    /// one. This is well past the longest thing anyone dictates in one go, and
+    /// the peek's line cap truncates far below it anyway.
+    static let maxLength = 4000
 
     /// Anything older than this is history, not something you just said.
     ///
