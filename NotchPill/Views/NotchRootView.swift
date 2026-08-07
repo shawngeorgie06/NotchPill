@@ -115,6 +115,16 @@ struct NotchRootView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else if !state.renderedDevReadyAlerts.isEmpty {
                 devReadyContent(alerts: state.renderedDevReadyAlerts)
+                    // Clip the text to the surface that is growing behind it.
+                    //
+                    // The content is an overlay laid out at the *final* size, so
+                    // a caption's full width was drawn on frame one and the pill
+                    // spent the animation catching up to text that was already
+                    // there. That is the pop: nothing about the fade fixes it,
+                    // because the text was never the wrong opacity — it was the
+                    // wrong size. Masked, the words are revealed by the pill as
+                    // it opens and covered as it closes.
+                    .mask(growingPeekMask)
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else if state.isExpanded || state.isCollapsing {
                 // Tied to the surface rather than to `isExpanded`. The
@@ -202,6 +212,23 @@ struct NotchRootView: View {
 
     /// Expanded pill: a single, softly shouldered surface growing from the
     /// physical notch; the top corners stay clear for browser tabs.
+    /// The peek surface's silhouette at its current progress, as a mask.
+    ///
+    /// Deliberately the same geometry `expandedBackground` draws — if the two
+    /// drifted, the text would be clipped to a shape that is not the pill.
+    private var growingPeekMask: some View {
+        let progress = state.devReadyPresentation
+        let width = metrics.notchWidth + (frameSize.width - metrics.notchWidth) * progress
+        let height = metrics.notchHeight + (frameSize.height - metrics.notchHeight) * progress
+        let floating = !metrics.hasPhysicalNotch
+        let inset = floating ? 4 * progress : 0
+        return NotchShape(bottomRadius: 22, topRadius: floating ? 22 : 0)
+            .fill(Color.black)
+            .frame(width: width, height: max(0, height - inset))
+            .padding(.top, inset)
+            .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+    }
+
     private var expandedBackground: some View {
         // Match the intended island silhouette: a single compact black surface
         // that begins as the notch and grows outward from its centre.

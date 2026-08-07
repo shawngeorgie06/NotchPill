@@ -308,6 +308,71 @@ enum NotchContentLayout {
             .reduce(0, +)
     }
 
+    /// The shape a caption should settle into before it is worth getting wider.
+    ///
+    /// Width is spent only to keep a caption from becoming a tall column. Below
+    /// this many lines the peek has a sensible shape already and taking more of
+    /// the screen buys nothing; above it, widening is what stops the pill from
+    /// running down the display.
+    static let captionTargetLines = 4
+
+    /// The narrowest width that shows the text, rather than the widest allowed.
+    ///
+    /// The ceiling is a *limit*, and using it as the answer made every caption
+    /// the same enormous width: a short sentence became a 1050pt ribbon two
+    /// lines tall, which is a worse shape than the one it replaced. Extra width
+    /// is only worth taking when the alternative is running out of lines.
+    ///
+    /// So: grow only until the text fits inside the line budget, then take back
+    /// whatever the last line did not use. That second step is what removes the
+    /// dead space after a short caption — wrapped text almost never fills its
+    /// final line, and a box sized to the width you *offered* rather than the
+    /// width the text *used* has a blank tail by construction.
+    static func fittedCaptionWidth(titles: [String], ordinary: CGFloat, ceiling: CGFloat,
+                                   targetLines: Int, replyable: Bool) -> CGFloat {
+        guard ceiling > ordinary else { return ordinary }
+        func linesNeeded(at width: CGFloat) -> Int {
+            titles.map {
+                measuredTitleLines(for: $0, width: width, maxLines: .max, replyable: replyable)
+            }.max() ?? 1
+        }
+        // Binary search the narrowest width inside the budget. Widths are
+        // continuous and the line count falls monotonically with width, so a
+        // handful of probes lands within a point of the boundary.
+        var low = ordinary
+        var high = ceiling
+        if linesNeeded(at: ordinary) <= targetLines {
+            high = ordinary
+        } else if linesNeeded(at: ceiling) > targetLines {
+            // Even the widest peek cannot hold it. Take the ceiling; the line
+            // cap and `minimumScaleFactor` absorb the remainder.
+            return ceiling
+        } else {
+            for _ in 0..<12 {
+                let mid = (low + high) / 2
+                if linesNeeded(at: mid) <= targetLines { high = mid } else { low = mid }
+            }
+        }
+        let fitted = high
+        // Reclaim the unused tail of the last line.
+        let furniture = fitted - titleTextWidth(inPeekOfWidth: fitted, replyable: replyable)
+        let ink = titles.map { title -> CGFloat in
+            guard !title.isEmpty else { return 0 }
+            return NSAttributedString(string: title, attributes: [.font: titleFont])
+                .boundingRect(with: CGSize(width: titleTextWidth(inPeekOfWidth: fitted,
+                                                                replyable: replyable),
+                                           height: .greatestFiniteMagnitude),
+                              options: [.usesLineFragmentOrigin, .usesFontLeading])
+                .width
+        }.max() ?? 0
+        // +2 for the rounding TextKit does between measuring and drawing. Never
+        // narrower than an ordinary peek, and never wider than what we fitted.
+        let tightened = min(fitted, max(ordinary, ceil(ink) + furniture + 2))
+        // Taking width back must not cost a line — a word pushed onto a new row
+        // would trade the blank tail for a taller pill.
+        return linesNeeded(at: tightened) <= linesNeeded(at: fitted) ? tightened : fitted
+    }
+
     /// One answer for "how wide is the peek, and how many lines does each row
     /// get", so the window, the height budget and the renderer cannot disagree.
     ///
@@ -348,9 +413,12 @@ enum NotchContentLayout {
             measuredTitleLines(for: $0.displayTitle, width: ordinary,
                                maxLines: maxLines, replyable: anyReplyable) > 1
         }
+        let ceiling = peekWidthCeiling(metrics: metrics, wrapping: true,
+                                       scale: AppSettings.shared.captionScale)
         let width = wrapping
-            ? peekWidthCeiling(metrics: metrics, wrapping: true,
-                               scale: AppSettings.shared.captionScale)
+            ? fittedCaptionWidth(titles: alerts.map(\.displayTitle),
+                                 ordinary: ordinary, ceiling: ceiling,
+                                 targetLines: captionTargetLines, replyable: anyReplyable)
             : ordinary
         // Measured again at the width actually used: a caption that needed six
         // lines at 389pt may need two at 1058pt, and reserving six would leave

@@ -3296,6 +3296,7 @@ struct SecretRedactorGapTests {
     // lie about what reached the screen.
     @Test("redaction is idempotent")
     func idempotent() {
+        var report: [String] = []
         for s in samples {
             let once = SecretRedactor.redact("token \(s) end")
             #expect(SecretRedactor.redact(once) == once)
@@ -3307,6 +3308,7 @@ struct SecretRedactorGapTests {
     func noFragmentSurvives() {
         let contexts = ["%@", "(%@)", "\"%@\"", "run --token=%@ now",
                         "line1\n%@\nline3", "a,%@;b", "<%@>", "  %@  "]
+        var report: [String] = []
         for s in samples {
             let body = String(s.dropFirst(4))   // the random-looking part
             for context in contexts {
@@ -3321,6 +3323,7 @@ struct SecretRedactorGapTests {
     func multipleSecrets() {
         let text = samples.joined(separator: " and ")
         let out = SecretRedactor.redact(text)
+        var report: [String] = []
         for s in samples {
             #expect(!out.contains(String(s.dropFirst(4))))
         }
@@ -3329,6 +3332,7 @@ struct SecretRedactorGapTests {
     // The card truncates; redaction runs first, so a half-token cannot appear.
     @Test("truncation cannot resurrect a partial token")
     func truncationSafe() {
+        var report: [String] = []
         for s in samples {
             let task = AgentSession.summarize("please push using \(s) to the remote")
             #expect(task?.contains(String(s.dropFirst(4))) != true)
@@ -6463,20 +6467,89 @@ struct CaptionFitsTests {
         }
     }
 
-    /// The other half of the same bug: a caption that wraps must get the wide
-    /// peek outright. It used to be `min`'d against a character-count width
-    /// heuristic, so only text long enough to push that heuristic past the
-    /// ceiling ever saw the wide layout — a short caption was stranded at a
-    /// middling width its own text did not fit in.
-    @Test("A wrapping caption gets the wide peek, not a character-count width")
     @MainActor
-    func wrappingCaptionGetsTheWideCeiling() {
-        let spoken = String(repeating: "spoken ", count: 30)
-        let alert = DevReadyAlert(id: "c", title: spoken, agent: "murmur", kind: .finished)
-        let layout = NotchContentLayout.peekTitleLayout(
-            metrics: metrics, alerts: [alert], answerEnabled: false)
-        #expect(layout.width == NotchContentLayout.peekWidthCeiling(
-            metrics: metrics, wrapping: true, scale: AppSettings.shared.captionScale))
+    private var ceiling: CGFloat {
+        NotchContentLayout.peekWidthCeiling(metrics: metrics, wrapping: true,
+                                            scale: AppSettings.shared.captionScale)
+    }
+
+    @MainActor
+    private func width(of spoken: String) -> CGFloat {
+        NotchContentLayout.peekTitleLayout(
+            metrics: metrics,
+            alerts: [DevReadyAlert(id: "c", title: spoken, agent: "murmur", kind: .finished)],
+            answerEnabled: false).width
+    }
+
+    /// Width is spent only to avoid a tall column. A sentence that already has
+    /// a sensible shape must not be stretched into a screen-wide ribbon two
+    /// lines tall — that was a worse shape than the truncation it replaced.
+    @Test("A short caption stays near the ordinary peek width")
+    @MainActor
+    func shortCaptionStaysNarrow() {
+        let spoken = "I do not like how the pill gets shaped for not that much text."
+        // The ordinary peek width on this hardware (720 x 0.54). A fraction of
+        // the ceiling would be a meaningless bound — the ceiling is ~1088pt
+        // here, so "under three quarters of it" still allows an 800pt ribbon.
+        #expect(width(of: spoken) <= 400,
+                "a one-sentence caption should stay notch-shaped, got \(width(of: spoken))pt")
+    }
+
+    @Test("A long caption is allowed to get wide")
+    @MainActor
+    func longCaptionWidens() {
+        let short = width(of: "I do not like how the pill gets shaped for short text.")
+        let long = width(of: String(repeating: "spoken words here ", count: 40))
+        #expect(long > short)
+        #expect(long <= ceiling)
+    }
+
+    /// Width never shrinks as text grows — a sentence that gets longer must not
+    /// produce a narrower peek than the one before it.
+    @Test("Width grows monotonically with text")
+    @MainActor
+    func widthIsMonotonic() {
+        var previous: CGFloat = 0
+        for count in stride(from: 1, through: 120, by: 3) {
+            let w = width(of: String(repeating: "spoken words ", count: count))
+            #expect(w >= previous - 0.5, "\(count) repeats came out narrower than the length before it")
+            previous = w
+        }
+    }
+
+    /// The dead space complaint: wrapped text almost never fills its last line,
+    /// so a peek sized to the width *offered* rather than the width *used* has
+    /// a blank tail by construction.
+    @Test("No blank tail — the peek is as wide as the text it holds")
+    @MainActor
+    func noBlankTail() {
+        let spoken = "This is a spoken sentence that needs more than a single line to show."
+        let w = width(of: spoken)
+        let textWidth = NotchContentLayout.titleTextWidth(inPeekOfWidth: w, replyable: false)
+        let ink = NSAttributedString(
+            string: spoken, attributes: [.font: NotchContentLayout.titleFont])
+            .boundingRect(with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
+                          options: [.usesLineFragmentOrigin, .usesFontLeading]).width
+        // Whatever the text does not use is given back, bar rounding.
+        #expect(textWidth - ink < 12, "left \(textWidth - ink)pt of empty space after the text")
+    }
+
+    /// Reclaiming the tail must not cost a line: trading a blank strip for a
+    /// taller pill is not a win.
+    @Test("Tightening never adds a line")
+    @MainActor
+    func tighteningNeverCostsALine() {
+        for count in stride(from: 2, through: 60, by: 3) {
+            let spoken = String(repeating: "spoken words ", count: count)
+            let alert = DevReadyAlert(id: "c", title: spoken, agent: "murmur", kind: .finished)
+            let layout = NotchContentLayout.peekTitleLayout(
+                metrics: metrics, alerts: [alert], answerEnabled: false)
+            let atCeiling = NotchContentLayout.measuredTitleLines(
+                for: spoken, width: ceiling, maxLines: .max, replyable: false)
+            let granted = layout.lines(for: alert)
+            #expect(granted <= max(atCeiling, NotchContentLayout.captionTargetLines),
+                    "\(count) repeats became \(granted) lines")
+        }
     }
 
     /// An agent ping is a label, not content: it must keep its notch-shaped
@@ -6575,3 +6648,4 @@ struct PeekMotionTests {
         #expect(NotchState.devReadyMotionDuration(for: []) == NotchState.devReadyAnimationDuration)
     }
 }
+
