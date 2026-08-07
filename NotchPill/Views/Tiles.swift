@@ -1192,25 +1192,21 @@ struct ExpandedActivityCard: View {
             // hid the session reset whenever the weekly figure happened to be
             // a few points higher — and the session window is the one that
             // stops you this afternoon.
-            // Extra columns, not extra rows. A per-model window is worth
-            // showing to whoever runs into one, and worth nothing to everyone
-            // else — so it is opt-in, and when it does appear it divides the
-            // width the card already has rather than making the pill taller.
-            // Screen space is unchanged either way.
             HStack(spacing: s(8)) {
                 quotaMeter(label: "session", percent: quota.sessionPercent,
                            footnote: ClaudeQuota.resetClock(for: quota.sessionResetsAt))
                 quotaMeter(label: "week", percent: quota.weeklyPercent,
                            footnote: ClaudeQuota.resetClock(for: quota.weeklyResetsAt))
-                if AppSettings.shared.showModelUsageMeters {
-                    // Capped at one: three columns already halve the room a
-                    // number gets, and a fourth would make the percentages
-                    // smaller than the labels under them.
-                    ForEach(quota.modelWindows.prefix(1), id: \.name) { window in
-                        quotaMeter(label: window.name, percent: window.percent,
-                                   footnote: ClaudeQuota.resetClock(for: window.resetsAt))
-                    }
-                }
+                // A third column for a per-model window (Opus, Fable, …) was
+                // built here and taken out again: the usage endpoint does not
+                // carry one. `seven_day_opus` and friends exist as keys but are
+                // flags rather than objects, and the only three entries with a
+                // utilization figure are `five_hour`, `seven_day` and
+                // `extra_usage`. `ClaudeQuota.modelWindows` still parses any
+                // real per-model window and the fetcher logs what it finds, so
+                // this becomes a two-line change if that ever lands — but a
+                // control that can never show anything is worse than no
+                // control.
             }
 
             if let extra = quota.extraSpendLabel {

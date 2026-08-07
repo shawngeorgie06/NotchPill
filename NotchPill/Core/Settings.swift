@@ -247,16 +247,6 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    /// Show the per-model weekly windows (Opus, Fable, …) on the Claude card.
-    ///
-    /// Off by default and a toggle rather than automatic: the card's job is the
-    /// two limits that stop you working, and a third meter is only worth its
-    /// share of a strip this narrow to someone who actually runs into a
-    /// model-specific cap.
-    @Published var showModelUsageMeters: Bool {
-        didSet { defaults.set(showModelUsageMeters, forKey: Keys.showModelUsageMeters) }
-    }
-
     @Published var persistLog: Bool {
         didSet {
             defaults.set(persistLog, forKey: Keys.persistLog)
@@ -370,7 +360,6 @@ final class AppSettings: ObservableObject {
         static let notchScale = "notchScale"
         static let showDevReadyPings = "showDevReadyPings"
         static let persistLog = "persistLog"
-        static let showModelUsageMeters = "showModelUsageMeters"
         static let captionScale = "captionScale"
         static let devReadyDuration = "devReadyDuration"
         static let devReadyPlaySound = "devReadyPlaySound"
@@ -419,7 +408,6 @@ final class AppSettings: ObservableObject {
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
             Keys.persistLog: false,
-            Keys.showModelUsageMeters: false,
             Keys.captionScale: 1.0,
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
@@ -462,7 +450,6 @@ final class AppSettings: ObservableObject {
         notchScale = AppSettings.clampNotchScale(defaults.double(forKey: Keys.notchScale))
         showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
         persistLog = defaults.object(forKey: Keys.persistLog) as? Bool ?? false
-        showModelUsageMeters = defaults.object(forKey: Keys.showModelUsageMeters) as? Bool ?? false
         let storedCaptionScale = defaults.double(forKey: Keys.captionScale)
         captionScale = storedCaptionScale > 0
             ? AppSettings.clampCaptionScale(storedCaptionScale) : 1.0
@@ -525,7 +512,6 @@ final class AppSettings: ObservableObject {
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.showDevReadyPings: true,
             Keys.persistLog: false,
-            Keys.showModelUsageMeters: false,
             Keys.captionScale: 1.0,
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,

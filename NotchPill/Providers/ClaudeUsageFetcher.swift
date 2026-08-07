@@ -197,8 +197,22 @@ enum ClaudeUsageFetcher {
             .sorted(by: Self.modelWindowOrder)
         // Names only — never a utilization figure — so the log says which
         // windows this account actually has without recording usage.
-        if !root.isEmpty {
-            LogStore.log("claude", "usage windows: " + root.keys.sorted().joined(separator: ", "))
+        //
+        // Only keys that parse as a window: the payload carries plan flags and
+        // promotional entries at the same level, and listing those made the log
+        // look like a menu of meters that mostly do not exist.
+        let metered = root.keys.filter { window($0) != nil }.sorted()
+        if !metered.isEmpty {
+            LogStore.log("claude", "metered windows: " + metered.joined(separator: ", "))
+        }
+        // Field *names* of the per-model entries, never their values. A key can
+        // exist without carrying a figure, and the two look identical from
+        // outside — this is what distinguishes "your plan has no such limit"
+        // from "the number is there under a name we do not read".
+        for key in root.keys.sorted() where Self.isModelWindowKey(key) {
+            let fields = (root[key] as? [String: Any])?.keys.sorted() ?? []
+            LogStore.log("claude", "\(key) fields: "
+                         + (fields.isEmpty ? "(not an object)" : fields.joined(separator: ", ")))
         }
 
         var spent: Int?, limit: Int?, currency: String?
