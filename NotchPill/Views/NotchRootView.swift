@@ -222,6 +222,17 @@ struct NotchRootView: View {
             .frame(width: width, height: max(0, height - inset))
             .padding(.top, inset)
             .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+            // Growing from the notch is already smooth, because `progress`
+            // animates from 0. A peek *replacing* another one is not: dictate
+            // twice and the second caption's size arrives with progress already
+            // at 1, so the surface jumps straight to the new width. Scoped to
+            // while a peek is on screen so the hover curve, which drives its own
+            // progress, is left exactly as it was.
+            .animation(state.renderedDevReadyAlerts.isEmpty
+                       ? nil
+                       : .timingCurve(0.32, 0.72, 0.15, 1,
+                                      duration: state.devReadyMotionDuration),
+                       value: frameSize)
     }
 
     private var expandedContent: some View {
@@ -276,7 +287,12 @@ struct NotchRootView: View {
                     ? NotchContentLayout.devReadyListHeight(rowCount: alerts.count)
                         + NotchContentLayout.waitingExtraHeight(alerts: alerts)
                     : nil,
-                pinnedIDs: state.pinnedPeekIDs
+                pinnedIDs: state.pinnedPeekIDs,
+                // The same measurement the window was sized with. Handing the
+                // row anything else is how a title ends up with a line limit
+                // computed for a width it is not being drawn at.
+                titleLines: NotchContentLayout
+                    .peekTitleLayout(metrics: metrics, alerts: alerts).lines
             )
                 .padding(.top, metrics.topGap + 2)
                 .frame(width: frameSize.width, height: frameSize.height - metrics.notchHeight - metrics.topGap,

@@ -424,6 +424,8 @@ struct DevReadyPeekListView: View {
     /// When set, the row list scrolls inside this height (used for multiple agents).
     var maxScrollHeight: CGFloat?
     var pinnedIDs: Set<String> = []
+    /// Measured line counts, keyed by alert id — see `peekTitleLayout`.
+    var titleLines: [String: Int] = [:]
 
     private var orderedAlerts: [DevReadyAlert] { DevReadyAlert.focusOrdered(alerts) }
     private var focusedAlert: DevReadyAlert? { orderedAlerts.first }
@@ -469,7 +471,8 @@ struct DevReadyPeekListView: View {
         VStack(spacing: 0) {
             ForEach(Array(orderedAlerts.enumerated()), id: \.element.id) { index, alert in
                 DevReadyPeekRow(alert: alert, actions: actions, isFocused: index == 0,
-                                isPinned: pinnedIDs.contains(alert.id))
+                                isPinned: pinnedIDs.contains(alert.id),
+                                titleLineLimit: titleLines[alert.id])
                 if index < orderedAlerts.count - 1 {
                     Rectangle()
                         .fill(Color.white.opacity(0.08))
@@ -491,6 +494,9 @@ struct DevReadyPeekRow: View {
     let actions: NotchActions
     var isFocused = false
     var isPinned = false
+    /// Measured at the width this peek is actually being drawn at. Falls back
+    /// to the alert's baked estimate only for previews and history rows.
+    var titleLineLimit: Int?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dismissOffset: CGFloat = 0
 
@@ -540,13 +546,13 @@ struct DevReadyPeekRow: View {
                             // The same number the layout budgeted height for.
                             // Raising one without the other either clips the
                             // text or leaves a gap under it.
-                            .lineLimit(alert.titleLines ?? 1)
+                            .lineLimit(renderedTitleLines)
                             // Only where the title is allowed to wrap. A
                             // one-line agent label still truncates as it always
                             // has — shrinking those would make every long peek
                             // title a different size than its neighbours for no
                             // gain, since they are labels rather than content.
-                            .minimumScaleFactor((alert.titleLines ?? 1) > 1
+                            .minimumScaleFactor(renderedTitleLines > 1
                                                 ? NotchContentLayout.titleMinimumScale : 1)
                             .fixedSize(horizontal: false, vertical: true)
 
@@ -865,6 +871,10 @@ struct DevReadyPeekRow: View {
 
     /// Must describe what a tap actually does on *this* row — VoiceOver
     /// promising "open" on a caption that only pins would be a lie.
+    private var renderedTitleLines: Int {
+        max(1, titleLineLimit ?? alert.titleLines ?? 1)
+    }
+
     private var accessibilityHint: String {
         guard alert.canJumpToSource else {
             return isPinned

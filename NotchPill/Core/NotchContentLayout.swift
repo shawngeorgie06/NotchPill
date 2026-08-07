@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 
 /// Render metrics for the notch pill — size and readability scale derived from
@@ -237,10 +238,47 @@ enum NotchContentLayout {
     }
 
     /// Characters that fit on one line of the 13pt semibold title at `width`.
+    ///
+    /// Kept for the height *estimate* only. Text is not monospaced, so this
+    /// average is wrong for any individual sentence — see `measuredTitleLines`.
     static func titleCharactersPerLine(width: CGFloat) -> Int {
         // The row spends width on the status dot, the source icon and controls.
         let textWidth = width - (dismissControlWidth + 70)
         return max(8, Int(textWidth / 6.6))
+    }
+
+    /// The exact font `DevReadyPeekRow` renders a title in. Measuring against
+    /// anything else is guesswork, and guessing low is what puts an ellipsis on
+    /// a sentence that was supposed to fit.
+    static let titleFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
+
+    /// Width left for the title once the row's furniture is paid for: status
+    /// dot, source icon, and the ✕ (plus ↰ where a row can reply).
+    static func titleTextWidth(inPeekOfWidth width: CGFloat, replyable: Bool) -> CGFloat {
+        max(60, width - (dismissControlWidth + (replyable ? replyControlWidth : 0) + 70))
+    }
+
+    /// Lines this exact string needs at this exact width, by measuring it.
+    ///
+    /// The old character-count estimate divided length by an average glyph
+    /// width. That average is wrong for every real sentence — "Will" and "MMMM"
+    /// are the same four characters and nowhere near the same width — and when
+    /// it guessed low the row was given `lineLimit(1)` for text that needed
+    /// 1.2 lines, so the tail was replaced by "…". A short sentence truncating
+    /// while a long one wrapped fine was exactly this: the estimate only has to
+    /// be wrong by one line, and it is wrongest near the boundary.
+    ///
+    /// TextKit answers the same question the renderer will ask, so the count is
+    /// right by construction rather than by tuning a constant.
+    static func measuredTitleLines(for text: String, width: CGFloat,
+                                   maxLines: Int, replyable: Bool = false) -> Int {
+        guard !text.isEmpty else { return 1 }
+        let textWidth = titleTextWidth(inPeekOfWidth: width, replyable: replyable)
+        let bounds = NSAttributedString(string: text, attributes: [.font: titleFont])
+            .boundingRect(with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
+                          options: [.usesLineFragmentOrigin, .usesFontLeading])
+        let lines = Int(ceil(bounds.height / titleLineHeight - 0.01))
+        return min(maxLines, max(1, lines))
     }
 
     /// Lines a title of this length needs.
@@ -261,12 +299,68 @@ enum NotchContentLayout {
     /// Extra height the wrapped titles add, over the one line already inside
     /// `devReadyRowHeight`. Summed over the rows actually shown, largest first,
     /// on the same reasoning as `waitingExtraHeight`.
-    static func titleExtraHeight(alerts: [DevReadyAlert]) -> CGFloat {
+    static func titleExtraHeight(alerts: [DevReadyAlert],
+                                 lines: [String: Int] = [:]) -> CGFloat {
         alerts
-            .map { CGFloat(max(1, $0.titleLines ?? 1) - 1) * titleLineHeight }
+            .map { CGFloat(max(1, lines[$0.id] ?? $0.titleLines ?? 1) - 1) * titleLineHeight }
             .sorted(by: >)
             .prefix(devReadyMaxVisibleRows)
             .reduce(0, +)
+    }
+
+    /// One answer for "how wide is the peek, and how many lines does each row
+    /// get", so the window, the height budget and the renderer cannot disagree.
+    ///
+    /// They used to. `titleLines` was baked into the alert at ~380pt, the width
+    /// was then clamped by a character-count heuristic that could land anywhere
+    /// between 380 and the ceiling, and the row was given a `lineLimit` computed
+    /// for neither. A short caption came out at ~494pt with `lineLimit(1)` and
+    /// truncated; only text long enough to push the heuristic past the ceiling
+    /// got the wide peek it needed.
+    struct PeekTitleLayout {
+        var width: CGFloat
+        var lines: [String: Int]
+        func lines(for alert: DevReadyAlert) -> Int { lines[alert.id] ?? 1 }
+    }
+
+    @MainActor
+    static func peekTitleLayout(metrics: NotchMetrics, alerts: [DevReadyAlert],
+                                answerEnabled: Bool? = nil) -> PeekTitleLayout {
+        let replyEnabled = answerEnabled ?? AppSettings.shared.agentReplyEnabled
+        let anyReplyable = alerts.contains { $0.canReplyFromNotch(replyEnabled: replyEnabled) }
+        let controls = dismissControlWidth + (anyReplyable ? replyControlWidth : 0)
+        let labelLen = CGFloat(alerts.map { ($0.agent ?? $0.source ?? $0.title).count }.max() ?? 16)
+        let titleLen = CGFloat(alerts.map(\.title.count).max() ?? 16)
+        let contentWidth = 300 + controls + max(labelLen, titleLen) * 2.5
+        let maxLines = titleMaxLines(scale: AppSettings.shared.captionScale)
+
+        // What the peek would be if nothing wrapped — an agent ping's width.
+        let ordinary = min(
+            peekWidthCeiling(metrics: metrics, wrapping: false),
+            max(metrics.notchWidth + 168, devReadyMinWidth, contentWidth)
+        )
+        // Wrapping is decided by measuring at that width, not by guessing from
+        // length. Anything that does not fit on one line there is content
+        // rather than a label, and content gets the wider ceiling outright —
+        // *not* `min`'d against the character heuristic, which is what used to
+        // strand a short caption at a width its own text did not fit in.
+        let wrapping = alerts.contains {
+            measuredTitleLines(for: $0.displayTitle, width: ordinary,
+                               maxLines: maxLines, replyable: anyReplyable) > 1
+        }
+        let width = wrapping
+            ? peekWidthCeiling(metrics: metrics, wrapping: true,
+                               scale: AppSettings.shared.captionScale)
+            : ordinary
+        // Measured again at the width actually used: a caption that needed six
+        // lines at 389pt may need two at 1058pt, and reserving six would leave
+        // four lines of empty pill under it.
+        var lines: [String: Int] = [:]
+        for alert in alerts {
+            lines[alert.id] = measuredTitleLines(for: alert.displayTitle, width: width,
+                                                 maxLines: maxLines, replyable: anyReplyable)
+        }
+        return PeekTitleLayout(width: width, lines: lines)
     }
 
     @MainActor
@@ -275,28 +369,11 @@ enum NotchContentLayout {
         let count = max(1, alerts.count)
         let headerHeight: CGFloat = count > 1 ? 18 : 0
         let listHeight = devReadyListHeight(rowCount: count)
-        let labelLen = CGFloat(alerts.map { ($0.agent ?? $0.source ?? $0.title).count }.max() ?? 16)
-        let titleLen = CGFloat(alerts.map(\.title.count).max() ?? 16)
-        // Every row carries a ✕ (28pt + 8pt trailing). Without this allowance the
-        // control eats title width instead of being given its own, and titles
-        // that used to fit start truncating. A replyable row carries a ↰ beside
-        // it at the same size — budgeted when *any* visible row can reply, since
-        // the rows share one window width.
-        let replyEnabled = answerEnabled ?? AppSettings.shared.agentReplyEnabled
-        let anyReplyable = alerts.contains { $0.canReplyFromNotch(replyEnabled: replyEnabled) }
-        let controls = dismissControlWidth + (anyReplyable ? replyControlWidth : 0)
-        let contentWidth = 300 + controls + max(labelLen, titleLen) * 2.5
-        // A wrapping title is content, not a label, and gets the wider ceiling.
-        let wrapping = alerts.contains { ($0.titleLines ?? 1) > 1 }
-        let width = min(
-            peekWidthCeiling(metrics: metrics, wrapping: wrapping,
-                             scale: AppSettings.shared.captionScale),
-            max(metrics.notchWidth + 168, devReadyMinWidth, contentWidth)
-        )
+        let title = peekTitleLayout(metrics: metrics, alerts: alerts, answerEnabled: answerEnabled)
         let height = metrics.notchHeight + metrics.topGap + headerHeight + listHeight + 4
-            + titleExtraHeight(alerts: alerts)
+            + titleExtraHeight(alerts: alerts, lines: title.lines)
         return NotchContentLayoutMetrics(
-            size: CGSize(width: width, height: height),
+            size: CGSize(width: title.width, height: height),
             readability: 1.05,
             textScale: 1.08
         )

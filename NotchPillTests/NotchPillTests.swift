@@ -4407,14 +4407,21 @@ struct CaptionSizingTests {
         let metrics = NotchMetrics(notchWidth: 179, notchHeight: 32,
                                    designExpandedWidth: 720, designExpandedHeight: 128,
                                    scale: 0.54)
-        let short = DevReadyAlert(id: "a", title: "Hi", titleLines: 1)
-        let long = DevReadyAlert(id: "a", title: "Hi", titleLines: 4)
-        let shortHeight = NotchContentLayout.devReadyLayout(
-            metrics: metrics, alerts: [short], answerEnabled: false).size.height
-        let longHeight = NotchContentLayout.devReadyLayout(
-            metrics: metrics, alerts: [long], answerEnabled: false).size.height
-        #expect(longHeight > shortHeight)
-        #expect(longHeight - shortHeight == 3 * NotchContentLayout.titleLineHeight)
+        // Real strings, because the height now follows what the text actually
+        // measures rather than a number baked into the alert. Asserting on a
+        // hand-set `titleLines` would only prove the old estimate still exists.
+        let short = DevReadyAlert(id: "a", title: "Hi")
+        let long = DevReadyAlert(id: "a", title: String(repeating: "spoken words ", count: 40))
+        let shortLayout = NotchContentLayout.devReadyLayout(
+            metrics: metrics, alerts: [short], answerEnabled: false)
+        let longLayout = NotchContentLayout.devReadyLayout(
+            metrics: metrics, alerts: [long], answerEnabled: false)
+        #expect(longLayout.size.height > shortLayout.size.height)
+        let lines = NotchContentLayout.peekTitleLayout(
+            metrics: metrics, alerts: [long], answerEnabled: false).lines["a"] ?? 1
+        #expect(lines > 1)
+        #expect(longLayout.size.height - shortLayout.size.height
+                == CGFloat(lines - 1) * NotchContentLayout.titleLineHeight)
     }
 
     @Test("A dictated sentence reaches the peek with room to show it")
@@ -6407,5 +6414,164 @@ struct PeekHoldTests {
         #expect(!hold.isPinned("a"))
         let changed17 = hold.setHovered(true)
         #expect(changed17, "hover starts fresh, so the next hover is a change")
+    }
+}
+
+@Suite("A caption is never cut off with an ellipsis")
+struct CaptionFitsTests {
+    private var metrics: NotchMetrics {
+        NotchMetrics(notchWidth: 179, notchHeight: 32,
+                     designExpandedWidth: 720, designExpandedHeight: 128,
+                     scale: 0.54, screenWidth: 1512)
+    }
+
+    /// The reported bug, in one assertion. A single short sentence used to be
+    /// estimated at one line from its character count, so the row was drawn
+    /// with `lineLimit(1)` — and then truncated, because the estimate was wrong
+    /// by the fraction of a line that matters.
+    @Test("A short spoken sentence gets every line it needs")
+    @MainActor
+    func shortSentenceIsNotTruncated() {
+        let spoken = "So I did tap to release and I want it to be very quick whenever that happens."
+        let alert = DevReadyAlert(id: "c", title: spoken, agent: "murmur", kind: .finished)
+        let layout = NotchContentLayout.peekTitleLayout(
+            metrics: metrics, alerts: [alert], answerEnabled: false)
+        // The number of lines the renderer is given must be at least what the
+        // text needs at the width the renderer is given.
+        let needed = NotchContentLayout.measuredTitleLines(
+            for: spoken, width: layout.width,
+            maxLines: .max, replyable: false)
+        #expect(layout.lines(for: alert) >= needed)
+    }
+
+    /// Sweeps the boundary the old estimate was wrongest at: lengths that land
+    /// within a character or two of a line break, in text whose glyphs are
+    /// wider than the 6.6pt average the estimate assumed.
+    @Test("No spoken length is given fewer lines than it needs")
+    @MainActor
+    func noLengthIsUnderBudgeted() {
+        for count in 1...90 {
+            let spoken = String(repeating: "W", count: count) + " " + String(repeating: "wow ", count: count / 3)
+            let alert = DevReadyAlert(id: "c", title: spoken, agent: "murmur", kind: .finished)
+            let layout = NotchContentLayout.peekTitleLayout(
+                metrics: metrics, alerts: [alert], answerEnabled: false)
+            let needed = NotchContentLayout.measuredTitleLines(
+                for: spoken, width: layout.width, maxLines: .max, replyable: false)
+            let granted = layout.lines(for: alert)
+            #expect(granted >= min(needed, NotchContentLayout.titleMaxLines(scale: 1)),
+                    "length \(count) got \(granted) lines but needs \(needed)")
+        }
+    }
+
+    /// The other half of the same bug: a caption that wraps must get the wide
+    /// peek outright. It used to be `min`'d against a character-count width
+    /// heuristic, so only text long enough to push that heuristic past the
+    /// ceiling ever saw the wide layout — a short caption was stranded at a
+    /// middling width its own text did not fit in.
+    @Test("A wrapping caption gets the wide peek, not a character-count width")
+    @MainActor
+    func wrappingCaptionGetsTheWideCeiling() {
+        let spoken = String(repeating: "spoken ", count: 30)
+        let alert = DevReadyAlert(id: "c", title: spoken, agent: "murmur", kind: .finished)
+        let layout = NotchContentLayout.peekTitleLayout(
+            metrics: metrics, alerts: [alert], answerEnabled: false)
+        #expect(layout.width == NotchContentLayout.peekWidthCeiling(
+            metrics: metrics, wrapping: true, scale: AppSettings.shared.captionScale))
+    }
+
+    /// An agent ping is a label, not content: it must keep its notch-shaped
+    /// width. Widening every peek would be a regression dressed as a fix.
+    @Test("A one-line agent ping keeps the ordinary width")
+    @MainActor
+    func agentPingStaysNarrow() {
+        let alert = DevReadyAlert(id: "a", title: "Agent finished", agent: "claude-code", kind: .finished)
+        let layout = NotchContentLayout.peekTitleLayout(
+            metrics: metrics, alerts: [alert], answerEnabled: false)
+        #expect(layout.lines(for: alert) == 1)
+        #expect(layout.width <= NotchContentLayout.peekWidthCeiling(
+            metrics: metrics, wrapping: false))
+    }
+
+    /// Measuring at the ordinary width and then rendering at the wide one would
+    /// reserve height for lines that no longer exist, leaving empty pill under
+    /// the text.
+    @Test("Lines are measured at the width actually used")
+    @MainActor
+    func linesAreMeasuredAtTheFinalWidth() {
+        let spoken = String(repeating: "spoken ", count: 30)
+        let alert = DevReadyAlert(id: "c", title: spoken, agent: "murmur", kind: .finished)
+        let layout = NotchContentLayout.peekTitleLayout(
+            metrics: metrics, alerts: [alert], answerEnabled: false)
+        let atOrdinary = NotchContentLayout.measuredTitleLines(
+            for: spoken, width: NotchContentLayout.devReadyMinWidth,
+            maxLines: .max, replyable: false)
+        #expect(layout.lines(for: alert) < atOrdinary,
+                "the wide peek must need fewer lines than the narrow one")
+    }
+
+    @Test("Measurement respects the ceiling on lines")
+    func measurementIsCapped() {
+        let huge = String(repeating: "spoken words ", count: 400)
+        #expect(NotchContentLayout.measuredTitleLines(for: huge, width: 400, maxLines: 12) == 12)
+    }
+
+    @Test("Empty text is one line, not zero")
+    func emptyIsOneLine() {
+        #expect(NotchContentLayout.measuredTitleLines(for: "", width: 400, maxLines: 12) == 1)
+    }
+}
+
+@Suite("A long caption is given time to travel")
+struct PeekMotionTests {
+    private func alert(_ title: String) -> DevReadyAlert {
+        DevReadyAlert(id: "c", title: title, agent: "murmur", kind: .finished)
+    }
+
+    @Test("A short agent ping keeps the original timing exactly")
+    func shortIsUnchanged() {
+        #expect(NotchState.devReadyMotionDuration(for: [alert("Agent finished")])
+                == NotchState.devReadyAnimationDuration)
+    }
+
+    /// Speed is what the eye judges, not duration: the pill travels several
+    /// times further for a caption, so the same 0.36s reads as a pop.
+    @Test("A caption gets longer motion than a label")
+    func longTravelsLonger() {
+        let long = NotchState.devReadyMotionDuration(
+            for: [alert(String(repeating: "spoken words ", count: 20))])
+        #expect(long > NotchState.devReadyAnimationDuration)
+    }
+
+    @Test("Motion never grows without bound")
+    func durationIsCapped() {
+        let huge = NotchState.devReadyMotionDuration(
+            for: [alert(String(repeating: "spoken words ", count: 500))])
+        #expect(huge <= NotchState.devReadyAnimationDuration + 0.24)
+        #expect(huge <= 0.6, "any longer and it stops feeling responsive")
+    }
+
+    @Test("Longer text never animates faster than shorter text")
+    func durationIsMonotonic() {
+        var previous = NotchState.devReadyAnimationDuration
+        for count in stride(from: 1, through: 400, by: 7) {
+            let d = NotchState.devReadyMotionDuration(for: [alert(String(repeating: "a", count: count))])
+            #expect(d >= previous, "length \(count) animated faster than the length before it")
+            previous = d
+        }
+    }
+
+    /// The window shrink is deferred until the collapse animation finishes. If
+    /// it used the old constant it would now cut the longest captions short —
+    /// reintroducing the snap it exists to prevent.
+    @Test("The deferred shrink waits at least as long as the animation")
+    func shrinkOutlastsTheAnimation() {
+        let d = NotchState.devReadyMotionDuration(
+            for: [alert(String(repeating: "spoken words ", count: 20))])
+        #expect(max(NotchState.devReadyAnimationDuration, d) >= d)
+    }
+
+    @Test("An empty peek falls back to the constant")
+    func emptyIsTheConstant() {
+        #expect(NotchState.devReadyMotionDuration(for: []) == NotchState.devReadyAnimationDuration)
     }
 }

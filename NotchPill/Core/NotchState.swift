@@ -70,6 +70,10 @@ final class NotchState: ObservableObject {
     /// show that it is pinned rather than leaving the pill silently stuck.
     @Published private(set) var pinnedPeekIDs: Set<String> = []
     @Published private(set) var devReadyPresentation: CGFloat = 0
+    /// The duration the in-flight peek animation is actually using, so the
+    /// controller's deferred window shrink waits exactly that long instead of
+    /// cutting a longer caption collapse short.
+    private(set) var devReadyMotionDuration: TimeInterval = NotchState.devReadyAnimationDuration
     @Published private(set) var recentDevReadyAlerts: [DevReadyAlert] = []
     /// Agent conversations alive right now. Distinct from `devReadyAlerts`:
     /// those are events that fire once, this is a standing list.
@@ -341,8 +345,9 @@ final class NotchState: ObservableObject {
         devReadyExitWorkItem?.cancel()
         departingDevReadyAlerts = devReadyAlerts
         isDismissingDevReady = true
-        withAnimation(.timingCurve(0.22, 0.8, 0.2, 1,
-                                   duration: Self.devReadyAnimationDuration)) {
+        let duration = Self.devReadyMotionDuration(for: devReadyAlerts)
+        devReadyMotionDuration = duration
+        withAnimation(.timingCurve(0.32, 0.72, 0.15, 1, duration: duration)) {
             devReadyPresentation = 0
         }
         let item = DispatchWorkItem { [weak self] in
@@ -351,7 +356,7 @@ final class NotchState: ObservableObject {
             self.isDismissingDevReady = false
         }
         devReadyExitWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.devReadyAnimationDuration, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: item)
     }
 
     private func animateDevReadyIn() {
@@ -361,12 +366,35 @@ final class NotchState: ObservableObject {
         // into a single full-sized notification.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
             guard let self, !self.devReadyAlerts.isEmpty else { return }
-            withAnimation(.timingCurve(0.22, 0.8, 0.2, 1,
-                                       duration: Self.devReadyAnimationDuration)) {
+            let duration = Self.devReadyMotionDuration(for: self.devReadyAlerts)
+            self.devReadyMotionDuration = duration
+            withAnimation(.timingCurve(0.32, 0.72, 0.15, 1, duration: duration)) {
                 self.devReadyPresentation = 1
             }
         }
     }
+
+    /// How long the peek should take to open or close.
+    ///
+    /// It was a constant, tuned when every peek was one line of agent label and
+    /// the pill barely changed width. A caption moves it from ~180pt to
+    /// ~1050pt — several times further — and covering that in the same 0.36s is
+    /// what reads as a pop rather than a growth: the *speed* is what the eye
+    /// judges, not the duration. Longer text therefore gets proportionally
+    /// longer motion, capped so it never feels sluggish.
+    ///
+    /// Length is the proxy rather than the measured width because this is the
+    /// one place that has the alerts but not the screen, and the two agree
+    /// closely enough for a duration.
+    nonisolated static func devReadyMotionDuration(for alerts: [DevReadyAlert]) -> TimeInterval {
+        let longest = alerts.map(\.displayTitle.count).max() ?? 0
+        guard longest > shortTitleLength else { return devReadyAnimationDuration }
+        let over = Double(longest - shortTitleLength) / 340
+        return devReadyAnimationDuration + min(0.24, over * 0.24)
+    }
+
+    /// Above this, a title is content being read rather than a label glanced at.
+    private static let shortTitleLength = 60
 
     /// Shows the volume HUD briefly after a keyboard adjustment.
     func showVolume(_ level: Int) {

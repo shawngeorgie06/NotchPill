@@ -605,10 +605,15 @@ final class NotchController {
                     pointerInHotZone: self.expandHoverScreenRect().contains(NSEvent.mouseLocation))
             }
             pendingShrink = item
-            // The peek's own animation, and the longer of the two the pill
-            // uses, so this is never cut short by the hover curve either.
+            // The duration the peek is *actually* animating with, not the
+            // constant: a long caption now collapses over a longer interval,
+            // and shrinking the window on the old schedule would clip the last
+            // third of its own animation — the exact snap this defer exists to
+            // prevent, reappearing only for the longest captions.
             DispatchQueue.main.asyncAfter(
-                deadline: .now() + NotchState.devReadyAnimationDuration, execute: item)
+                deadline: .now() + max(NotchState.devReadyAnimationDuration,
+                                       state.devReadyMotionDuration),
+                execute: item)
             MotionTrace.record("defer shrink to \(MotionTrace.rect(frame))")
             return
         }
