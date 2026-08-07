@@ -65,6 +65,10 @@ final class NotchState: ObservableObject {
     /// SwiftUI replace it with the dashboard for one frame.
     @Published private(set) var departingDevReadyAlerts: [DevReadyAlert] = []
     @Published private(set) var isDismissingDevReady = false
+    /// Peeks the user has pinned open. Presentation only — the timer itself is
+    /// suspended by `PeekHold` in the controller; this exists so the row can
+    /// show that it is pinned rather than leaving the pill silently stuck.
+    @Published private(set) var pinnedPeekIDs: Set<String> = []
     @Published private(set) var devReadyPresentation: CGFloat = 0
     @Published private(set) var recentDevReadyAlerts: [DevReadyAlert] = []
     /// Agent conversations alive right now. Distinct from `devReadyAlerts`:
@@ -270,6 +274,16 @@ final class NotchState: ObservableObject {
 
     func removeDevReady(id: String) {
         devReadyAlerts.removeAll { $0.id == id }
+        pinnedPeekIDs.remove(id)
+    }
+
+    /// Presentation half of a pin. The controller owns whether the timer runs.
+    func setPeekPinned(_ pinned: Bool, id: String) {
+        if pinned {
+            pinnedPeekIDs.insert(id)
+        } else {
+            pinnedPeekIDs.remove(id)
+        }
     }
 
     /// Fills in an on-screen peek's agent message once it has been read.
@@ -290,6 +304,9 @@ final class NotchState: ObservableObject {
     /// finished auto-dismiss timer uses this so a finished ping from terminal B
     /// can never erase terminal A's still-blocked question.
     func clearFinishedDevReady() {
+        for alert in devReadyAlerts where alert.kind == .finished {
+            pinnedPeekIDs.remove(alert.id)
+        }
         devReadyAlerts.removeAll { $0.kind == .finished }
     }
 

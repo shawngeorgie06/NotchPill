@@ -423,6 +423,7 @@ struct DevReadyPeekListView: View {
     let actions: NotchActions
     /// When set, the row list scrolls inside this height (used for multiple agents).
     var maxScrollHeight: CGFloat?
+    var pinnedIDs: Set<String> = []
 
     private var orderedAlerts: [DevReadyAlert] { DevReadyAlert.focusOrdered(alerts) }
     private var focusedAlert: DevReadyAlert? { orderedAlerts.first }
@@ -467,7 +468,8 @@ struct DevReadyPeekListView: View {
     private var alertRows: some View {
         VStack(spacing: 0) {
             ForEach(Array(orderedAlerts.enumerated()), id: \.element.id) { index, alert in
-                DevReadyPeekRow(alert: alert, actions: actions, isFocused: index == 0)
+                DevReadyPeekRow(alert: alert, actions: actions, isFocused: index == 0,
+                                isPinned: pinnedIDs.contains(alert.id))
                 if index < orderedAlerts.count - 1 {
                     Rectangle()
                         .fill(Color.white.opacity(0.08))
@@ -488,6 +490,7 @@ struct DevReadyPeekRow: View {
     let alert: DevReadyAlert
     let actions: NotchActions
     var isFocused = false
+    var isPinned = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dismissOffset: CGFloat = 0
 
@@ -566,6 +569,15 @@ struct DevReadyPeekRow: View {
                                 Text("Tap to open")
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.38))
+                            } else {
+                                // Only ever shown on rows that pin, so the
+                                // affordance and its state occupy one slot.
+                                // Pinned reads brighter because a peek that has
+                                // stopped fading needs to say so — otherwise it
+                                // looks like the overlay is stuck.
+                                Text(isPinned ? "Pinned · tap to release" : "Tap to keep open")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.white.opacity(isPinned ? 0.62 : 0.38))
                             }
                         }
                     }
@@ -593,9 +605,7 @@ struct DevReadyPeekRow: View {
             // reject the expression outright.
             .opacity(Double(1 - min(abs(dismissOffset) / CGFloat(180), CGFloat(0.45))))
             .simultaneousGesture(dismissGesture)
-            .accessibilityHint(alert.kind == .finished
-                               ? "Swipe left to dismiss, or double tap to open"
-                               : "Double tap to open")
+            .accessibilityHint(accessibilityHint)
 
             if canReply {
                 Button {
@@ -853,7 +863,29 @@ struct DevReadyPeekRow: View {
             )
     }
 
+    /// Must describe what a tap actually does on *this* row — VoiceOver
+    /// promising "open" on a caption that only pins would be a lie.
+    private var accessibilityHint: String {
+        guard alert.canJumpToSource else {
+            return isPinned
+                ? "Double tap to release this notification and let it fade"
+                : "Double tap to keep this notification open"
+        }
+        return alert.kind == .finished
+            ? "Swipe left to dismiss, or double tap to open"
+            : "Double tap to open"
+    }
+
     private func handleTap() {
+        // A row that can jump keeps jumping — that is the point of tapping it.
+        // A row that cannot (a dictation caption, a transcript-watcher ping)
+        // used to focus nothing and then dismiss itself, so clicking the text
+        // you were trying to keep reading was the fastest way to lose it.
+        // Those rows pin instead.
+        guard alert.canJumpToSource else {
+            actions.togglePeekPin(alert)
+            return
+        }
         actions.focusAlert(alert)
         actions.dismissDevReady(alert.id)
     }

@@ -275,7 +275,8 @@ struct NotchRootView: View {
                 maxScrollHeight: alerts.count > 1
                     ? NotchContentLayout.devReadyListHeight(rowCount: alerts.count)
                         + NotchContentLayout.waitingExtraHeight(alerts: alerts)
-                    : nil
+                    : nil,
+                pinnedIDs: state.pinnedPeekIDs
             )
                 .padding(.top, metrics.topGap + 2)
                 .frame(width: frameSize.width, height: frameSize.height - metrics.notchHeight - metrics.topGap,

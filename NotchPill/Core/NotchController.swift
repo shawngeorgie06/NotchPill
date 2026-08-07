@@ -65,6 +65,8 @@ final class NotchController {
     /// Waiting alerts used to be permanent; each now owns a five-second timer
     /// just like a completed ping, so a new prompt cannot leave a banner behind.
     private var waitingDismissItems: [String: DispatchWorkItem] = [:]
+    /// Hover and pins that suspend the fade timer. See `PeekHold`.
+    private var peekHold = PeekHold()
     private var devReadyCoalesceItem: DispatchWorkItem?
     private var pendingDevReadyAlerts: [DevReadyAlert] = []
     private var devReadyDedup = DevReadyDedup()
@@ -267,6 +269,7 @@ final class NotchController {
             focusAlert: { [weak self] alert in self?.focusSourceApp(alert: alert) },
             dismissDevReady: { [weak self] id in self?.dismissDevReady(id: id) },
             dismissPeek: { [weak self] id in self?.dismissPeek(id: id) },
+            togglePeekPin: { [weak self] alert in self?.togglePeekPin(alert) },
             beginReply: { [weak self] alert in self?.state.beginReply(to: alert) },
             sendReply: { [weak self] alert, text in self?.performReply(alert: alert, text: text) },
             beginPlanRevision: { [weak self] alert in self?.state.beginPlanRevision(for: alert) },
@@ -665,6 +668,11 @@ final class NotchController {
             arming.disarm()
             hotZoneKeys.updatePointerInHotZone(false)
             updateMousePassthrough(pointerInHotZone: false)
+            // This branch returns early, and it is reachable while a peek is
+            // held: move the pointer from the peek straight out to a browser
+            // tab and the hold would never be released, so the peek would sit
+            // there until something else dismissed it.
+            updatePeekHover(overPill: false)
             return
         }
 
@@ -674,6 +682,43 @@ final class NotchController {
         let inZone = shouldArmShortcuts(at: mouse)
         hotZoneKeys.updatePointerInHotZone(arming.update(point: mouse, inZone: inZone))
         updateMousePassthrough(pointerInHotZone: inZone)
+        updatePeekHover(overPill: overPill)
+    }
+
+    /// Hold a peek open while the pointer rests on it.
+    ///
+    /// Uses the raw geometry rather than the movement-latched `inZone`: that
+    /// latch exists so a peek growing under a parked cursor cannot steal
+    /// keyboard shortcuts, and it would be wrong here — a parked cursor over a
+    /// peek is exactly the case worth holding open.
+    private func updatePeekHover(overPill: Bool) {
+        let hovering = overPill && state.devReadyAlerts.contains { $0.kind == .finished }
+        guard peekHold.setHovered(hovering) else { return }
+        if peekHold.holdsPeek {
+            devReadyDismissItem?.cancel()
+            devReadyDismissItem = nil
+            LogStore.log("peek", "hold (hover)")
+        } else {
+            // Full duration, not the remainder. Coming back from a hover means
+            // you just finished reading; a peek that vanishes 200ms later
+            // because the old timer had nearly expired reads as a glitch.
+            LogStore.log("peek", "release (hover) — fade timer restarted")
+            scheduleDevReadyDismiss()
+        }
+    }
+
+    /// Explicit sticky hold, from clicking a row that has nowhere else to go.
+    private func togglePeekPin(_ alert: DevReadyAlert) {
+        let changed = peekHold.togglePin(alert.id)
+        state.setPeekPinned(peekHold.isPinned(alert.id), id: alert.id)
+        LogStore.log("peek", peekHold.isPinned(alert.id) ? "pinned" : "unpinned")
+        guard changed else { return }
+        if peekHold.holdsPeek {
+            devReadyDismissItem?.cancel()
+            devReadyDismissItem = nil
+        } else {
+            scheduleDevReadyDismiss()
+        }
     }
 
     /// Opens the pill.
@@ -1259,6 +1304,11 @@ final class NotchController {
 
     private func scheduleDevReadyDismiss() {
         devReadyDismissItem?.cancel()
+        devReadyDismissItem = nil
+        // Every path that would re-arm the timer funnels through here, so this
+        // one guard is enough to make a hold mean what it says — including the
+        // paths that re-arm after a sibling row is dismissed or a reply closes.
+        guard !peekHold.holdsPeek else { return }
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             for alert in self.state.devReadyAlerts where alert.kind == .finished {
@@ -1298,6 +1348,9 @@ final class NotchController {
         if let id {
             if state.devReadyAlerts.count == 1 { state.beginDevReadyDismissal() }
             state.removeDevReady(id: id)
+            // A pin whose row is gone would hold the peek open with nothing
+            // left to unpin — the one way this could strand the overlay.
+            _ = peekHold.forget(id)
             if !state.devReadyAlerts.isEmpty {
                 if state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
                     scheduleDevReadyDismiss()
@@ -1318,6 +1371,13 @@ final class NotchController {
             state.beginDevReadyDismissal()
         }
         state.clearFinishedDevReady()
+        if state.devReadyAlerts.isEmpty {
+            // Hover is cleared too: the pointer may still be sitting where the
+            // peek was, and a stale hover would hold the *next* peek open.
+            peekHold.reset()
+        } else {
+            _ = peekHold.retain(ids: Set(state.devReadyAlerts.map(\.id)))
+        }
 
         guard state.devReadyAlerts.isEmpty else {
             // Waiting peeks survive; keep the pill open and just resize.

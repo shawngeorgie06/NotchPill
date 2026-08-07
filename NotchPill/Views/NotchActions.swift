@@ -12,6 +12,9 @@ struct NotchActions {
     var dismissDevReady: (String) -> Void
     /// Explicit dismissal that also clears `.waiting` peeks, which never time out.
     var dismissPeek: (String) -> Void
+    /// Hold a peek open until it is unpinned. Offered only on rows with nowhere
+    /// to jump — for those, a tap used to dismiss the very text you clicked on.
+    var togglePeekPin: (DevReadyAlert) -> Void = { _ in }
     var beginReply: (DevReadyAlert) -> Void
     var sendReply: (DevReadyAlert, String) -> Void
     /// Open a feedback field that returns a plan for revision through the

@@ -6273,3 +6273,139 @@ struct CursorQuotaCacheTests {
         #expect(await failing.quota(now: Date()) == nil)
     }
 }
+
+@Suite("A peek you are reading does not fade out from under you")
+struct PeekHoldTests {
+    @Test("Nothing holds a fresh peek")
+    func idleHoldsNothing() {
+        let hold = PeekHold()
+        #expect(!hold.holdsPeek)
+    }
+
+    @Test("Hovering holds the peek, leaving releases it")
+    func hoverHolds() {
+        var hold = PeekHold()
+        let changed1 = hold.setHovered(true)
+        #expect(changed1)
+        #expect(hold.holdsPeek)
+        let changed2 = hold.setHovered(false)
+        #expect(changed2)
+        #expect(!hold.holdsPeek)
+    }
+
+    /// The hover source is a polling tick, so this fires many times per second
+    /// with an unchanged answer. Reporting a change every time would restart
+    /// the fade timer on every tick and the peek would never fade at all.
+    @Test("Repeating the same hover state reports no change")
+    func hoverIsIdempotent() {
+        var hold = PeekHold()
+        let changed3 = hold.setHovered(true)
+        #expect(changed3)
+        let changed4 = hold.setHovered(true)
+        #expect(!changed4)
+        let changed5 = hold.setHovered(true)
+        #expect(!changed5)
+        #expect(hold.holdsPeek)
+    }
+
+    @Test("A pin outlives the pointer")
+    func pinSurvivesHoverLeaving() {
+        var hold = PeekHold()
+        _ = hold.setHovered(true)
+        _ = hold.togglePin("a")
+        let changed6 = hold.setHovered(false)
+        #expect(!changed6, "the pin still holds it, so nothing changed")
+        #expect(hold.holdsPeek)
+        #expect(hold.isPinned("a"))
+    }
+
+    /// Hover already holds the peek, so pinning changes no timer *now* — but it
+    /// decides what happens when the pointer leaves, which is the whole point.
+    @Test("Pinning under the pointer reports no timer change")
+    func pinningWhileHoveredChangesNothingYet() {
+        var hold = PeekHold()
+        _ = hold.setHovered(true)
+        let changed7 = hold.togglePin("a")
+        #expect(!changed7)
+        #expect(hold.holdsPeek)
+    }
+
+    @Test("Unpinning the last pin releases the peek")
+    func unpinReleases() {
+        var hold = PeekHold()
+        let changed8 = hold.togglePin("a")
+        #expect(changed8)
+        #expect(hold.holdsPeek)
+        let changed9 = hold.togglePin("a")
+        #expect(changed9)
+        #expect(!hold.holdsPeek)
+    }
+
+    /// Pins are per-row: pinning a caption must not freeze an unrelated agent
+    /// ping that happens to be stacked with it.
+    @Test("Pins are independent of each other")
+    func pinsAreIndependent() {
+        var hold = PeekHold()
+        _ = hold.togglePin("a")
+        _ = hold.togglePin("b")
+        let changed10 = hold.togglePin("a")
+        #expect(!changed10, "b still holds it")
+        #expect(hold.holdsPeek)
+        #expect(!hold.isPinned("a"))
+        #expect(hold.isPinned("b"))
+        let changed11 = hold.togglePin("b")
+        #expect(changed11)
+        #expect(!hold.holdsPeek)
+    }
+
+    /// The one way this feature could strand the overlay: a pin whose row is
+    /// gone holds the peek open forever with nothing left to click.
+    @Test("A dismissed row's pin is forgotten")
+    func forgettingADismissedRowReleases() {
+        var hold = PeekHold()
+        _ = hold.togglePin("a")
+        let changed12 = hold.forget("a")
+        #expect(changed12)
+        #expect(!hold.holdsPeek)
+        let changed13 = hold.forget("a")
+        #expect(!changed13, "forgetting twice is not a second change")
+    }
+
+    @Test("Pins for rows that no longer exist are pruned")
+    func retainDropsVanishedRows() {
+        var hold = PeekHold()
+        _ = hold.togglePin("a")
+        _ = hold.togglePin("b")
+        let changed14 = hold.retain(ids: ["a"])
+        #expect(!changed14, "a still holds it")
+        #expect(hold.holdsPeek)
+        #expect(!hold.isPinned("b"))
+        let changed15 = hold.retain(ids: [])
+        #expect(changed15)
+        #expect(!hold.holdsPeek)
+    }
+
+    @Test("Keeping every row prunes nothing")
+    func retainIsANoOpWhenNothingVanished() {
+        var hold = PeekHold()
+        _ = hold.togglePin("a")
+        let changed16 = hold.retain(ids: ["a", "b"])
+        #expect(!changed16)
+        #expect(hold.isPinned("a"))
+    }
+
+    /// The pointer may still be sitting where the peek was. A hover that
+    /// survived the dismissal would hold the *next* peek open without the user
+    /// hovering anything — a peek that never fades and never explains why.
+    @Test("Dismissal clears hover as well as pins")
+    func resetClearsHoverToo() {
+        var hold = PeekHold()
+        _ = hold.setHovered(true)
+        _ = hold.togglePin("a")
+        hold.reset()
+        #expect(!hold.holdsPeek)
+        #expect(!hold.isPinned("a"))
+        let changed17 = hold.setHovered(true)
+        #expect(changed17, "hover starts fresh, so the next hover is a change")
+    }
+}
