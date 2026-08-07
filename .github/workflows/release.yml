@@ -151,7 +151,14 @@ jobs:
           chmod +x "$STAGE/Install NotchPill.command"
           mkdir -p dist
           ditto -c -k --keepParent "$STAGE" "dist/NotchPill-${VERSION}-macOS-arm64.zip"
-          shasum -a 256 "dist/NotchPill-${VERSION}-macOS-arm64.zip" | tee dist/SHA256SUMS.txt
+          # Bare filename, not "dist/…". This file ships next to the zip on the
+          # releases page, so anyone who downloads both and runs the obvious
+          # `shasum -a 256 -c SHA256SUMS.txt` is standing in a directory with no
+          # dist/ in it and gets "FAILED open or read" for a hash that is
+          # perfectly correct — which reads as a corrupted download of a
+          # security artifact. Fixed in Scripts/build-release.sh first; this is
+          # the copy that actually produces the published asset.
+          (cd dist && shasum -a 256 "NotchPill-${VERSION}-macOS-arm64.zip" | tee SHA256SUMS.txt)
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
