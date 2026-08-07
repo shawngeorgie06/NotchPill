@@ -6753,3 +6753,97 @@ struct CaptionBoundsTests {
         #expect(parsed.text == spoken)
     }
 }
+
+@Suite("A caption does not outlive being read")
+struct CaptionConsumptionTests {
+    private func tempURL(_ name: String) -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("npcap-\(name)-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("latest-caption.json")
+    }
+
+    private func write(_ text: String, at url: URL, ageSeconds: TimeInterval = 0) {
+        let ms = (Date().timeIntervalSince1970 - ageSeconds) * 1000
+        let data = try! JSONSerialization.data(withJSONObject: ["text": text, "timestamp": ms])
+        try! data.write(to: url)
+    }
+
+    /// The whole point: the mailbox is emptied when collected, so the last
+    /// thing the user said stops sitting on disk between dictations.
+    @Test("A shown caption is deleted")
+    @MainActor
+    func shownCaptionIsRemoved() {
+        let url = tempURL("shown")
+        let provider = DictationCaptionProvider(url: url)
+        provider.start()
+        write("what I just said", at: url)
+        var seen: String?
+        provider.onCaption = { seen = $0.text }
+        provider.poll()
+        #expect(seen == "what I just said")
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    /// A caption too old to present is exactly the kind we least want left
+    /// behind — it is speech with no remaining purpose.
+    @Test("A stale caption is deleted without being shown")
+    @MainActor
+    func staleCaptionIsRemovedAnyway() {
+        let url = tempURL("stale")
+        let provider = DictationCaptionProvider(url: url)
+        provider.start()
+        write("said a long time ago", at: url,
+              ageSeconds: DictationCaption.freshWithin + 60)
+        var seen: String?
+        provider.onCaption = { seen = $0.text }
+        provider.poll()
+        #expect(seen == nil)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    /// Whatever is in the file at launch is history from a previous session.
+    /// It is neither shown nor kept.
+    @Test("A caption already present at launch is cleared")
+    @MainActor
+    func launchClearsLeftoverCaption() {
+        let url = tempURL("launch")
+        write("from the last session", at: url)
+        let provider = DictationCaptionProvider(url: url)
+        var seen: String?
+        provider.onCaption = { seen = $0.text }
+        provider.start()
+        #expect(seen == nil)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    /// Consuming must not break the next one: deleting the file resets the
+    /// modification-date gate, so a caption written afterwards still lands.
+    @Test("The next caption still arrives after a consume")
+    @MainActor
+    func consumingDoesNotDeafenTheNextPoll() {
+        let url = tempURL("next")
+        let provider = DictationCaptionProvider(url: url)
+        provider.start()
+        var seen: [String] = []
+        provider.onCaption = { seen.append($0.text) }
+
+        write("first thing", at: url)
+        provider.poll()
+        write("second thing", at: url)
+        provider.poll()
+
+        #expect(seen == ["first thing", "second thing"])
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("An empty mailbox is not an error")
+    @MainActor
+    func missingFileIsFine() {
+        let url = tempURL("missing")
+        let provider = DictationCaptionProvider(url: url)
+        provider.start()
+        provider.poll()
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+}
