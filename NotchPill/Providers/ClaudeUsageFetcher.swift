@@ -179,18 +179,27 @@ enum ClaudeUsageFetcher {
         let weekly = window("seven_day")
         guard session != nil || weekly != nil else { return nil }
 
-        // Everything else shaped like a window is a per-model allowance.
-        // Sorted by name so the card's third column does not reorder itself
-        // between refreshes.
-        let accountWide: Set<String> = ["five_hour", "seven_day"]
+        // Per-model allowances only.
+        //
+        // "Anything with a utilization figure" was too loose: the payload
+        // carries other metered things at the same level, and the first one
+        // alphabetically took the column that was supposed to show a model.
+        // A per-model window is a *window key with a model suffix* —
+        // `seven_day_opus`, `seven_day_fable` — so that is what this matches,
+        // and nothing else can wander in.
         let models = root.keys
-            .filter { !accountWide.contains($0) }
+            .filter { Self.isModelWindowKey($0) }
             .compactMap { key -> ClaudeQuota.ModelWindow? in
                 guard let w = window(key) else { return nil }
                 return ClaudeQuota.ModelWindow(name: Self.modelWindowLabel(for: key),
                                                percent: w.percent, resetsAt: w.resets)
             }
-            .sorted { $0.name < $1.name }
+            .sorted(by: Self.modelWindowOrder)
+        // Names only — never a utilization figure — so the log says which
+        // windows this account actually has without recording usage.
+        if !root.isEmpty {
+            LogStore.log("claude", "usage windows: " + root.keys.sorted().joined(separator: ", "))
+        }
 
         var spent: Int?, limit: Int?, currency: String?
         if let spend = root["spend"] as? [String: Any],
@@ -216,6 +225,40 @@ enum ClaudeUsageFetcher {
             extraCurrency: currency,
             modelWindows: models,
             updatedAt: now)
+    }
+
+    /// Window keys that name a model, and only those.
+    ///
+    /// The prefixes are the two window lengths the API meters in; anything
+    /// after one of them is the model the allowance belongs to. A bare
+    /// `five_hour`/`seven_day` is the account-wide window, already shown, and
+    /// a key that starts with neither is not a window at all — which is how
+    /// something that was not a model ended up in the model column.
+    nonisolated static func isModelWindowKey(_ key: String) -> Bool {
+        for prefix in ["seven_day_", "five_hour_"] where key.hasPrefix(prefix) {
+            return key.count > prefix.count
+        }
+        return false
+    }
+
+    /// Which model gets the one extra column.
+    ///
+    /// Not alphabetical. The column exists because someone asked to see a
+    /// specific model's limit, and alphabetical order hands it to whichever
+    /// model happens to sort first — so the card shows a model you did not ask
+    /// about while the one you did sits behind it. Fable first, then Opus,
+    /// then anything else by name for a stable order.
+    nonisolated static func modelWindowRank(_ name: String) -> Int {
+        let lowered = name.lowercased()
+        if lowered.contains("fable") { return 0 }
+        if lowered.contains("opus") { return 1 }
+        return 2
+    }
+
+    nonisolated static func modelWindowOrder(_ a: ClaudeQuota.ModelWindow,
+                                             _ b: ClaudeQuota.ModelWindow) -> Bool {
+        let (ra, rb) = (modelWindowRank(a.name), modelWindowRank(b.name))
+        return ra == rb ? a.name < b.name : ra < rb
     }
 
     /// `seven_day_opus` → `opus`. Unknown shapes keep their key, which is

@@ -6972,7 +6972,7 @@ struct ModelWindowTests {
 
     /// Naming models in code would mean shipping a release to display a window
     /// that is already in the response.
-    @Test("Any extra window is picked up, whatever it is called")
+    @Test("Any per-model window is picked up, whatever the model is called")
     func unknownModelWindowsAreKept() {
         let quota = ClaudeUsageFetcher.quota(in: payload([
             "seven_day_opus": ["utilization": 61.0],
@@ -6989,7 +6989,7 @@ struct ModelWindowTests {
         #expect(quota?.sessionPercent == 18)
     }
 
-    /// Sorted so the third column does not swap models between refreshes.
+    /// Stable order among equals, so the column does not swap between refreshes.
     @Test("Order is stable")
     func orderIsStable() {
         let quota = ClaudeUsageFetcher.quota(in: payload([
@@ -6997,6 +6997,52 @@ struct ModelWindowTests {
             "seven_day_alpha": ["utilization": 2.0],
         ]))
         #expect(quota?.modelWindows.map(\.name) == ["alpha", "zeta"])
+    }
+
+    /// The column exists because someone asked for a *specific* model.
+    /// Alphabetical order hands it to whichever model sorts first, so the card
+    /// shows one you did not ask about while the one you did sits behind it.
+    @Test("Fable takes the column when the plan reports one")
+    func fableWinsTheColumn() {
+        let quota = ClaudeUsageFetcher.quota(in: payload([
+            "seven_day_opus": ["utilization": 61.0],
+            "seven_day_fable": ["utilization": 7.0],
+            "seven_day_aardvark": ["utilization": 3.0],
+        ]))
+        #expect(quota?.modelWindows.first?.name == "fable")
+        #expect(quota?.modelWindows.first?.percent == 7)
+    }
+
+    @Test("Opus takes it only when there is no Fable window")
+    func opusIsSecond() {
+        let quota = ClaudeUsageFetcher.quota(in: payload([
+            "seven_day_opus": ["utilization": 61.0],
+            "seven_day_aardvark": ["utilization": 3.0],
+        ]))
+        #expect(quota?.modelWindows.first?.name == "opus")
+    }
+
+    /// The bug: the payload meters other things at the same level, and
+    /// "anything with a utilization figure" let one of them take the column
+    /// that was supposed to belong to a model.
+    @Test("Metered things that are not models never take the column")
+    func nonModelWindowsAreExcluded() {
+        let quota = ClaudeUsageFetcher.quota(in: payload([
+            "extra_usage": ["utilization": 88.0],
+            "overage": ["utilization": 12.0],
+            "seven_day_fable": ["utilization": 7.0],
+        ]))
+        #expect(quota?.modelWindows.map(\.name) == ["fable"])
+    }
+
+    @Test("Only keys with a model suffix count as model windows")
+    func keyShapeIsChecked() {
+        #expect(ClaudeUsageFetcher.isModelWindowKey("seven_day_fable"))
+        #expect(ClaudeUsageFetcher.isModelWindowKey("five_hour_opus"))
+        #expect(!ClaudeUsageFetcher.isModelWindowKey("seven_day"))
+        #expect(!ClaudeUsageFetcher.isModelWindowKey("seven_day_"))
+        #expect(!ClaudeUsageFetcher.isModelWindowKey("extra_usage"))
+        #expect(!ClaudeUsageFetcher.isModelWindowKey("spend"))
     }
 
     @Test("Labels drop the window prefix")
