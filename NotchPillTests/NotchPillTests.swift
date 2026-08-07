@@ -4188,8 +4188,9 @@ struct AgentModelLabelTests {
 
     @Test("Known families shorten to what you actually choose between")
     func knownFamilies() {
-        #expect(AgentSession.modelLabel("gpt-5.6-terra") == "GPT 5.6")
-        #expect(AgentSession.modelLabel("gemini-3-pro") == "Gemini 3")
+        #expect(AgentSession.modelLabel("gpt-5.6-terra") == "GPT 5.6 Terra")
+        #expect(AgentSession.modelLabel("gpt-5.6-soul-terra") == "GPT 5.6 Soul Terra")
+        #expect(AgentSession.modelLabel("gemini-3-pro") == "Gemini 3 Pro")
     }
 
     /// A model we have never seen is exactly the one worth naming. Trimming it
@@ -4214,13 +4215,12 @@ struct AgentModelLabelTests {
                      lastActivity: Date(), model: model, effort: effort)
     }
 
-    /// Medium is the default wherever the setting exists, so printing it would
-    /// spend row width to say "nothing unusual".
-    @Test("Effort shows only when it is not the default")
+    @Test("Every recorded effort is shown")
     func effortSuffix() {
         #expect(session(model: "claude-opus-5", effort: "high").modelLabel == "Opus 5 · high")
         #expect(session(model: "claude-opus-5", effort: "low").modelLabel == "Opus 5 · low")
-        #expect(session(model: "claude-opus-5", effort: "medium").modelLabel == "Opus 5")
+        #expect(session(model: "gpt-5.6-terra", effort: "medium").modelLabel
+                == "GPT 5.6 Terra · medium")
         #expect(session(model: "claude-opus-5", effort: nil).modelLabel == "Opus 5")
         #expect(session(model: nil, effort: "high").modelLabel == nil)
     }

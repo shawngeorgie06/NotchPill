@@ -148,8 +148,9 @@ struct AgentSession: Equatable, Identifiable {
     ///
     /// Vendor prefixes and date stamps are stripped: the row already says which
     /// tool this is, and `claude-haiku-4-5-20251001` spends most of its width
-    /// on a build date nobody is choosing between. What is worth the space is
-    /// the part you actually pick — Opus against Sonnet, 5 against 4.8.
+    /// on a build date nobody is choosing between. The remaining variant is
+    /// kept: `gpt-5.6-terra` is a different choice from another 5.6 variant,
+    /// and hiding that final word made the live card materially less useful.
     ///
     /// Unknown ids pass through cleaned rather than dropped. A model we have
     /// never seen is exactly the one worth naming, and printing it verbatim is
@@ -178,20 +179,24 @@ struct AgentSession: Equatable, Identifiable {
 
         // A version segment starts with a digit, so "5", "4" and "5.6" all
         // count while codenames like "terra" do not. Numeric-only segments
-        // rejoin with dots: ["4", "8"] → "4.8".
-        let version = parts.dropFirst()
-            .prefix { $0.first?.isNumber == true }
-            .joined(separator: ".")
-        return version.isEmpty ? name : "\(name) \(version)"
+        // rejoin with dots: ["4", "8"] → "4.8". Everything after that is a
+        // model variant, not disposable metadata — e.g. 5.6 Terra.
+        let remaining = Array(parts.dropFirst())
+        let versionParts = remaining.prefix { $0.first?.isNumber == true }
+        let version = versionParts.joined(separator: ".")
+        let variant = remaining.dropFirst(versionParts.count)
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+        return [name, version, variant].filter { !$0.isEmpty }.joined(separator: " ")
     }
 
-    /// `Opus 5` on its own, or `Opus 5 · high` when the agent reports effort.
-    /// Medium is left off: it is the default everywhere that has the setting,
-    /// so printing it would spend row width to say "nothing unusual".
+    /// `GPT 5.6 Terra · medium`. The reasoning effort is part of the active
+    /// Codex configuration, including `medium`: omitting the default made two
+    /// otherwise identical live sessions impossible to distinguish at a glance.
     var modelLabel: String? {
         guard let base = Self.modelLabel(model) else { return nil }
         guard let effort = effort?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-              !effort.isEmpty, effort != "medium", effort != "default" else { return base }
+              !effort.isEmpty, effort != "default" else { return base }
         return "\(base) · \(effort)"
     }
 
