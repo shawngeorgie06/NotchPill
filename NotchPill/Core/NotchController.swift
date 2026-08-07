@@ -709,16 +709,22 @@ final class NotchController {
 
     /// Explicit sticky hold, from clicking a row that has nowhere else to go.
     private func togglePeekPin(_ alert: DevReadyAlert) {
-        let changed = peekHold.togglePin(alert.id)
-        state.setPeekPinned(peekHold.isPinned(alert.id), id: alert.id)
-        LogStore.log("peek", peekHold.isPinned(alert.id) ? "pinned" : "unpinned")
-        guard changed else { return }
-        if peekHold.holdsPeek {
-            devReadyDismissItem?.cancel()
-            devReadyDismissItem = nil
-        } else {
-            scheduleDevReadyDismiss()
+        let nowPinned = !peekHold.isPinned(alert.id)
+        _ = peekHold.togglePin(alert.id)
+        state.setPeekPinned(nowPinned, id: alert.id)
+        LogStore.log("peek", nowPinned ? "pinned" : "unpinned (dismissing)")
+        guard nowPinned else {
+            // Releasing is a decision, not a lapse of attention: you are done
+            // with this row, so it goes now rather than waiting out another
+            // full fade. Handing it back to the timer would have felt broken
+            // in the one case that always applies — you have to be *on* the
+            // row to click it, so hover would hold it open anyway, and nothing
+            // would happen until you moved the mouse away.
+            dismissDevReady(id: alert.id)
+            return
         }
+        devReadyDismissItem?.cancel()
+        devReadyDismissItem = nil
     }
 
     /// Opens the pill.

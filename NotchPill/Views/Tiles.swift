@@ -575,7 +575,7 @@ struct DevReadyPeekRow: View {
                                 // Pinned reads brighter because a peek that has
                                 // stopped fading needs to say so — otherwise it
                                 // looks like the overlay is stuck.
-                                Text(isPinned ? "Pinned · tap to release" : "Tap to keep open")
+                                Text(isPinned ? "Pinned · tap to dismiss" : "Tap to keep open")
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(.white.opacity(isPinned ? 0.62 : 0.38))
                             }
@@ -868,7 +868,7 @@ struct DevReadyPeekRow: View {
     private var accessibilityHint: String {
         guard alert.canJumpToSource else {
             return isPinned
-                ? "Double tap to release this notification and let it fade"
+                ? "Double tap to dismiss this notification"
                 : "Double tap to keep this notification open"
         }
         return alert.kind == .finished
