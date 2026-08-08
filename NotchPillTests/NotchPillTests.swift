@@ -2183,6 +2183,72 @@ struct SubagentPathTests {
     }
 }
 
+@Suite("Sub-agent identity from the transcript")
+struct SidechainIdentityTests {
+    /// Shaped after a real sidechain record: the flag, the agent's own id, the
+    /// *parent's* id under `sessionId`, and the agent kind on a later record.
+    private let sidechain = """
+    {"isSidechain":true,"agentId":"a085a38d","sessionId":"796e84e2","type":"user","cwd":"/p"}
+    {"isSidechain":true,"attributionAgent":"code-reviewer","type":"assistant"}
+    """
+
+    @Test("a sidechain names its agent, its kind, and the session that owns it")
+    func readsIdentity() {
+        let id = AgentSessionScanner.sidechainIdentity(in: sidechain)
+        #expect(id.isSidechain)
+        #expect(id.agentId == "a085a38d")
+        #expect(id.parentSessionId == "796e84e2")
+        #expect(id.agentType == "code-reviewer")
+    }
+
+    // The whole point of reading the flag rather than the path: a top-level
+    // session promoted to a sub-agent would be located through a parent that
+    // does not exist, and one demoted the other way would be a ping claiming
+    // to be the thing the user was waiting on.
+    @Test("a top-level session is not a sidechain whatever else it carries")
+    func topLevelIsNot() {
+        let text = """
+        {"isSidechain":false,"sessionId":"796e84e2","type":"user"}
+        {"isSidechain":false,"type":"assistant"}
+        """
+        let id = AgentSessionScanner.sidechainIdentity(in: text)
+        #expect(!id.isSidechain)
+        #expect(id.agentId == nil)
+    }
+
+    @Test("the first flag wins, so a later record cannot flip it")
+    func firstFlagWins() {
+        let text = """
+        {"isSidechain":true,"agentId":"aaa"}
+        {"isSidechain":false}
+        """
+        #expect(AgentSessionScanner.sidechainIdentity(in: text).isSidechain)
+    }
+
+    // A transcript that says nothing must read as "not a sidechain" rather
+    // than crash or guess — the path fallback covers that case.
+    @Test("garbage and silence are answered with nothing, not a guess")
+    func toleratesJunk() {
+        #expect(AgentSessionScanner.sidechainIdentity(in: "") == AgentSessionScanner.SidechainIdentity())
+        #expect(AgentSessionScanner.sidechainIdentity(in: "not json\n{oops") ==
+                AgentSessionScanner.SidechainIdentity())
+        // A record with no flag at all leaves the default in place.
+        let partial = AgentSessionScanner.sidechainIdentity(in: #"{"sessionId":"S","type":"user"}"#)
+        #expect(!partial.isSidechain)
+        #expect(partial.parentSessionId == "S")
+    }
+
+    @Test("empty strings do not count as answers")
+    func emptyValuesIgnored() {
+        let id = AgentSessionScanner.sidechainIdentity(
+            in: #"{"isSidechain":true,"agentId":"","attributionAgent":"","sessionId":""}"#)
+        #expect(id.isSidechain)
+        #expect(id.agentId == nil)
+        #expect(id.agentType == nil)
+        #expect(id.parentSessionId == nil)
+    }
+}
+
 @Suite("Pill hit rule")
 struct HitRuleTests {
     private let bounds = CGRect(x: 0, y: 0, width: 500, height: 200)

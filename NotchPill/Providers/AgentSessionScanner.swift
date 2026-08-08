@@ -16,6 +16,12 @@ actor AgentSessionScanner {
     private var taskCache: [String: (stamp: Date?, task: String?)] = [:]
     /// Sub-agent type and description by agent id; immutable once known.
     private var subagentTypeCache: [String: (type: String, task: String?)] = [:]
+    /// What a transcript said about itself, by path. A file cannot stop being
+    /// a sidechain, so this is read once and kept.
+    private var identityCache: [String: SidechainIdentity] = [:]
+    /// Agent ids whose parent transcript has already been searched, so a miss
+    /// costs one read rather than one per scan.
+    private var attemptedParentLookup: Set<String> = []
 
     private var roots: [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -28,6 +34,8 @@ actor AgentSessionScanner {
         lastDiscovery = .distantPast
         taskCache.removeAll()
         subagentTypeCache.removeAll()
+        identityCache.removeAll()
+        attemptedParentLookup.removeAll()
     }
 
     /// The whole scan, off the main actor.
@@ -112,7 +120,15 @@ actor AgentSessionScanner {
                 return nil
             }
             ledger.keep()
-            let sidechain = Self.subagentId(from: url)
+            // Ask the transcript what it is. Codex has no sidechains, so it is
+            // not read for one; the path check remains only as a fallback for
+            // a file whose records could not be parsed at all.
+            let identity = isCodex ? SidechainIdentity() : sidechainIdentity(for: url)
+            let pathAgentId = Self.subagentId(from: url)
+            let isSubagent = identity.isSidechain || (!isCodex && pathAgentId != nil)
+            let sidechain = isSubagent ? (identity.agentId ?? pathAgentId) : nil
+            // The parent is still the only place a dispatch *description*
+            // exists, so it stays worth one lookup.
             let info = sidechain.flatMap { subagentInfo(for: $0, sidechain: url) }
             let modelInfo = currentModel(in: url, isCodex: isCodex)
             return AgentSession(
@@ -128,14 +144,26 @@ actor AgentSessionScanner {
                     blockedSince: blockedSessions[sessionId],
                     now: now),
                 lastActivity: mod,
-                locatorId: sidechain == nil ? sessionId : parentSessionId(of: url),
+                // A sub-agent has no window of its own; tabbing to one means
+                // tabbing to the session that dispatched it. The records name
+                // that session outright, so the path is only the fallback.
+                locatorId: isSubagent
+                    ? (identity.parentSessionId ?? parentSessionId(of: url))
+                    : sessionId,
                 directory: workingDirectory(for: url, isCodex: isCodex),
-                subagent: info?.type,
+                // `attributionAgent` comes from the sub-agent's own transcript
+                // and is always there; the parent lookup only still matters
+                // for a transcript written before that field existed.
+                subagent: identity.agentType ?? info?.type,
                 // A sidechain has no `last-prompt` record, so without the
                 // parent's description a sub-agent row had no task line at all
-                // — and two Explores looked identical.
-                task: AgentSession.summarize(info?.task
-                                             ?? currentTask(in: url, isCodex: isCodex)),
+                // — and two Explores looked identical. The dispatch prompt in
+                // its own file covers the case where the parent has since
+                // outgrown the tail window.
+                task: AgentSession.summarize(
+                    info?.task
+                        ?? (isSubagent ? sidechainPrompt(in: url) : nil)
+                        ?? currentTask(in: url, isCodex: isCodex)),
                 toolActivity: currentToolActivity(in: url, isCodex: isCodex),
                 model: modelInfo.model,
                 effort: modelInfo.effort,
@@ -208,11 +236,109 @@ actor AgentSessionScanner {
     }
 
     /// `…/subagents/agent-<id>.jsonl` → `<id>`, or nil for a normal session.
+    ///
+    /// The layout is corroboration, not the answer. `sidechainIdentity` reads
+    /// what the transcript says about itself; this only stands in when the
+    /// records are unreadable.
     nonisolated static func subagentId(from url: URL) -> String? {
         guard url.deletingLastPathComponent().lastPathComponent == "subagents" else { return nil }
         let name = url.deletingPathExtension().lastPathComponent
         guard name.hasPrefix("agent-") else { return nil }
         return String(name.dropFirst("agent-".count))
+    }
+
+    /// What a Claude transcript says about itself.
+    ///
+    /// Telling a sub-agent apart from the session the user is actually talking
+    /// to used to be a question about the file's *path* — a transcript counted
+    /// as a sidechain if it sat in a `subagents/` directory under a name
+    /// starting `agent-`. That is a convention of one release's on-disk layout,
+    /// not a fact about the run, and getting it wrong is the expensive kind of
+    /// wrong: a sub-agent promoted to a top-level row is a notification
+    /// claiming to be the thing you were waiting on.
+    ///
+    /// Every record carries the answer directly. `isSidechain` is the flag
+    /// Claude Code itself sets, `sessionId` on a sidechain names the *parent*
+    /// session rather than the file, and `attributionAgent` names the kind of
+    /// agent running — which the sub-agent's own transcript was previously
+    /// assumed never to know.
+    struct SidechainIdentity: Equatable {
+        var isSidechain = false
+        var agentId: String?
+        /// The session this work belongs to — the one worth tabbing to.
+        var parentSessionId: String?
+        /// `code-reviewer`, `Explore`, `general-purpose`…
+        var agentType: String?
+    }
+
+    nonisolated static func sidechainIdentity(in text: String) -> SidechainIdentity {
+        var identity = SidechainIdentity()
+        var sawFlag = false
+        for line in text.split(separator: "\n") {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
+            else { continue }
+            if let flag = obj["isSidechain"] as? Bool, !sawFlag {
+                identity.isSidechain = flag
+                sawFlag = true
+            }
+            if identity.agentId == nil, let id = obj["agentId"] as? String, !id.isEmpty {
+                identity.agentId = id
+            }
+            if identity.parentSessionId == nil,
+               let id = obj["sessionId"] as? String, !id.isEmpty {
+                identity.parentSessionId = id
+            }
+            // Written on the assistant's records rather than the opening one,
+            // so this keeps reading after the flag is settled.
+            if identity.agentType == nil,
+               let type = obj["attributionAgent"] as? String, !type.isEmpty {
+                identity.agentType = type
+            }
+            if sawFlag, identity.agentId != nil,
+               identity.parentSessionId != nil, identity.agentType != nil { break }
+        }
+        return identity
+    }
+
+    /// Read once per file from the head window and kept: a transcript cannot
+    /// change its mind about being a sidechain.
+    private func sidechainIdentity(for url: URL) -> SidechainIdentity {
+        if let cached = identityCache[url.path] { return cached }
+        guard let text = text(ofHead: url) else { return SidechainIdentity() }
+        let identity = Self.sidechainIdentity(in: text)
+        identityCache[url.path] = identity
+        return identity
+    }
+
+    /// The prompt a sub-agent was dispatched with.
+    ///
+    /// A sidechain has no `last-prompt` record, and the parent's `description`
+    /// is only reachable while the call that started it is still inside the
+    /// tail window — on a parent transcript that has grown to a hundred
+    /// megabytes it usually is not. The dispatch prompt is the first thing in
+    /// the sub-agent's own file and says what it was sent to do.
+    private func sidechainPrompt(in url: URL) -> String? {
+        guard let text = text(ofHead: url) else { return nil }
+        for line in text.split(separator: "\n") {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  obj["type"] as? String == "user",
+                  let message = obj["message"] as? [String: Any] else { continue }
+            if let text = message["content"] as? String {
+                return Self.clean(text)
+            }
+            if let blocks = message["content"] as? [[String: Any]] {
+                let joined = blocks.compactMap { $0["text"] as? String }.joined(separator: " ")
+                if !joined.isEmpty { return Self.clean(joined) }
+            }
+        }
+        return nil
+    }
+
+    private func text(ofHead url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: Self.metadataReadWindow) else { return nil }
+        return String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
     }
 
     /// The kind of sub-agent this sidechain is running.
@@ -254,6 +380,12 @@ actor AgentSessionScanner {
     private func subagentInfo(for agentId: String,
                               sidechain url: URL) -> (type: String, task: String?)? {
         if let cached = subagentTypeCache[agentId] { return cached }
+        // A miss is permanent and worth remembering. The dispatch record only
+        // exists inside the parent's tail window, and a parent that has grown
+        // past it never gets shorter — so without this, every scan re-read half
+        // a megabyte of a transcript that will never hold the answer.
+        if attemptedParentLookup.contains(agentId) { return nil }
+        attemptedParentLookup.insert(agentId)
         // <project>/<session>/subagents/agent-x.jsonl → <project>/<session>.jsonl
         let sessionDir = url.deletingLastPathComponent().deletingLastPathComponent()
         let parent = sessionDir.deletingLastPathComponent()
