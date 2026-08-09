@@ -14,6 +14,15 @@ struct NowPlaying {
 
     var isEmpty: Bool { title.isEmpty && artist.isEmpty }
 
+    /// What makes this a *different song*, as opposed to the same song in a
+    /// different playback state.
+    ///
+    /// Pausing changes `NowPlaying`, so anything animating on the whole value
+    /// treats a pause exactly like a track change. It is the same reason the
+    /// pill used to slide sideways when you hit pause: the deck animated a
+    /// reflow that only a new track should ever cause.
+    var trackKey: String { title + "\u{1}" + artist }
+
     var hasProgress: Bool {
         guard let duration, duration > 0, elapsed != nil else { return false }
         return true

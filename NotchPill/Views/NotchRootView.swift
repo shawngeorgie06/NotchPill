@@ -493,7 +493,11 @@ struct ExpandedView: View {
         .padding(.top, 6)
         .padding(.bottom, 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(.easeOut(duration: 0.16), value: state.nowPlaying)
+        // Keyed on the track, not the whole value. `NowPlaying` carries
+        // `isPlaying`, so animating on it made pause reflow the entire deck —
+        // the sideways slide that reads as "skipped to the next song". Play and
+        // pause are now a local symbol morph instead; see `mediaCard`.
+        .animation(.easeOut(duration: 0.16), value: state.nowPlaying?.trackKey)
         .animation(.easeOut(duration: 0.14), value: state.appSwitchHint)
         .animation(.easeOut(duration: 0.14), value: state.frontmostApp)
         .animation(.easeOut(duration: 0.12), value: state.systemVolume)

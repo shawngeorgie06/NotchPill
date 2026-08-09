@@ -1590,7 +1590,12 @@ struct ExpandedActivityCard: View {
                         .foregroundStyle(.white.opacity(0.55))
                         .lineLimit(1)
                 }
-                if np.isPlaying { EqualizerBars(scale: readability) }
+                // The text column absorbs every spare point, so the controls
+                // sit at the trailing edge at a fixed distance from it. Without
+                // this the arrows were positioned by whatever the title happened
+                // to measure, and moved for every song.
+                .frame(maxWidth: .infinity, alignment: .leading)
+                EqualizerSlot(isPlaying: np.isPlaying, scale: readability)
                 HStack(spacing: s(2)) {
                     mediaArrowButton("chevron.left", label: "Previous track", action: actions.previous)
                     mediaArrowButton("chevron.right", label: "Next track", action: actions.next)
@@ -1598,7 +1603,8 @@ struct ExpandedActivityCard: View {
             }
             HStack(spacing: s(18)) {
                 transportButton("backward.fill", action: actions.previous)
-                transportButton(np.isPlaying ? "pause.fill" : "play.fill", size: 22, action: actions.togglePlayPause)
+                transportButton(np.isPlaying ? "pause.fill" : "play.fill", size: 22,
+                                morphing: true, action: actions.togglePlayPause)
                 transportButton("forward.fill", action: actions.next)
             }
             if np.hasProgress {
@@ -1791,15 +1797,61 @@ struct ExpandedActivityCard: View {
         return formatter.localizedString(for: date, relativeTo: Date())
     }
 
-    private func transportButton(_ symbol: String, size: CGFloat = 18, action: @escaping () -> Void) -> some View {
+    /// `morphing` is for play/pause only. SF Symbols can cross-dissolve one
+    /// glyph into the other in place, which is what a pause should look like —
+    /// a button changing its mind, not the card rearranging itself.
+    private func transportButton(_ symbol: String, size: CGFloat = 18,
+                                 morphing: Bool = false,
+                                 action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: s(size), weight: .medium))
                 .foregroundStyle(.white)
+                .modifier(SymbolMorph(enabled: morphing, symbol: symbol))
                 .frame(width: s(28), height: s(28))
                 .contentShape(Rectangle())
         }
         .buttonStyle(TransportButtonStyle())
+    }
+}
+
+/// Cross-dissolves between two SF Symbols in place.
+///
+/// `contentTransition(.symbolEffect(.replace))` needs the value it is keyed on
+/// to change, hence the explicit animation on the symbol name.
+private struct SymbolMorph: ViewModifier {
+    let enabled: Bool
+    let symbol: String
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .contentTransition(.symbolEffect(.replace))
+                .animation(.easeInOut(duration: 0.18), value: symbol)
+        } else {
+            content
+        }
+    }
+}
+
+/// The equalizer, in a slot that exists whether or not it is animating.
+///
+/// It used to be inserted and removed with playback (`if np.isPlaying`), so
+/// pausing took ten points out of the middle of the row and everything to its
+/// right slid across to close the gap. Reserving the width means pause only
+/// fades the bars out — nothing moves.
+struct EqualizerSlot: View {
+    let isPlaying: Bool
+    var scale: CGFloat = 1.0
+
+    /// Three 2pt bars with 2pt gaps, at the caller's scale.
+    static func width(scale: CGFloat) -> CGFloat { 10 * scale }
+
+    var body: some View {
+        EqualizerBars(scale: scale)
+            .opacity(isPlaying ? 1 : 0)
+            .animation(.easeInOut(duration: 0.18), value: isPlaying)
+            .frame(width: Self.width(scale: scale))
     }
 }
 
@@ -1942,8 +1994,8 @@ struct CollapsedChipView: View {
             HStack(spacing: s(6)) {
                 leading
                 mediaLabels
-                if case .media(let np) = chip, np.isPlaying {
-                    EqualizerBars(scale: readability)
+                if case .media(let np) = chip {
+                    EqualizerSlot(isPlaying: np.isPlaying, scale: readability)
                 }
             }
             if case .media(let np) = chip, np.hasProgress {

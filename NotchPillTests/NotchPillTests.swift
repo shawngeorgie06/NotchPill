@@ -2183,6 +2183,37 @@ struct SubagentPathTests {
     }
 }
 
+@Suite("Media track identity")
+struct TrackKeyTests {
+    private func song(_ title: String, _ artist: String, playing: Bool) -> NowPlaying {
+        NowPlaying(title: title, artist: artist, isPlaying: playing)
+    }
+
+    // The bug this exists to prevent: the deck animated on the whole
+    // `NowPlaying` value, so hitting pause reflowed the card exactly the way a
+    // new track does — it read as a skip.
+    @Test("pausing is not a track change")
+    func pauseKeepsTheKey() {
+        let playing = song("Friends", "Chase Atlantic", playing: true)
+        let paused = song("Friends", "Chase Atlantic", playing: false)
+        #expect(playing != paused)          // the value does change…
+        #expect(playing.trackKey == paused.trackKey)  // …but the track does not
+    }
+
+    @Test("a different song is a different key")
+    func differentSongDiffers() {
+        #expect(song("A", "X", playing: true).trackKey != song("B", "X", playing: true).trackKey)
+        #expect(song("A", "X", playing: true).trackKey != song("A", "Y", playing: true).trackKey)
+    }
+
+    // Two songs must not collide just because their title and artist can be
+    // concatenated the same way — hence a separator no metadata contains.
+    @Test("the title and artist boundary cannot be forged")
+    func noBoundaryCollision() {
+        #expect(song("A", "BC", playing: true).trackKey != song("AB", "C", playing: true).trackKey)
+    }
+}
+
 @Suite("Sub-agent identity from the transcript")
 struct SidechainIdentityTests {
     /// Shaped after a real sidechain record: the flag, the agent's own id, the
