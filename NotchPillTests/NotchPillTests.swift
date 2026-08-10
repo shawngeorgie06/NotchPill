@@ -2183,6 +2183,91 @@ struct SubagentPathTests {
     }
 }
 
+@Suite("cmux session index")
+struct CmuxIndexTests {
+    /// Shaped after the real file: title and tty sit on the panel, the agent's
+    /// session id sits under `terminal.agent`.
+    private let real = Data("""
+    {"windows":[{"tabManager":{"workspaces":[{"panels":[
+      {"id":"10F486A2","title":"⠐ finish-approvals-toggle","ttyName":"ttys000",
+       "directory":"/Users/me","terminal":{"agent":{"kind":"claude","sessionId":"796e84e2"}}},
+      {"id":"64FF7B2E","title":"✳ Improve NJIT room finder usability","ttyName":"ttys002",
+       "directory":"/Users/me/Downloads","terminal":{"agent":{"sessionId":"3d9a4039"}}}
+    ]}]}}]}
+    """.utf8)
+
+    @Test("a session resolves to its pane, name and directory")
+    func parsesPanes() {
+        let index = CmuxIndex.parse(real)
+        let pane = index.pane(forSession: "796e84e2")
+        #expect(pane?.panelId == "10F486A2")
+        #expect(pane?.title == "finish-approvals-toggle")
+        #expect(pane?.ttyName == "ttys000")
+        #expect(index.pane(forSession: "3d9a4039")?.title == "Improve NJIT room finder usability")
+    }
+
+    // cmux prefixes the title with a spinner frame that changes while the agent
+    // works. Keeping it would make the row's name flicker every tick.
+    @Test("the status glyph is stripped, the words are kept")
+    func stripsGlyph() {
+        #expect(CmuxIndex.cleanTitle("✳ Improve things") == "Improve things")
+        #expect(CmuxIndex.cleanTitle("⠐ finish-approvals-toggle") == "finish-approvals-toggle")
+        #expect(CmuxIndex.cleanTitle("no glyph here") == "no glyph here")
+        #expect(CmuxIndex.cleanTitle("✳   ") == nil)
+        #expect(CmuxIndex.cleanTitle(nil) == nil)
+    }
+
+    // Another app's private state file. A shape we do not recognise must yield
+    // nothing rather than a wrong pane — focusing the wrong terminal is worse
+    // than focusing none.
+    @Test("unknown or broken shapes yield nothing")
+    func toleratesJunk() {
+        #expect(CmuxIndex.parse(Data("not json".utf8)).isEmpty)
+        #expect(CmuxIndex.parse(Data("{}".utf8)).isEmpty)
+        #expect(CmuxIndex.parse(Data(#"{"windows":[{"tabManager":{"workspaces":[]}}]}"#.utf8)).isEmpty)
+        // A pane with no agent is a plain shell, not a session.
+        let shell = #"{"windows":[{"tabManager":{"workspaces":[{"panels":[{"id":"A","title":"zsh"}]}]}}]}"#
+        #expect(CmuxIndex.parse(Data(shell.utf8)).isEmpty)
+    }
+
+    @Test("an unknown session has no pane")
+    func unknownSession() {
+        let index = CmuxIndex.parse(real)
+        #expect(index.pane(forSession: "nope") == nil)
+        #expect(index.pane(forSession: nil) == nil)
+        #expect(index.pane(forSession: "") == nil)
+    }
+}
+
+@Suite("Agent row naming")
+struct AgentDisplayNameTests {
+    private func session(subagent: String? = nil, title: String? = nil) -> AgentSession {
+        AgentSession(id: "s", agent: "claude-code", project: "NotchPill",
+                     state: .working, lastActivity: Date(),
+                     subagent: subagent, sessionTitle: title)
+    }
+
+    // The complaint: three sessions in one repo were three rows all reading
+    // "Claude", separable only by a task line that is often missing.
+    @Test("the terminal's name for the session beats the vendor")
+    func titleBeatsVendor() {
+        #expect(session().displayName == "Claude")
+        #expect(session(title: "Improve room finder").displayName == "Improve room finder")
+    }
+
+    // "which agent is this?" means the persona doing the work.
+    @Test("a running sub-agent is still the most specific answer")
+    func subagentWins() {
+        #expect(session(subagent: "code-reviewer", title: "Improve room finder")
+            .displayName == "Code Reviewer")
+    }
+
+    @Test("an empty title is not a name")
+    func emptyTitleIgnored() {
+        #expect(session(title: "").displayName == "Claude")
+    }
+}
+
 @Suite("Finished peek wording")
 struct FinishedSubtitleTests {
     private func identity(sidechain: Bool, type: String? = nil)

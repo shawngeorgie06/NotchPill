@@ -22,6 +22,11 @@ actor AgentSessionScanner {
     /// Agent ids whose parent transcript has already been searched, so a miss
     /// costs one read rather than one per scan.
     private var attemptedParentLookup: Set<String> = []
+    /// cmux's view of which pane each session runs in. Re-read on the same
+    /// cadence as the directory walk: it changes when panes open or are
+    /// renamed, which is rare, and it is another app's file.
+    private var cmux = CmuxIndex()
+    private var lastCmuxLoad = Date.distantPast
 
     private var roots: [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -87,6 +92,10 @@ actor AgentSessionScanner {
                 LogStore.log("scan", ledger.summary)
             }
             lastLedger = ledger
+        }
+        if now.timeIntervalSince(lastCmuxLoad) >= rediscoverInterval {
+            cmux = CmuxIndex.load()
+            lastCmuxLoad = now
         }
         return transcripts(now: now).compactMap { url -> AgentSession? in
             let isCodex = url.path.contains("/.codex/")
@@ -165,6 +174,17 @@ actor AgentSessionScanner {
                         ?? (isSubagent ? sidechainPrompt(in: url) : nil)
                         ?? currentTask(in: url, isCodex: isCodex)),
                 toolActivity: currentToolActivity(in: url, isCodex: isCodex),
+                // Keyed on the session the *user* is in, so a sub-agent inherits
+                // the pane its orchestrator occupies — which is the only pane
+                // either of them has. A sub-agent keeps its own name, though:
+                // "Code Reviewer" says more than the session's title.
+                sessionTitle: isSubagent
+                    ? nil
+                    : cmux.pane(forSession: sessionId)?.title,
+                hostPaneId: cmux.pane(
+                    forSession: isSubagent
+                        ? (identity.parentSessionId ?? parentSessionId(of: url) ?? sessionId)
+                        : sessionId)?.panelId,
                 model: modelInfo.model,
                 effort: modelInfo.effort,
                 contextTokens: contextTokens(in: url, isCodex: isCodex),

@@ -40,7 +40,8 @@ enum AgentSessionLocator {
     static func focus(sessionId: String?,
                       fallbackBundleId: String?,
                       directory: String? = nil,
-                      agent: String? = nil) -> Bool {
+                      agent: String? = nil,
+                      paneId: String? = nil) -> Bool {
         let table = processTable()
         let candidateEntries: [Entry] = sessionId.map { candidates(forSessionId: $0, in: table) } ?? []
         let located = candidateEntries.lazy.compactMap { entry in
@@ -106,10 +107,17 @@ enum AgentSessionLocator {
         // cmux exposes each terminal's working directory but not its TTY, so
         // the session is matched by directory instead. Ambiguity is declined
         // rather than guessed at — see `cmuxFocusScript`.
-        if target == "com.cmuxterm.app",
-           let directory, !directory.isEmpty,
-           runAppleScript(cmuxFocusScript(directory: directory)) {
-            return true
+        if target == "com.cmuxterm.app" {
+            // The exact pane first, when cmux told us which one it is.
+            if let paneId, !paneId.isEmpty,
+               runAppleScript(cmuxFocusScript(paneId: paneId)) {
+                LogStore.log("focus", "cmux pane \(paneId)")
+                return true
+            }
+            if let directory, !directory.isEmpty,
+               runAppleScript(cmuxFocusScript(directory: directory)) {
+                return true
+            }
         }
 
         // The AppleScript paths above each `activate` the target themselves, so
@@ -337,6 +345,35 @@ enum AgentSessionLocator {
     /// exactly one. Landing you in the wrong tab is worse than landing you in
     /// the right app: the caller falls through to plain activation, which is
     /// the same thing an unscriptable terminal gets.
+    /// Focuses one cmux pane by its stable id.
+    ///
+    /// Strictly better than the directory match below, which cannot separate
+    /// two agents working in the same repo and correctly declines rather than
+    /// guess — leaving the tap doing nothing. cmux records which pane each
+    /// session runs in, and its `terminal` class exposes that same id to
+    /// AppleScript, so the pane can be named outright.
+    static func cmuxFocusScript(paneId: String) -> String {
+        let escaped = escapedAppleScriptString(paneId)
+        return """
+        tell application "cmux"
+            activate
+            repeat with cmuxWindow in windows
+                repeat with cmuxTab in tabs of cmuxWindow
+                    repeat with cmuxTerminal in terminals of cmuxTab
+                        try
+                            if id of cmuxTerminal is "\(escaped)" then
+                                focus cmuxTerminal
+                                return true
+                            end if
+                        end try
+                    end repeat
+                end repeat
+            end repeat
+            return false
+        end tell
+        """
+    }
+
     static func cmuxFocusScript(directory: String) -> String {
         let escaped = escapedAppleScriptString(directory)
         return """

@@ -64,14 +64,26 @@ struct AgentSession: Equatable, Identifiable {
     var task: String?
     /// Latest Read/Edit/Write/Bash-style action, when the transcript exposes it.
     var toolActivity: AgentToolActivity?
+    /// The host terminal's own name for this session, when it has one —
+    /// cmux auto-names every session after the work it is doing. Nothing in a
+    /// transcript carries this: the agent does not name itself.
+    var sessionTitle: String?
+    /// The host terminal's stable id for the pane this runs in, so a tap can
+    /// focus that exact pane instead of matching on a directory two sessions
+    /// might share.
+    var hostPaneId: String?
 
     /// How the agent is named on the row. The raw values are wire identifiers,
     /// not labels: "claude-code" reads like a package name.
-    /// The name shown on the row. A running sub-agent is the more specific and
-    /// more useful answer — "which agent is this?" means the persona doing the
-    /// work, not the vendor.
+    ///
+    /// Most specific answer wins. A running sub-agent is the most specific —
+    /// "which agent is this?" means the persona doing the work. Failing that,
+    /// the terminal's name for the session says what it is *about*, which beats
+    /// the vendor: three sessions in one repo used to be three rows all reading
+    /// "Claude", distinguishable only by a task line that is often missing.
     var displayName: String {
         if let subagent, !subagent.isEmpty { return prettify(subagent) }
+        if let sessionTitle, !sessionTitle.isEmpty { return sessionTitle }
         return agentName
     }
 
