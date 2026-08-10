@@ -45,6 +45,10 @@ final class AgentTranscriptProvider {
     /// Cached result of walking the transcript trees; see `transcripts()`.
     private var activeFiles: [URL]?
     private var lastDiscovery = Date.distantPast
+    /// cmux's name for each session, so a peek can say what finished rather
+    /// than which folder it happened in.
+    private var cmux = CmuxIndex()
+    private var lastCmuxLoad = Date.distantPast
     private let rediscoverInterval: TimeInterval = 15
 
     private var roots: [URL] {
@@ -262,6 +266,18 @@ final class AgentTranscriptProvider {
         return AgentSession.prettifyAgentType(type) + " finished" + suffix
     }
 
+    /// cmux's name for a session, cached on the same cadence as the walk.
+    ///
+    /// Re-read rather than held forever: cmux renames a session as its work
+    /// changes, and a peek carrying last hour's name is worse than none.
+    private func cmuxTitle(forSession id: String) -> String? {
+        if Date().timeIntervalSince(lastCmuxLoad) >= 15 {
+            cmux = CmuxIndex.load()
+            lastCmuxLoad = Date()
+        }
+        return cmux.pane(forSession: id)?.title
+    }
+
     /// Builds a peek matching what the hooks emit, so the two dedup against
     /// each other rather than double-peeking.
     private func alert(for url: URL) -> DevReadyAlert? {
@@ -289,10 +305,14 @@ final class AgentTranscriptProvider {
         guard let project = projectName(for: url, isCodex: isCodex) else { return nil }
         let branch = gitBranch(for: url, isCodex: isCodex)
         return DevReadyAlert(
+            // The project folder was the whole title, and for a session run
+            // from a home directory that is the word "home" — which says
+            // nothing about what just finished. cmux names each session after
+            // its work, so prefer that when it has one.
             title: isCodex ? Self.codexFinishedTitle(
                 project: project,
                 task: tailText(of: url).flatMap(AgentSessionScanner.codexLastPrompt(in:))
-            ) : project,
+            ) : (cmuxTitle(forSession: sessionId) ?? project),
             // Both fire, but they must never read the same. A sub-agent says
             // which one it was — "Code Reviewer finished" — so a ping mid-run
             // is not mistaken for the turn being over.
