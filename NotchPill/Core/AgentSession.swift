@@ -77,6 +77,13 @@ struct AgentSession: Equatable, Identifiable {
 
     /// "code-reviewer" → "Code Reviewer".
     private func prettify(_ slug: String) -> String {
+        AgentSession.prettifyAgentType(slug)
+    }
+
+    /// Shared with the peek path, which names a finishing sub-agent the same
+    /// way the row does — the two must agree or the same agent reads as two
+    /// different things depending on where you saw it.
+    nonisolated static func prettifyAgentType(_ slug: String) -> String {
         slug.split(whereSeparator: { $0 == "-" || $0 == "_" })
             .map { $0.prefix(1).uppercased() + $0.dropFirst() }
             .joined(separator: " ")

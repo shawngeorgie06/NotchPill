@@ -2183,6 +2183,57 @@ struct SubagentPathTests {
     }
 }
 
+@Suite("Finished peek wording")
+struct FinishedSubtitleTests {
+    private func identity(sidechain: Bool, type: String? = nil)
+    -> AgentSessionScanner.SidechainIdentity {
+        AgentSessionScanner.SidechainIdentity(isSidechain: sidechain, agentType: type)
+    }
+
+    @Test("the orchestrator finishing says only that")
+    func orchestrator() {
+        #expect(AgentTranscriptProvider.finishedSubtitle(
+            identity: identity(sidechain: false), branch: "main") == "finished · main")
+    }
+
+    // The bug: a sub-agent's transcript sits under the session's directory and
+    // the walk is recursive, so four Explores fired four peeks that read
+    // exactly like the turn being over.
+    @Test("a named sub-agent says which one finished")
+    func namedSubagent() {
+        #expect(AgentTranscriptProvider.finishedSubtitle(
+            identity: identity(sidechain: true, type: "code-reviewer"),
+            branch: "main") == "Code Reviewer finished · main")
+    }
+
+    @Test("an unnamed sub-agent still does not borrow the orchestrator's wording")
+    func unnamedSubagent() {
+        #expect(AgentTranscriptProvider.finishedSubtitle(
+            identity: identity(sidechain: true), branch: nil) == "subagent finished")
+        #expect(AgentTranscriptProvider.finishedSubtitle(
+            identity: identity(sidechain: true, type: ""), branch: nil) == "subagent finished")
+    }
+
+    @Test("no branch, no separator left dangling")
+    func branchless() {
+        #expect(AgentTranscriptProvider.finishedSubtitle(
+            identity: identity(sidechain: false), branch: nil) == "finished")
+    }
+
+    // Whatever else changes, these two must never render the same string —
+    // that identity is the entire point of the fix.
+    @Test("the two can never be confused")
+    func neverEqual() {
+        let orchestrator = AgentTranscriptProvider.finishedSubtitle(
+            identity: identity(sidechain: false), branch: "main")
+        for type in ["general-purpose", "Explore", "code-reviewer", ""] {
+            let sub = AgentTranscriptProvider.finishedSubtitle(
+                identity: identity(sidechain: true, type: type), branch: "main")
+            #expect(sub != orchestrator)
+        }
+    }
+}
+
 @Suite("Media track identity")
 struct TrackKeyTests {
     private func song(_ title: String, _ artist: String, playing: Bool) -> NowPlaying {

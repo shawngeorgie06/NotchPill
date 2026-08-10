@@ -246,6 +246,22 @@ final class AgentTranscriptProvider {
         return String(decoding: data, as: UTF8.self)
     }
 
+    /// "finished · main", or "Code Reviewer finished · main" for a sub-agent.
+    ///
+    /// An unnamed sidechain still says "subagent" rather than borrowing the
+    /// orchestrator's wording, matching what `claude-code-notify.sh` emits on
+    /// the hook path so the two dedup against each other instead of
+    /// double-peeking.
+    nonisolated static func finishedSubtitle(identity: AgentSessionScanner.SidechainIdentity,
+                                             branch: String?) -> String {
+        let suffix = branch.map { " · \($0)" } ?? ""
+        guard identity.isSidechain else { return "finished" + suffix }
+        guard let type = identity.agentType, !type.isEmpty else {
+            return "subagent finished" + suffix
+        }
+        return AgentSession.prettifyAgentType(type) + " finished" + suffix
+    }
+
     /// Builds a peek matching what the hooks emit, so the two dedup against
     /// each other rather than double-peeking.
     private func alert(for url: URL) -> DevReadyAlert? {
@@ -253,7 +269,22 @@ final class AgentTranscriptProvider {
         // Codex's filename is `rollout-<timestamp>-<id>`; the hooks send the bare
         // id, and these two must match or the peeks won't dedup against each
         // other. Claude Code's filename *is* the session id.
+        // A sub-agent's transcript lives under the session it belongs to, and
+        // this walk is recursive — so every Explore and reviewer that finished
+        // used to fire a peek indistinguishable from the whole turn ending.
+        // Four sub-agents meant four "finished" pings before the orchestrator
+        // had done anything, and each carried its own `agent-…` filename as the
+        // session id, which no window can be resolved from.
+        let identity = isCodex
+            ? AgentSessionScanner.SidechainIdentity()
+            // The tail rather than the head: every record carries `isSidechain`,
+            // `agentId` and the parent's `sessionId`, so the newest ones answer
+            // this as well as the first and are already being read here.
+            : tailText(of: url)
+                .map(AgentSessionScanner.sidechainIdentity(in:))
+                ?? AgentSessionScanner.SidechainIdentity()
         let sessionId = (isCodex ? firstValue(in: url, key: "id") : nil)
+            ?? (identity.isSidechain ? identity.parentSessionId : nil)
             ?? url.deletingPathExtension().lastPathComponent
         guard let project = projectName(for: url, isCodex: isCodex) else { return nil }
         let branch = gitBranch(for: url, isCodex: isCodex)
@@ -262,7 +293,10 @@ final class AgentTranscriptProvider {
                 project: project,
                 task: tailText(of: url).flatMap(AgentSessionScanner.codexLastPrompt(in:))
             ) : project,
-            subtitle: "finished" + (branch.map { " · \($0)" } ?? ""),
+            // Both fire, but they must never read the same. A sub-agent says
+            // which one it was — "Code Reviewer finished" — so a ping mid-run
+            // is not mistaken for the turn being over.
+            subtitle: Self.finishedSubtitle(identity: identity, branch: branch),
             source: isCodex ? "Codex" : "Claude Code",
             agent: isCodex ? "codex" : "claude-code",
             // Deliberately no bundleId: nothing here says which terminal the
