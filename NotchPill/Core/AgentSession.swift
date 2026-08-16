@@ -124,6 +124,10 @@ struct AgentSession: Equatable, Identifiable {
     var model: String?
     /// Reasoning effort, where the agent records one: `low`, `medium`, `high`.
     var effort: String?
+    /// How the session handles permission prompts, as its transcript reports
+    /// it: `default`, `plan`, `acceptEdits`, `bypassPermissions`. Nil for
+    /// agents that do not record one.
+    var permissionMode: String?
     /// Live context size in tokens: everything the next request will carry —
     /// prompt plus cache. The number people actually want from a running
     /// session, because it is the one that ends it: a session near the window
@@ -144,9 +148,68 @@ struct AgentSession: Equatable, Identifiable {
         return String(format: "%.1fM", Double(tokens) / 1_000_000)
     }
 
+    /// How full the context is, as a share of the window — the number that
+    /// decides the session's fate.
+    ///
+    /// `157k ctx` is only meaningful to someone who has memorised the model's
+    /// window; the same figure is comfortable on one model and about to
+    /// compact on another. Falls back to the raw count when the window is not
+    /// known, because a number you have to interpret still beats none.
     var contextLabel: String? {
         guard let contextTokens, contextTokens > 0 else { return nil }
-        return Self.compactTokens(contextTokens) + " ctx"
+        guard let fraction = contextFraction else {
+            return Self.compactTokens(contextTokens) + " ctx"
+        }
+        return "\(Int((fraction * 100).rounded()))% ctx"
+    }
+
+    /// Nil when the model is unrecognised. Deliberately not guessed: a
+    /// percentage against the wrong window is worse than no percentage,
+    /// because it looks authoritative.
+    var contextFraction: Double? {
+        guard let contextTokens, contextTokens > 0,
+              let window = contextWindow, window > 0 else { return nil }
+        return min(1, Double(contextTokens) / Double(window))
+    }
+
+    /// Past this, the session is close enough to compaction that it is worth
+    /// knowing before you hand it more work.
+    var isContextTight: Bool { (contextFraction ?? 0) >= 0.8 }
+
+    /// The window the running model carries, in tokens.
+    ///
+    /// A table rather than anything read from the transcript: Claude Code does
+    /// not record its own limit. Matched on the family, so a new dated build
+    /// of a known model keeps working without an edit here.
+    var contextWindow: Int? {
+        guard let model = model?.lowercased(), !model.isEmpty else { return nil }
+        if model.contains("claude") || model.contains("opus")
+            || model.contains("sonnet") || model.contains("haiku") {
+            return 200_000
+        }
+        return nil
+    }
+
+    /// How much the agent will stop to ask — and the only thing on the card
+    /// that says whether it is safe to walk away from.
+    ///
+    /// `default` is omitted: it is the mode where the agent asks, which is
+    /// what everyone already assumes. A badge is worth drawing only when the
+    /// answer is surprising.
+    var permissionLabel: String? {
+        switch permissionMode?.lowercased() {
+        case "bypasspermissions": return "bypass"
+        case "acceptedits": return "auto-edit"
+        case "plan": return "plan"
+        default: return nil
+        }
+    }
+
+    /// True when the mode means the agent will act without asking. Drawn in
+    /// warning colour, unlike `plan`, which is the cautious end of the scale.
+    var isUnsupervised: Bool {
+        let mode = permissionMode?.lowercased()
+        return mode == "bypasspermissions" || mode == "acceptedits"
     }
 
     var runtimeLabel: String? {

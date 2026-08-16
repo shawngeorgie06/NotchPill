@@ -7458,3 +7458,74 @@ struct EffortLabelTests {
         #expect(session(model: nil, effort: "high").modelBaseLabel == nil)
     }
 }
+
+@Suite("context pressure and permission mode")
+struct SessionSafetyTests {
+    private func session(model: String?, tokens: Int?, mode: String? = nil) -> AgentSession {
+        var s = AgentSession(id: "s", agent: "claude-code", project: "p",
+                             state: .working, lastActivity: Date())
+        s.model = model
+        s.contextTokens = tokens
+        s.permissionMode = mode
+        return s
+    }
+
+    /// The point of the change: a share of the window, not a raw count that
+    /// only means something if you have memorised the model's limit.
+    @Test func contextReadsAsAShareOfTheWindow() {
+        #expect(session(model: "claude-opus-5", tokens: 100_000).contextLabel == "50% ctx")
+        #expect(session(model: "claude-opus-5", tokens: 160_000).contextLabel == "80% ctx")
+    }
+
+    /// A percentage against a guessed window is worse than none, because it
+    /// looks authoritative. Unknown models keep the honest raw figure.
+    @Test func anUnknownModelKeepsTheRawCount() {
+        #expect(session(model: "some-new-model", tokens: 100_000).contextLabel == "100k ctx")
+        #expect(session(model: nil, tokens: 100_000).contextLabel == "100k ctx")
+        #expect(session(model: "claude-opus-5", tokens: nil).contextLabel == nil)
+    }
+
+    @Test func tightnessTripsAtEightyPercent() {
+        #expect(session(model: "claude-opus-5", tokens: 158_000).isContextTight == false)
+        #expect(session(model: "claude-opus-5", tokens: 160_000).isContextTight)
+        // Unknown window cannot be tight — it would be a guess.
+        #expect(session(model: "mystery", tokens: 5_000_000).isContextTight == false)
+        // A session over its window reports full, never more.
+        #expect(session(model: "claude-opus-5", tokens: 400_000).contextLabel == "100% ctx")
+    }
+
+    /// `default` is the mode where the agent asks — what everyone assumes. A
+    /// badge on every row would teach the eye to skip badges entirely.
+    @Test func onlySurprisingModesEarnABadge() {
+        #expect(session(model: nil, tokens: nil, mode: "default").permissionLabel == nil)
+        #expect(session(model: nil, tokens: nil, mode: nil).permissionLabel == nil)
+        #expect(session(model: nil, tokens: nil, mode: "bypassPermissions")
+            .permissionLabel == "bypass")
+        #expect(session(model: nil, tokens: nil, mode: "acceptEdits")
+            .permissionLabel == "auto-edit")
+        #expect(session(model: nil, tokens: nil, mode: "plan").permissionLabel == "plan")
+    }
+
+    /// Plan mode is the cautious end of the scale, so it must not be warned
+    /// about in the same colour as an agent that never stops to ask.
+    @Test func onlyUnaskingModesCountAsUnsupervised() {
+        #expect(session(model: nil, tokens: nil, mode: "bypassPermissions").isUnsupervised)
+        #expect(session(model: nil, tokens: nil, mode: "acceptEdits").isUnsupervised)
+        #expect(session(model: nil, tokens: nil, mode: "plan").isUnsupervised == false)
+        #expect(session(model: nil, tokens: nil, mode: "default").isUnsupervised == false)
+    }
+
+    /// Shaped after the real transcript, where the mode rides on prompt
+    /// records rather than every message — and the newest one wins, because a
+    /// plan-mode session that was approved is no longer in plan mode.
+    @Test func newestRecordedModeWins() {
+        let text = """
+        {"type":"user","permissionMode":"plan","message":{"role":"user"}}
+        {"type":"assistant","message":{"role":"assistant"}}
+        {"type":"user","permissionMode":"bypassPermissions","message":{"role":"user"}}
+        """
+        #expect(AgentSessionScanner.permissionMode(in: text) == "bypassPermissions")
+        #expect(AgentSessionScanner.permissionMode(in: "{\"type\":\"user\"}") == nil)
+        #expect(AgentSessionScanner.permissionMode(in: "not json") == nil)
+    }
+}

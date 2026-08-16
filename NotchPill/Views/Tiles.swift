@@ -1561,12 +1561,51 @@ struct ExpandedActivityCard: View {
     @ViewBuilder
     private func agentMetricsLine(_ session: AgentSession) -> some View {
         let parts = [session.runtimeLabel, session.contextLabel].compactMap { $0 }
-        if !parts.isEmpty {
-            Text(parts.joined(separator: " · "))
-                .font(.system(size: 8.5 * textScale, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.38))
+        if !parts.isEmpty || session.permissionLabel != nil {
+            HStack(spacing: s(4)) {
+                if !parts.isEmpty {
+                    Text(parts.joined(separator: " · "))
+                        .font(.system(size: 8.5 * textScale, weight: .medium,
+                                      design: .monospaced))
+                        // A session near its window is the one about to compact
+                        // and lose the thread, so at that point the figure stops
+                        // being trivia and is drawn like it matters.
+                        .foregroundStyle(session.isContextTight
+                            ? Color.orange.opacity(0.9)
+                            : .white.opacity(0.38))
+                        .lineLimit(1)
+                }
+                agentPermissionBadge(session)
+            }
+            .padding(.leading, s(12))
+        }
+    }
+
+    /// Whether the agent will stop and ask — the one thing on the row that
+    /// says if it is safe to walk away from.
+    ///
+    /// Only drawn when the answer is surprising. `default` is the mode where
+    /// the agent asks, which is what everyone already assumes, so a badge there
+    /// would be noise on every row and teach the eye to skip the badge
+    /// entirely. `bypass` and `auto-edit` are warned about; `plan` is the
+    /// cautious end of the scale and is drawn calmly.
+    @ViewBuilder
+    private func agentPermissionBadge(_ session: AgentSession) -> some View {
+        if let label = session.permissionLabel {
+            let tint = session.isUnsupervised ? Color.orange : Color.cyan
+            Text(label)
+                .font(.system(size: 8 * textScale, weight: .semibold))
+                .foregroundStyle(tint.opacity(0.95))
+                .padding(.horizontal, s(4))
+                .padding(.vertical, s(1))
+                .background(tint.opacity(0.16),
+                            in: Capsule())
+                .overlay(Capsule().stroke(tint.opacity(0.35), lineWidth: 0.5))
                 .lineLimit(1)
-                .padding(.leading, s(12))
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityLabel(session.isUnsupervised
+                    ? "Runs without asking: \(label)"
+                    : "Permission mode \(label)")
         }
     }
 

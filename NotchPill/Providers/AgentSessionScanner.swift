@@ -199,6 +199,7 @@ actor AgentSessionScanner {
                         : sessionId),
                 model: modelInfo.model,
                 effort: modelInfo.effort,
+                permissionMode: modelInfo.permissionMode,
                 contextTokens: contextTokens(in: url, isCodex: isCodex),
                 startedAt: created(url))
         }
@@ -487,9 +488,15 @@ actor AgentSessionScanner {
     /// session — switching model, or a sub-agent running on a different one
     /// than its parent — and the row should say what is running now, not what
     /// it started on.
-    private func currentModel(in url: URL, isCodex: Bool) -> (model: String?, effort: String?) {
-        guard let text = text(of: url, tail: 262_144) else { return (nil, nil) }
-        return isCodex ? Self.codexModel(in: text) : Self.claudeModel(in: text)
+    private func currentModel(in url: URL, isCodex: Bool)
+        -> (model: String?, effort: String?, permissionMode: String?) {
+        guard let text = text(of: url, tail: 262_144) else { return (nil, nil, nil) }
+        let parsed = isCodex ? Self.codexModel(in: text) : Self.claudeModel(in: text)
+        // Same text, so the mode costs no extra read. Codex has no equivalent
+        // field in its transcript, and inventing one would be worse than the
+        // badge simply not appearing.
+        let mode = isCodex ? nil : Self.permissionMode(in: text)
+        return (parsed.model, parsed.effort, mode)
     }
 
     /// Claude Code puts the model inside `message` and the effort beside it at
@@ -598,6 +605,23 @@ actor AgentSessionScanner {
     /// Code's opening record has no `timestamp` field at all.
     private func created(_ url: URL) -> Date? {
         (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
+    }
+
+    /// The permission mode the session is running under.
+    ///
+    /// Read newest-first, because it changes mid session — a plan-mode session
+    /// that was approved is no longer in plan mode, and the row has to say
+    /// what is true now. Claude Code records it on prompt records rather than
+    /// every message, so this scans for the first one that carries it.
+    nonisolated static func permissionMode(in text: String) -> String? {
+        for line in text.split(separator: "\n").reversed() {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8))
+                    as? [String: Any],
+                  let mode = object["permissionMode"] as? String,
+                  !mode.isEmpty else { continue }
+            return mode
+        }
+        return nil
     }
 
     /// The live context size: what the next request will carry.
