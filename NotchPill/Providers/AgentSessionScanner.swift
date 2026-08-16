@@ -180,7 +180,6 @@ actor AgentSessionScanner {
                     info?.task
                         ?? (isSubagent ? sidechainPrompt(in: url) : nil)
                         ?? currentTask(in: url, isCodex: isCodex)),
-                toolActivity: currentToolActivity(in: url, isCodex: isCodex),
                 // Keyed on the session the *user* is in, so a sub-agent inherits
                 // the pane its orchestrator occupies — which is the only pane
                 // either of them has. A sub-agent keeps its own name, though:
@@ -482,11 +481,6 @@ actor AgentSessionScanner {
     /// The latest tool call answers “what is it doing?” more usefully than a
     /// generic working dot. It remains a one-line local summary, never a full
     /// transcript replay.
-    private func currentToolActivity(in url: URL, isCodex: Bool) -> AgentToolActivity? {
-        guard let text = text(of: url, tail: 262_144) else { return nil }
-        return isCodex ? Self.codexToolActivity(in: text) : Self.claudeToolActivity(in: text)
-    }
-
     /// The model and effort the session is currently running.
     ///
     /// Read from the newest record backwards, because both can change mid
@@ -527,76 +521,6 @@ actor AgentSessionScanner {
             return (model, effort)
         }
         return (nil, nil)
-    }
-
-    nonisolated static func claudeToolActivity(in text: String) -> AgentToolActivity? {
-        for line in text.split(separator: "\n").reversed() {
-            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-                  let message = obj["message"] as? [String: Any],
-                  let content = message["content"] as? [[String: Any]] else { continue }
-            for block in content.reversed() where block["type"] as? String == "tool_use" {
-                guard let name = block["name"] as? String else { continue }
-                return toolActivity(name: name, input: block["input"] as? [String: Any])
-            }
-        }
-        return nil
-    }
-
-    nonisolated static func codexToolActivity(in text: String) -> AgentToolActivity? {
-        for line in text.split(separator: "\n").reversed() {
-            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-                  let payload = obj["payload"] as? [String: Any],
-                  payload["type"] as? String == "custom_tool_call",
-                  let name = payload["name"] as? String else { continue }
-            let input = (payload["input"] as? String).flatMap {
-                try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
-            }
-            return toolActivity(name: name, input: input, rawInput: payload["input"] as? String)
-        }
-        return nil
-    }
-
-    nonisolated private static func toolActivity(name: String,
-                                                 input: [String: Any]?,
-                                                 rawInput: String? = nil) -> AgentToolActivity {
-        let label: String
-        switch name.lowercased() {
-        case "exec", "bash", "shell", "run_command": label = "Bash"
-        case "read", "read_file": label = "Read"
-        case "edit", "apply_patch": label = "Edit"
-        case "write", "write_file": label = "Write"
-        case "glob": label = "Find"
-        case "grep", "search": label = "Search"
-        default: label = name
-        }
-        let raw = ["file_path", "path", "cmd", "command", "pattern", "query"]
-            .compactMap { input?[$0] as? String }
-            .first
-            ?? command(in: rawInput)
-        return AgentToolActivity(tool: label, detail: AgentSession.summarize(raw, limit: 46))
-    }
-
-    /// Desktop Codex serializes custom tool calls as a JavaScript expression
-    /// (`tools.exec_command({"cmd":"…"})`), not as the JSON object used by
-    /// its CLI transcript. Recover the one named argument we render, without
-    /// trying to interpret or execute any of that expression.
-    nonisolated private static func command(in text: String?) -> String? {
-        guard let text, let key = text.range(of: "\"cmd\"") else { return nil }
-        let afterKey = text[key.upperBound...]
-        guard let colon = afterKey.firstIndex(of: ":") else { return nil }
-        let afterColon = afterKey[afterKey.index(after: colon)...]
-        guard let opening = afterColon.firstIndex(of: "\"") else { return nil }
-
-        var escaped = ""
-        var isEscaped = false
-        for character in afterColon[afterColon.index(after: opening)...] {
-            if character == "\"", !isEscaped { break }
-            escaped.append(character)
-            if character == "\\" { isEscaped.toggle() } else { isEscaped = false }
-        }
-        guard !escaped.isEmpty else { return nil }
-        let wrapped = "\"" + escaped + "\""
-        return try? JSONDecoder().decode(String.self, from: Data(wrapped.utf8))
     }
 
     /// Codex has used two transcript shapes for submitted requests:

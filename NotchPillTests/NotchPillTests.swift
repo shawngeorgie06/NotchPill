@@ -259,7 +259,7 @@ struct CollapsedChipBuilderTests {
     func activeAgent() {
         let session = AgentSession(id: "s", agent: "codex", project: "NotchPill",
                                    state: .working, lastActivity: Date(), locatorId: nil,
-                                   directory: nil, subagent: nil, task: nil, toolActivity: nil)
+                                   directory: nil, subagent: nil, task: nil)
         let chips = CollapsedChipBuilder.chips(
             nowPlaying: nil, nextEvent: nil, shelfCount: 0, appSwitchHint: nil,
             timer: nil, systemStats: nil, battery: nil, agentSessions: [session],
@@ -274,7 +274,7 @@ struct CollapsedChipBuilderTests {
         let session = AgentSession(id: "s", agent: "codex", project: "w",
                                    state: .working, lastActivity: Date(), locatorId: nil,
                                    directory: nil, subagent: nil,
-                                   task: "Fix the expanded notch title", toolActivity: nil)
+                                   task: "Fix the expanded notch title")
         #expect(session.displayContext == "Fix the expanded notch title")
     }
 }
@@ -1457,27 +1457,6 @@ struct TranscriptTurnTests {
         #expect(AgentSessionScanner.codexLastPrompt(in:
             #"{"type":"event_msg","payload":{"type":"user_message","message":"\#(handoff)"}}"#)
                 == "Reviewing a permission request")
-    }
-
-    @Test("Claude tool calls become a compact file action")
-    func claudeToolActivity() {
-        let transcript = #"{"message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"src/auth.swift"}}]}}"#
-        #expect(AgentSessionScanner.claudeToolActivity(in: transcript)
-                == AgentToolActivity(tool: "Edit", detail: "src/auth.swift"))
-    }
-
-    @Test("Codex exec calls become a compact command action")
-    func codexToolActivity() {
-        let transcript = #"{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"{\"cmd\":\"xcodebuild test\"}"}}"#
-        #expect(AgentSessionScanner.codexToolActivity(in: transcript)
-                == AgentToolActivity(tool: "Bash", detail: "xcodebuild test"))
-    }
-
-    @Test("Codex desktop tool expressions expose their command")
-    func codexDesktopToolActivity() {
-        let transcript = #"{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"const r = await tools.exec_command({\"cmd\":\"xcodebuild test\"});"}}"#
-        #expect(AgentSessionScanner.codexToolActivity(in: transcript)
-                == AgentToolActivity(tool: "Bash", detail: "xcodebuild test"))
     }
 
     @Test("Codex local rate-limit record exposes a real quota and reset")
@@ -7441,5 +7420,41 @@ struct SessionLivenessTests {
         var waiting = session("b", idleFor: 1, alive: false)
         waiting.state = .waiting(since: Date())
         #expect(AgentSession.current([waiting]).isEmpty)
+    }
+}
+
+@Suite("effort reads as its own fact")
+struct EffortLabelTests {
+    private func session(model: String?, effort: String?) -> AgentSession {
+        var s = AgentSession(id: "s", agent: "claude-code", project: "p",
+                             state: .working, lastActivity: Date())
+        s.model = model
+        s.effort = effort
+        return s
+    }
+
+    /// The row draws the two halves separately, so both must stand alone —
+    /// and the combined form still has to agree with them, because it is what
+    /// VoiceOver reads.
+    @Test func splitsModelFromEffort() {
+        let s = session(model: "claude-opus-5", effort: "low")
+        #expect(s.modelBaseLabel == "Opus 5")
+        #expect(s.effortLabel == "low")
+        #expect(s.modelLabel == "Opus 5 · low")
+    }
+
+    /// "default" names the absence of a choice. Shown on a row it reads as a
+    /// setting the user picked, so it is dropped — but the model stays.
+    @Test func defaultEffortIsNotASetting() {
+        let s = session(model: "claude-opus-5", effort: "default")
+        #expect(s.effortLabel == nil)
+        #expect(s.modelLabel == "Opus 5")
+    }
+
+    @Test func toleratesMissingAndUntidyValues() {
+        #expect(session(model: "claude-opus-5", effort: nil).effortLabel == nil)
+        #expect(session(model: "claude-opus-5", effort: "   ").effortLabel == nil)
+        #expect(session(model: "claude-opus-5", effort: "  HIGH ").effortLabel == "high")
+        #expect(session(model: nil, effort: "high").modelBaseLabel == nil)
     }
 }

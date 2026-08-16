@@ -1488,41 +1488,46 @@ struct ExpandedActivityCard: View {
     /// squeezed to nothing before it ever drew. Down here it trails a line
     /// whose content is usually short, and it is pushed to the edge so it
     /// never competes with the tool detail for the middle of the row.
+    /// Effort is drawn brighter than the model beside it. It is the part that
+    /// changes between two otherwise identical sessions, and the part you can
+    /// act on — an agent grinding on `high` is the one worth interrupting.
     @ViewBuilder
     private func agentModelTag(_ session: AgentSession) -> some View {
-        if let model = session.modelLabel {
-            Text(model)
-                .font(.system(size: 8 * textScale, weight: .medium))
-                .foregroundStyle(.white.opacity(0.42))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .accessibilityLabel("Model \(model)")
+        if session.modelBaseLabel != nil || session.effortLabel != nil {
+            HStack(spacing: s(3)) {
+                if let base = session.modelBaseLabel {
+                    Text(base)
+                        .font(.system(size: 8 * textScale, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                if let effort = session.effortLabel {
+                    Text(effort)
+                        .font(.system(size: 8 * textScale, weight: .semibold))
+                        .foregroundStyle(color(for: session.state).opacity(0.85))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(session.modelLabel.map { "Model \($0)" } ?? "")
         }
     }
 
+    /// The row says what the session is *for*, never what it is typing.
+    ///
+    /// This line used to render the live tool call — "$ Bash xcodebuild test".
+    /// Two problems. It is the most volatile thing on the card, so the row
+    /// rewrote itself several times a second and the eye could not rest on it;
+    /// and a command line is not ours to publish. Whatever a user types after
+    /// `Bash` lands in the notch verbatim, in front of whoever is looking at
+    /// the screen — an API key passed inline, a token in a curl, a private
+    /// path. The task line answers the question the card is actually for
+    /// ("what is this session doing?") and stays still while it does.
     @ViewBuilder
     private func agentActivityLine(_ session: AgentSession) -> some View {
-        if let activity = session.toolActivity {
-            HStack(spacing: s(5)) {
-                Text("$")
-                    .font(.system(size: 9 * textScale, weight: .bold, design: .monospaced))
-                    .foregroundStyle(color(for: session.state).opacity(0.9))
-                Text(activity.tool)
-                    .font(.system(size: 9 * textScale, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.78))
-                    .fixedSize(horizontal: true, vertical: false)
-                if let detail = activity.detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(.system(size: 9 * textScale, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.58))
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .layoutPriority(1)
-                }
-                Spacer(minLength: s(4))
-                agentModelTag(session)
-            }
-        } else if let task = session.task {
+        if let task = session.task {
             HStack(spacing: s(5)) {
                 Text("›")
                     .font(font(size: 12, weight: .bold))

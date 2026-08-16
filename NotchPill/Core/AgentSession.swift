@@ -1,16 +1,5 @@
 import Foundation
 
-/// The latest concrete action an agent wrote to its local transcript.
-struct AgentToolActivity: Equatable {
-    var tool: String
-    var detail: String?
-
-    var displayText: String {
-        guard let detail, !detail.isEmpty else { return tool }
-        return "\(tool) · \(detail)"
-    }
-}
-
 /// One agent conversation that is alive right now.
 ///
 /// This is the "what am I actually in?" view. A peek tells you a turn *ended*;
@@ -62,8 +51,6 @@ struct AgentSession: Equatable, Identifiable {
     /// What the session was last asked to do. Nil when the source has nothing
     /// to offer — a brand-new session, or a transcript we could not read.
     var task: String?
-    /// Latest Read/Edit/Write/Bash-style action, when the transcript exposes it.
-    var toolActivity: AgentToolActivity?
     /// The host terminal's own name for this session, when it has one —
     /// cmux auto-names every session after the work it is doing. Nothing in a
     /// transcript carries this: the agent does not name itself.
@@ -221,9 +208,24 @@ struct AgentSession: Equatable, Identifiable {
     /// otherwise identical live sessions impossible to distinguish at a glance.
     var modelLabel: String? {
         guard let base = Self.modelLabel(model) else { return nil }
-        guard let effort = effort?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-              !effort.isEmpty, effort != "default" else { return base }
+        guard let effort = effortLabel else { return base }
         return "\(base) · \(effort)"
+    }
+
+    /// The two halves the row draws separately, so effort can be given weight
+    /// the model name does not get.
+    var modelBaseLabel: String? { Self.modelLabel(model) }
+
+    /// How hard the agent is thinking: `low`, `medium`, `high`. Claude Code
+    /// records it on every message and Codex in its thread settings, so this is
+    /// the live setting rather than whatever the session started with.
+    ///
+    /// `default` is dropped — it names the absence of a choice, and a row that
+    /// says "default" reads as a state the user picked.
+    var effortLabel: String? {
+        guard let effort = effort?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !effort.isEmpty, effort != "default" else { return nil }
+        return effort
     }
 
     /// A glyph for the vendor, because nothing else on the row reliably says
@@ -501,7 +503,7 @@ struct AgentSession: Equatable, Identifiable {
             id: alert.sessionId ?? "alert-\(alert.id)", agent: agent,
             project: alert.displayTitle, state: state, lastActivity: date,
             locatorId: alert.sessionId, directory: nil, subagent: nil,
-            task: summarize(alert.agentMessage ?? alert.message), toolActivity: nil)
+            task: summarize(alert.agentMessage ?? alert.message))
     }
 }
 
