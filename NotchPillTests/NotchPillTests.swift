@@ -7361,3 +7361,85 @@ struct ModelWindowTests {
         #expect(quota?.modelWindows.isEmpty == true)
     }
 }
+
+@Suite("cmux agent runtime")
+struct CmuxAgentRuntimeTests {
+    /// Shaped after the real file: the pid and lifecycle sit on each record
+    /// under `sessions`, keyed by session id.
+    private let real = Data("""
+    {"version":1,"sessions":{
+      "aaa":{"agentLifecycle":"running","cwd":"/Users/x/Projects/NotchPill",
+             "pid":1605,"sessionId":"aaa"},
+      "bbb":{"agentLifecycle":"unknown","cwd":"/Users/x/Downloads",
+             "pid":1604,"sessionId":"bbb"}}}
+    """.utf8)
+
+    @Test func readsPidPerSession() {
+        let runtime = CmuxAgentRuntime.parse(real)
+        #expect(runtime.agent(forSession: "aaa")?.pid == 1605)
+        #expect(runtime.agent(forSession: "bbb")?.lifecycle == "unknown")
+        #expect(runtime.agent(forSession: "nope") == nil)
+    }
+
+    @Test func unknownShapesYieldNothing() {
+        #expect(CmuxAgentRuntime.parse(Data("null".utf8)).isEmpty)
+        #expect(CmuxAgentRuntime.parse(Data("{\"sessions\":[]}".utf8)).isEmpty)
+        // A record without a usable pid is not a runtime fact.
+        #expect(CmuxAgentRuntime.parse(Data("{\"sessions\":{\"a\":{\"pid\":0}}}".utf8)).isEmpty)
+    }
+
+    /// The distinction the card depends on: no record at all means "unknown",
+    /// which must not be confused with "dead".
+    @Test func missingSessionIsUnknownNotDead() {
+        let runtime = CmuxAgentRuntime.parse(real)
+        #expect(runtime.isAlive(sessionId: "nope", isRunning: { _ in true }) == nil)
+        #expect(runtime.isAlive(sessionId: nil, isRunning: { _ in true }) == nil)
+        #expect(runtime.isAlive(sessionId: "aaa", isRunning: { _ in false }) == false)
+    }
+
+    /// This process is definitely alive, and its path is definitely not an
+    /// agent's — so the pid check alone must not be what answers.
+    @Test func aRecycledPidIsNotTheAgent() {
+        let mine = CmuxAgentRuntime.Agent(pid: getpid(), lifecycle: nil, cwd: nil)
+        #expect(CmuxAgentRuntime.isRunning(mine) == false)
+        #expect(CmuxAgentRuntime.isRunning(
+            CmuxAgentRuntime.Agent(pid: -1, lifecycle: nil, cwd: nil)) == false)
+    }
+}
+
+@Suite("liveness overrules the clock")
+struct SessionLivenessTests {
+    private func session(_ id: String, idleFor seconds: TimeInterval,
+                         alive: Bool?) -> AgentSession {
+        var s = AgentSession(id: id, agent: "claude-code", project: "p",
+                             state: .idle(since: Date().addingTimeInterval(-seconds)),
+                             lastActivity: Date().addingTimeInterval(-seconds))
+        s.isAlive = alive
+        return s
+    }
+
+    /// The behaviour before any of this: unknown liveness still expires at
+    /// thirty seconds, so Codex and Cursor rows are unaffected.
+    @Test func unknownLivenessKeepsTheOldWindow() {
+        #expect(AgentSession.current([session("a", idleFor: 10, alive: nil)]).count == 1)
+        #expect(AgentSession.current([session("a", idleFor: 60, alive: nil)]).isEmpty)
+    }
+
+    /// The long-build case: quiet for ten minutes, but the process is there.
+    @Test func aLivingAgentSurvivesGoingQuiet() {
+        #expect(AgentSession.current([session("a", idleFor: 600, alive: true)]).count == 1)
+        #expect(AgentSession.current([session("a", idleFor: 7300, alive: true)]).isEmpty)
+    }
+
+    /// The closed-terminal case: it wrote a second ago, so the clock still
+    /// calls it working — but there is nothing left to tab to.
+    @Test func aDeadAgentGoesAtOnceWhateverTheClockSays() {
+        var working = session("a", idleFor: 1, alive: false)
+        working.state = .working
+        #expect(AgentSession.current([working]).isEmpty)
+
+        var waiting = session("b", idleFor: 1, alive: false)
+        waiting.state = .waiting(since: Date())
+        #expect(AgentSession.current([waiting]).isEmpty)
+    }
+}

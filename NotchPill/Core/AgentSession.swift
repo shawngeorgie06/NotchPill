@@ -72,6 +72,13 @@ struct AgentSession: Equatable, Identifiable {
     /// focus that exact pane instead of matching on a directory two sessions
     /// might share.
     var hostPaneId: String?
+    /// Whether the agent's process is still alive, when the host terminal
+    /// recorded a pid to ask about.
+    ///
+    /// Nil means unknown, not dead — Codex, Cursor, and anything launched
+    /// outside cmux have no runtime record, and judging those dead would empty
+    /// the card. Only a definite `false` retires a row early.
+    var isAlive: Bool?
 
     /// How the agent is named on the row. The raw values are wire identifiers,
     /// not labels: "claude-code" reads like a package name.
@@ -395,10 +402,19 @@ struct AgentSession: Equatable, Identifiable {
     /// Drops quiet sessions that have stopped being news. Working and waiting
     /// sessions are kept whatever their age — a long build and an unanswered
     /// question are both exactly what the card is for.
+    ///
+    /// Where the process is known, it overrules the clock in both directions.
+    /// A dead agent goes immediately, however recently it wrote: closing a
+    /// terminal used to leave a row insisting the agent was "working" for the
+    /// next forty-five seconds. A living one keeps the long window even while
+    /// quiet, because the thirty-second rule was only ever a guess at whether
+    /// it was still there, and now we know.
     static func current(_ sessions: [AgentSession], now: Date = Date()) -> [AgentSession] {
         sessions.filter { session in
+            if session.isAlive == false { return false }
             guard case .idle(let since) = session.state else { return true }
-            return now.timeIntervalSince(since) < idleWindow
+            let window = session.isAlive == true ? liveWindow : idleWindow
+            return now.timeIntervalSince(since) < window
         }
     }
 

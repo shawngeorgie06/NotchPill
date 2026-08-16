@@ -26,6 +26,9 @@ actor AgentSessionScanner {
     /// cadence as the directory walk: it changes when panes open or are
     /// renamed, which is rare, and it is another app's file.
     private var cmux = CmuxIndex()
+    /// Which agent processes cmux launched, so a row can be retired when the
+    /// process is gone rather than when the file stops changing.
+    private var runtime = CmuxAgentRuntime()
     private var lastCmuxLoad = Date.distantPast
 
     private var roots: [URL] {
@@ -41,6 +44,9 @@ actor AgentSessionScanner {
         subagentTypeCache.removeAll()
         identityCache.removeAll()
         attemptedParentLookup.removeAll()
+        cmux = CmuxIndex()
+        runtime = CmuxAgentRuntime()
+        lastCmuxLoad = .distantPast
     }
 
     /// The whole scan, off the main actor.
@@ -95,6 +101,7 @@ actor AgentSessionScanner {
         }
         if now.timeIntervalSince(lastCmuxLoad) >= rediscoverInterval {
             cmux = CmuxIndex.load()
+            runtime = CmuxAgentRuntime.load()
             lastCmuxLoad = now
         }
         return transcripts(now: now).compactMap { url -> AgentSession? in
@@ -185,6 +192,12 @@ actor AgentSessionScanner {
                     forSession: isSubagent
                         ? (identity.parentSessionId ?? parentSessionId(of: url) ?? sessionId)
                         : sessionId)?.panelId,
+                // Same reasoning as the pane: a sub-agent runs inside its
+                // orchestrator's process, so its liveness is the parent's.
+                isAlive: runtime.isAlive(
+                    sessionId: isSubagent
+                        ? (identity.parentSessionId ?? parentSessionId(of: url) ?? sessionId)
+                        : sessionId),
                 model: modelInfo.model,
                 effort: modelInfo.effort,
                 contextTokens: contextTokens(in: url, isCodex: isCodex),
