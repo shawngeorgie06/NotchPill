@@ -7638,3 +7638,77 @@ struct MediaAdvanceDirectionTests {
         #expect(state.expandedDeckDirection == 1)
     }
 }
+
+@Suite("codex usage stops asking when asking cannot help")
+struct CodexUsageResilienceTests {
+    /// An auth file the fetcher will parse, with a recent refresh stamp so the
+    /// service goes straight to the usage request rather than a token refresh.
+    private func authFile() throws -> URL {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let json = """
+        {"tokens":{"access_token":"a","refresh_token":"r","account_id":"acct"},
+         "last_refresh":"\(stamp)"}
+        """
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-auth-\(UUID().uuidString).json")
+        try Data(json.utf8).write(to: url)
+        return url
+    }
+
+    private func response(_ code: Int) -> URLResponse {
+        HTTPURLResponse(url: URL(string: "https://example.invalid")!,
+                        statusCode: code, httpVersion: nil, headerFields: nil)!
+    }
+
+    /// The regression. A rejected token was retried every sixty seconds for as
+    /// long as the app was open — a request a minute and an identical log line
+    /// each time, for a failure that only signing in can fix.
+    @Test func aRejectedTokenIsAskedAboutOnce() async throws {
+        let file = try authFile()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let calls = Counter()
+        let service = CodexUsageService(authFile: file) { [calls] _ in
+            await calls.bump()
+            return (Data("{}".utf8), self.response(401))
+        }
+        let start = Date()
+        #expect(await service.quota(now: start) == nil)
+        // The first attempt is allowed to spend more than one request: a 401 is
+        // the one failure worth a token refresh and a retry, in case Codex
+        // rotated the token since the file was read.
+        let spent = await calls.value
+        #expect(spent > 0)
+        // Well past `refreshInterval`, so only the give-up can hold it back.
+        #expect(await service.quota(now: start.addingTimeInterval(600)) == nil)
+        #expect(await service.quota(now: start.addingTimeInterval(6000)) == nil)
+        // Nothing further is spent: the retry already happened, and only a
+        // sign-in can change the answer.
+        #expect(await calls.value == spent)
+    }
+
+    /// A server error might clear, so it must not give up — but it must back
+    /// off rather than retry on the ordinary interval.
+    @Test func aServerErrorBacksOffInsteadOfGivingUp() async throws {
+        let file = try authFile()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let calls = Counter()
+        let service = CodexUsageService(authFile: file) { [calls] _ in
+            await calls.bump()
+            return (Data("{}".utf8), self.response(500))
+        }
+        let start = Date()
+        _ = await service.quota(now: start)
+        #expect(await calls.value == 1)
+        // Inside the backoff window: no second request.
+        _ = await service.quota(now: start.addingTimeInterval(90))
+        #expect(await calls.value == 1)
+        // Past it: tries again, because this failure could have cleared.
+        _ = await service.quota(now: start.addingTimeInterval(4000))
+        #expect(await calls.value == 2)
+    }
+
+    private actor Counter {
+        private(set) var value = 0
+        func bump() { value += 1 }
+    }
+}

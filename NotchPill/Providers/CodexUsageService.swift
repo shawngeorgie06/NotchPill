@@ -18,9 +18,17 @@ actor CodexUsageService {
     /// failing. Beyond this the number is old enough that showing it is worse
     /// than showing nothing.
     static let staleAfter: TimeInterval = 3600
+    /// Ceiling on the wait between retries of a failure that might still clear.
+    static let maxBackoff: TimeInterval = 1800
 
     private var cached: CodexQuota?
     private var lastFetch = Date.distantPast
+    /// Set when the failure is one no retry can fix, so the service stops
+    /// asking until the app is restarted.
+    private var givenUp = false
+    /// Earliest next attempt after a failure that might clear on its own.
+    private var retryNoEarlierThan = Date.distantPast
+    private var consecutiveFailures = 0
     private var credentials: CodexUsageFetcher.Credentials?
 
     private let transport: (URLRequest) async throws -> (Data, URLResponse)
@@ -37,22 +45,64 @@ actor CodexUsageService {
     /// The current quota, refreshing at most once per `refreshInterval`.
     /// Returns nil only when there is nothing trustworthy to show.
     func quota(now: Date = Date()) async -> CodexQuota? {
+        // A dead token is not a transient failure. Without this the service
+        // re-asked every sixty seconds for as long as the app was open, wrote
+        // the same line each time, and could never have succeeded — a signed
+        // out account produced hours of identical log and a request a minute.
+        if givenUp { return nil }
+        if now < retryNoEarlierThan { return servedCache(now: now) }
         if now.timeIntervalSince(lastFetch) < Self.refreshInterval { return cached }
         lastFetch = now
         do {
             let fresh = try await fetch(now: now)
+            let recovered = consecutiveFailures > 0
+            consecutiveFailures = 0
+            retryNoEarlierThan = .distantPast
+            if recovered { LogStore.log("codex", "usage recovered") }
             cached = fresh
             return fresh
-        } catch {
-            LogStore.log("codex", "usage fetch failed: \(Self.describe(error))")
-            // Serve the cache until it is genuinely too old to mean anything.
-            if let cached, let updated = cached.updatedAt,
-               now.timeIntervalSince(updated) < Self.staleAfter {
-                return cached
+        } catch let error as CodexUsageFetcher.FetchError {
+            switch error {
+            case .noCredentials, .unauthorized:
+                // Only a sign-in fixes these, and that arrives with a restart's
+                // worth of new state anyway.
+                givenUp = true
+                cached = nil
+                LogStore.log("codex", Self.describe(error))
+                return nil
+            case .http, .malformedResponse:
+                let wait = backoff(now: now)
+                LogStore.log("codex", "usage fetch failed: \(Self.describe(error))"
+                             + " — next try in \(Int(wait))s")
+                return servedCache(now: now)
             }
-            cached = nil
-            return nil
+        } catch {
+            let wait = backoff(now: now)
+            LogStore.log("codex", "usage fetch failed: \(Self.describe(error))"
+                         + " — next try in \(Int(wait))s")
+            return servedCache(now: now)
         }
+    }
+
+    /// Sets the next allowed attempt and returns how long that is away.
+    @discardableResult
+    private func backoff(now: Date) -> TimeInterval {
+        consecutiveFailures += 1
+        let wait = min(Self.maxBackoff,
+                       Self.refreshInterval * pow(2, Double(consecutiveFailures)))
+        retryNoEarlierThan = now.addingTimeInterval(wait)
+        return wait
+    }
+
+    /// Serve the last good answer until it is too old to mean anything. Wi-Fi
+    /// dropping should blank the card no sooner than the number going unknown.
+    private func servedCache(now: Date) -> CodexQuota? {
+        if let cached, let updated = cached.updatedAt,
+           now.timeIntervalSince(updated) < Self.staleAfter {
+            return cached
+        }
+        cached = nil
+        return nil
     }
 
     /// Deliberately never interpolates the error's full description into a log
