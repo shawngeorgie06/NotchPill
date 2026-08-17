@@ -21,10 +21,19 @@ final class MediaRemoteBridge {
     private let artworkQueue = DispatchQueue(label: "notchpill.mediaremote.artwork")
     /// Track we're currently fetching artwork for (owned by `artworkQueue`).
     private var artworkInFlightKey: String?
+    /// Whether the bridge is meant to be running, as opposed to merely not
+    /// running. Without it a restart cannot tell a crash apart from `stop()`
+    /// and would resurrect the adapter after a deliberate shutdown.
+    private var shouldRun = false
+    /// Consecutive restarts, to back off rather than spin. Reset by the first
+    /// line the new stream delivers, which is the only proof it works.
+    private var restartAttempts = 0
+    private static let maxRestartDelay: TimeInterval = 30
 
     private static let logMedia = ProcessInfo.processInfo.environment["NOTCHPILL_LOG_NOWPLAYING"] == "1"
 
     func start() {
+        shouldRun = true
         guard streamProcess == nil else { return }
         guard let paths = bundledPaths() else {
             if Self.logMedia { print("NOWPLAYING: adapter bundle missing") }
@@ -73,6 +82,8 @@ final class MediaRemoteBridge {
     }
 
     func stop() {
+        shouldRun = false
+        restartAttempts = 0
         readSource?.cancel()
         readSource = nil
         if let streamProcess, streamProcess.isRunning {
@@ -105,17 +116,62 @@ final class MediaRemoteBridge {
         }
     }
 
+    /// Bring the adapter back when it dies.
+    ///
+    /// This used to tear the state down and stop there, which quietly ended
+    /// media for the rest of the app's life: the adapter is a separate
+    /// `/usr/bin/perl` process, and anything that takes it out — a crash, a
+    /// MediaRemote hiccup, the system reaping it across sleep — left the notch
+    /// with no source and no way back short of relaunching NotchPill. Nothing
+    /// reported it, so it looked like "media just stopped showing".
+    ///
+    /// Restarting is safe because the stream re-sends the current track the
+    /// moment it connects, so a recovered bridge repopulates the card without
+    /// waiting for the user to press anything.
     private func handleStreamTerminated() {
         streamProcess = nil
         readSource?.cancel()
         readSource = nil
         stdoutPipe = nil
+        // A deliberate `stop()` must stay stopped.
+        guard shouldRun else { return }
+        restartAttempts += 1
+        // Backed off so a permanently broken adapter — a missing framework, a
+        // perl that will not run — costs one process a half-minute instead of
+        // a spawn loop for as long as the app is open.
+        let delay = Self.restartDelay(attempt: restartAttempts)
+        if Self.logMedia {
+            print("NOWPLAYING: adapter died, restarting in \(delay)s (attempt \(restartAttempts))")
+        }
+        LogStore.log("media", "adapter stopped — restarting in \(Int(delay))s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.shouldRun, self.streamProcess == nil else { return }
+            self.start()
+        }
+    }
+
+    /// Seconds to wait before the nth restart: 2, 4, 8, 16, 30, 30…
+    ///
+    /// Backed off because the failure this recovers from is not always
+    /// transient. A missing framework or an unrunnable perl fails identically
+    /// every time, and retrying that at full speed would spawn processes for as
+    /// long as the app is open. Capped so a bridge that recovers after a long
+    /// outage still comes back within half a minute.
+    nonisolated static func restartDelay(attempt: Int) -> TimeInterval {
+        guard attempt > 0 else { return 0 }
+        return min(maxRestartDelay, pow(2, Double(min(attempt, 5))))
     }
 
     private func readAvailableOutput() {
         guard let handle = stdoutPipe?.fileHandleForReading else { return }
         let chunk = handle.availableData
         guard !chunk.isEmpty else { return }
+        // Output is the only proof the restarted adapter actually works, so the
+        // backoff is cleared here rather than when the process launches — a
+        // bridge that starts and dies immediately must keep backing off.
+        if restartAttempts != 0 {
+            DispatchQueue.main.async { [weak self] in self?.restartAttempts = 0 }
+        }
         lineBuffer.append(chunk)
         while let range = lineBuffer.firstRange(of: Data([0x0A])) {
             let lineData = lineBuffer.subdata(in: lineBuffer.startIndex..<range.lowerBound)

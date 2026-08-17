@@ -7586,3 +7586,27 @@ struct ActivityIdentityTests {
         #expect(Set(ids).count == ids.count)
     }
 }
+
+@Suite("media bridge recovers")
+struct MediaBridgeRestartTests {
+    /// The adapter is a separate perl process. When it died the bridge tore
+    /// itself down and stopped, so media silently ended for the life of the
+    /// app — the notch showed nothing and only a relaunch brought it back.
+    /// It now retries, and these are the intervals it retries on.
+    @Test func backsOffThenSettlesAtTheCap() {
+        #expect(MediaRemoteBridge.restartDelay(attempt: 1) == 2)
+        #expect(MediaRemoteBridge.restartDelay(attempt: 2) == 4)
+        #expect(MediaRemoteBridge.restartDelay(attempt: 3) == 8)
+        #expect(MediaRemoteBridge.restartDelay(attempt: 4) == 16)
+        // Capped, so a permanently broken adapter costs one process every
+        // thirty seconds rather than a spawn loop.
+        #expect(MediaRemoteBridge.restartDelay(attempt: 5) == 30)
+        #expect(MediaRemoteBridge.restartDelay(attempt: 50) == 30)
+    }
+
+    /// A recovered bridge must never wait: the guard is on `attempt > 0`, so a
+    /// first start is immediate.
+    @Test func firstStartIsNotDelayed() {
+        #expect(MediaRemoteBridge.restartDelay(attempt: 0) == 0)
+    }
+}
