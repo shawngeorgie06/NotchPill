@@ -19,6 +19,9 @@ actor ClaudeUsageService {
     static let staleAfter: TimeInterval = 3600
 
     private var cached: ClaudeQuota?
+    /// The fetch currently running, so concurrent callers share it rather than
+    /// each starting their own.
+    private var inFlight: Task<ClaudeQuota?, Never>?
     private var lastFetch = Date.distantPast
     /// Where the last good answer is kept between launches.
     ///
@@ -95,7 +98,31 @@ actor ClaudeUsageService {
         return item as? Data
     }
 
+    /// One request at a time, whoever asks.
+    ///
+    /// The log showed four rate-limit hits and a success inside nine
+    /// milliseconds, which is several requests racing each other — and being
+    /// 429'd for it. `retryNoEarlierThan` cannot prevent that: every caller
+    /// reads it before any of them has written, so the guard passes for all of
+    /// them. An actor serialises the *state*, not a network call it awaits.
+    ///
+    /// So callers now share one computation. A second caller arriving mid
+    /// flight waits for the first answer instead of spending another request
+    /// on the same question, which also stops the duplicate log lines that
+    /// made a single failure look like four.
     func quota(now: Date = Date()) async -> ClaudeQuota? {
+        if let inFlight { return await inFlight.value }
+        let task = Task<ClaudeQuota?, Never> { [weak self] in
+            guard let self else { return nil }
+            return await self.computeQuota(now: now)
+        }
+        inFlight = task
+        let result = await task.value
+        inFlight = nil
+        return result
+    }
+
+    private func computeQuota(now: Date) async -> ClaudeQuota? {
         // A refusal is permanent until the app restarts: re-asking re-prompts.
         if let givenUp {
             _ = givenUp

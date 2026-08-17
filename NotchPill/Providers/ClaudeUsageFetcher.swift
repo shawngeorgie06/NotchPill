@@ -96,6 +96,11 @@ struct ClaudeQuota: Equatable {
 /// that starts off — an app that asks for Keychain access unprompted, for a
 /// card you never asked for, has earned the suspicion it gets.
 enum ClaudeUsageFetcher {
+    /// The last payload shape written to the log, so an unchanged one stays
+    /// silent. Not state the parse depends on — losing it only costs one
+    /// repeated line.
+    nonisolated(unsafe) private static var lastLoggedShape: String?
+
     static let usageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     /// The service name Claude Code stores its credentials under.
     static let keychainService = "Claude Code-credentials"
@@ -202,17 +207,30 @@ enum ClaudeUsageFetcher {
         // promotional entries at the same level, and listing those made the log
         // look like a menu of meters that mostly do not exist.
         let metered = root.keys.filter { window($0) != nil }.sorted()
-        if !metered.isEmpty {
-            LogStore.log("claude", "metered windows: " + metered.joined(separator: ", "))
-        }
         // Field *names* of the per-model entries, never their values. A key can
         // exist without carrying a figure, and the two look identical from
         // outside — this is what distinguishes "your plan has no such limit"
         // from "the number is there under a name we do not read".
-        for key in root.keys.sorted() where Self.isModelWindowKey(key) {
+        let perModel = root.keys.sorted().filter { Self.isModelWindowKey($0) }.map { key -> String in
             let fields = (root[key] as? [String: Any])?.keys.sorted() ?? []
-            LogStore.log("claude", "\(key) fields: "
-                         + (fields.isEmpty ? "(not an object)" : fields.joined(separator: ", ")))
+            return "\(key) fields: "
+                + (fields.isEmpty ? "(not an object)" : fields.joined(separator: ", "))
+        }
+        // Only when it changes.
+        //
+        // This is a description of the payload's *shape*, which is the same on
+        // every poll of the same account — so logging it each time wrote a
+        // dozen identical lines every five minutes and buried everything else.
+        // It is worth keeping, because it is what identifies a plan whose
+        // windows are named differently; it is not worth repeating. A change is
+        // news and still prints immediately.
+        let shape = ([metered.joined(separator: ", ")] + perModel).joined(separator: "\n")
+        if shape != lastLoggedShape {
+            lastLoggedShape = shape
+            if !metered.isEmpty {
+                LogStore.log("claude", "metered windows: " + metered.joined(separator: ", "))
+            }
+            perModel.forEach { LogStore.log("claude", $0) }
         }
 
         var spent: Int?, limit: Int?, currency: String?
