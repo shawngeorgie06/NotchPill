@@ -263,8 +263,8 @@ final class NotchController {
     private func makeRootView() -> NotchRootView {
         let actions = NotchActions(
             togglePlayPause: { [weak self] in self?.nowPlaying.togglePlayPause() },
-            next: { [weak self] in self?.nowPlaying.next() },
-            previous: { [weak self] in self?.nowPlaying.previous() },
+            next: { [weak self] in self?.advanceTrack(by: 1) },
+            previous: { [weak self] in self?.advanceTrack(by: -1) },
             focusApp: { [weak self] bundleId in self?.focusSourceApp(bundleId: bundleId) },
             focusAlert: { [weak self] alert in self?.focusSourceApp(alert: alert) },
             dismissDevReady: { [weak self] id in self?.dismissDevReady(id: id) },
@@ -774,6 +774,15 @@ final class NotchController {
         if takeKey { window?.makeKey() }
     }
 
+    /// Skip a track, and aim the card transition the same way first.
+    ///
+    /// Order matters: the direction has to be set before the new track reaches
+    /// the view, or the card animates using the previous one's direction.
+    private func advanceTrack(by offset: Int) {
+        state.noteMediaAdvance(offset)
+        if offset >= 0 { nowPlaying.next() } else { nowPlaying.previous() }
+    }
+
     /// When the compact island is open, Left/Right navigate its pages. The
     /// same keys retain their established media controls while the island is
     /// collapsed, so a parked pointer never changes agent context by accident.
@@ -782,7 +791,7 @@ final class NotchController {
               state.updateProgress == nil,
               state.replyCompose == nil,
               state.devReadyAlerts.isEmpty else {
-            nowPlaying.next()
+            advanceTrack(by: 1)
             return
         }
         state.moveExpandedDeckPage(by: 1, kinds: expandedDeckActivityKinds())
@@ -793,7 +802,7 @@ final class NotchController {
               state.updateProgress == nil,
               state.replyCompose == nil,
               state.devReadyAlerts.isEmpty else {
-            nowPlaying.previous()
+            advanceTrack(by: -1)
             return
         }
         state.moveExpandedDeckPage(by: -1, kinds: expandedDeckActivityKinds())

@@ -7610,3 +7610,31 @@ struct MediaBridgeRestartTests {
         #expect(MediaRemoteBridge.restartDelay(attempt: 0) == 0)
     }
 }
+
+@Suite("track skips aim their own animation")
+@MainActor
+struct MediaAdvanceDirectionTests {
+    /// Next enters from the right, previous from the left. The direction was
+    /// only ever set by *page* moves, so skipping a track reused whichever way
+    /// the deck was last paged: both directions animated the same, and after a
+    /// backwards swipe the next song slid in from the wrong side.
+    @Test func skippingSetsTheDirection() {
+        let state = NotchState()
+        state.noteMediaAdvance(1)
+        #expect(state.expandedDeckDirection == 1)
+        state.noteMediaAdvance(-1)
+        #expect(state.expandedDeckDirection == -1)
+        state.noteMediaAdvance(1)
+        #expect(state.expandedDeckDirection == 1)
+    }
+
+    /// Paging must still aim it, since the two share one transition — a track
+    /// skip after a backwards page has to override, not inherit.
+    @Test func theLastActionAimsIt() {
+        let state = NotchState()
+        state.moveExpandedDeckPage(by: -1, kinds: ["media", "agents"])
+        #expect(state.expandedDeckDirection == -1)
+        state.noteMediaAdvance(1)
+        #expect(state.expandedDeckDirection == 1)
+    }
+}

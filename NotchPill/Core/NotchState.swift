@@ -187,6 +187,21 @@ final class NotchState: ObservableObject {
         expandedDeckKind = kinds[target]
     }
 
+    /// Point the card transition the way a *track* change is going.
+    ///
+    /// The slide direction was only ever set by page moves, so skipping a track
+    /// reused whichever way the deck last happened to be paged. Next and
+    /// previous therefore animated identically, and after a backwards page
+    /// swipe both animated backwards — the card slid in from the left on the
+    /// way to the *next* song.
+    ///
+    /// Shared with paging on purpose: it is one transition, so it needs one
+    /// direction, and whichever action moved the card last is the one that
+    /// should aim it.
+    func noteMediaAdvance(_ offset: Int) {
+        expandedDeckDirection = offset >= 0 ? 1 : -1
+    }
+
     func moveExpandedDeckPage(by offset: Int, kinds: [String]) {
         guard !kinds.isEmpty else {
             expandedDeckPage = 0

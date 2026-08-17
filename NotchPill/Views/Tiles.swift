@@ -2193,6 +2193,17 @@ struct MediaProgressView: View {
     private func s(_ value: CGFloat) -> CGFloat { value * readability }
     private func textSize(_ base: CGFloat) -> CGFloat { base * textScale }
 
+    /// Matched to the tick so the bar glides between samples instead of
+    /// stepping four times a second.
+    ///
+    /// It also absorbs the jump at a pause. While playing, the position is
+    /// *interpolated* forward from the last reading; pausing stops the
+    /// interpolation and falls back to the reading itself, which is a moment
+    /// behind — so the bar snapped backwards at the exact instant the user was
+    /// looking at it. The same easing that smooths playback now eases that
+    /// correction instead of showing it.
+    private static let progressMotion: Animation = .linear(duration: 0.25)
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.25)) { context in
             let elapsed = nowPlaying.interpolatedElapsed(at: context.date) ?? 0
@@ -2209,6 +2220,7 @@ struct MediaProgressView: View {
                     }
                 }
                 .frame(width: s(88), height: s(2.5))
+                .animation(Self.progressMotion, value: fraction)
             case .expanded:
                 VStack(spacing: s(4)) {
                     GeometryReader { geo in
@@ -2220,6 +2232,7 @@ struct MediaProgressView: View {
                         }
                     }
                     .frame(height: s(4))
+                    .animation(Self.progressMotion, value: fraction)
                     HStack {
                         Text(formatTime(elapsed))
                         Spacer()
