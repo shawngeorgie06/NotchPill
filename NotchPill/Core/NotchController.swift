@@ -617,6 +617,20 @@ final class NotchController {
             MotionTrace.record("defer shrink to \(MotionTrace.rect(frame))")
             return
         }
+        // Nothing to resize. Worth checking because this runs on *every*
+        // publish that can change the layout — media position, CPU, battery,
+        // each quota poll — and almost none of them actually move the window.
+        // `setFrame(display: true)` forces a redraw of the whole overlay
+        // whether or not the rect differs, so the common case was paying for a
+        // resize that resolved to the same numbers many times a minute.
+        if abs(frame.width - current.width) < 0.5,
+           abs(frame.height - current.height) < 0.5,
+           abs(frame.origin.x - current.origin.x) < 0.5,
+           abs(frame.origin.y - current.origin.y) < 0.5 {
+            updateMousePassthrough(
+                pointerInHotZone: expandHoverScreenRect().contains(NSEvent.mouseLocation))
+            return
+        }
         // Keep the overlay's coordinate space fixed while SwiftUI animates the
         // surface. Animating the NSWindow as well makes the starting notch move
         // underneath the path, which is why previous attempts looked like a

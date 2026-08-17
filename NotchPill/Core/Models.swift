@@ -728,6 +728,40 @@ enum ExpandedActivity: Equatable, Identifiable {
         }
     }
 
+    /// What is *inside* the card right now — the counterpart to `id`.
+    ///
+    /// Splitting these is what lets the deck animate smoothly without
+    /// rebuilding anything. `id` answers "is this a different card?" and drives
+    /// the slide; this answers "did the contents move?" and drives a plain
+    /// interpolation of whatever changed size. Collapsing the two is what made
+    /// a pause look like a skipped track.
+    ///
+    /// Timestamps are deliberately excluded. A quota's `updatedAt` advances on
+    /// every poll while nothing on screen differs, and animating on it spends a
+    /// transaction per poll to redraw an identical card.
+    var contentKey: String {
+        switch self {
+        case .media(let np): return "media-\(np.title)-\(np.artist)-\(np.isPlaying)"
+        case .appSwitch(let name): return "switch-\(name)"
+        case .activeApp(let name): return "app-\(name)"
+        case .volume(let level): return "vol-\(level)"
+        case .clock: return "clock"
+        case .calendar(let e): return "cal-\(e.title)-\(e.start.timeIntervalSince1970)"
+        case .timer(let t): return "timer-\(t.endDate.timeIntervalSince1970)"
+        case .systemStats(let s): return "stats-\(s.cpuPercent)-\(s.memoryPercent)"
+        case .battery(let b): return "battery-\(b.level)-\(b.isCharging)"
+        case .shelf(let count, _): return "shelf-\(count)"
+        case .agents(let list): return "agents-" + list.map(\.id).joined(separator: ",")
+        case .openCodeUsage(let usage): return "opencode-\(usage.totalTokens)-\(usage.cost)"
+        case .codexQuota(let quota): return "codex-quota-\(quota.usedPercent)"
+        case .claudeQuota(let quota):
+            return "claude-quota-\(quota.sessionPercent)-\(quota.weeklyPercent)"
+        case .cursorQuota(let quota): return "cursor-quota-\(quota.used)-\(quota.limit)"
+        case .ci(let runs): return "ci-" + runs.map { $0.id + $0.statusLabel }.joined(separator: ",")
+        case .recentAlerts(let alerts): return "recent-" + alerts.map(\.id).joined(separator: ",")
+        }
+    }
+
     /// Human label for the settings row.
     var kindLabel: String {
         switch self {
@@ -750,25 +784,43 @@ enum ExpandedActivity: Equatable, Identifiable {
         }
     }
 
+    /// Which card this *is* — never what is currently inside it.
+    ///
+    /// The deck applies this as the visible card's SwiftUI `.id`, and a card
+    /// whose id changes is not updated but destroyed and replaced, playing the
+    /// page-turn slide on the way in. So anything volatile encoded here becomes
+    /// an animation the user did not ask for.
+    ///
+    /// That is exactly what pausing did. `isPlaying` used to be part of this
+    /// string, so hitting pause replaced the media card and slid the deck
+    /// sideways — indistinguishable from skipping to the next song, and immune
+    /// to fixing the animation curves, because the card was genuinely a new
+    /// view each time. The same bug ran on a timer everywhere else: a CPU
+    /// reading or a quota's `updatedAt` moved on every poll, so the card on
+    /// screen was tossed out and slid back in several times a minute.
+    ///
+    /// The subject still counts. A different song, a different app, a
+    /// different meeting *is* a different card, and sliding to it is right.
+    /// Everything else is content, and content animates in place.
     var id: String {
         switch self {
-        case .media(let np): return "media-\(np.title)-\(np.artist)-\(np.isPlaying)"
+        case .media(let np): return "media-\(np.title)-\(np.artist)"
         case .appSwitch(let name): return "switch-\(name)"
         case .activeApp(let name): return "app-\(name)"
-        case .volume(let level): return "vol-\(level)"
+        case .volume: return "volume"
         case .clock: return "clock"
         case .calendar(let e): return "cal-\(e.title)-\(e.start.timeIntervalSince1970)"
         case .timer(let t): return "timer-\(t.endDate.timeIntervalSince1970)"
-        case .systemStats(let s): return "stats-\(s.cpuPercent)-\(s.memoryPercent)"
-        case .battery(let b): return "battery-\(b.level)-\(b.isCharging)"
-        case .shelf(let count, _): return "shelf-\(count)"
-        case .agents(let list): return "agents-" + list.map(\.id).joined(separator: ",")
-        case .openCodeUsage(let usage): return "opencode-\(usage.totalTokens)-\(usage.cost)"
-        case .codexQuota(let quota): return "codex-quota-\(quota.usedPercent)-\(quota.resetsAt?.timeIntervalSince1970 ?? 0)-\(quota.creditBalance?.description ?? "")-\(quota.updatedAt?.timeIntervalSince1970 ?? 0)"
-        case .claudeQuota(let quota): return "claude-quota-\(quota.sessionPercent)-\(quota.weeklyPercent)-\(quota.extraSpentMinor ?? -1)-\(quota.updatedAt?.timeIntervalSince1970 ?? 0)"
-        case .cursorQuota(let quota): return "cursor-quota-\(quota.used)-\(quota.limit)-\(quota.percentUsed)-\(quota.updatedAt?.timeIntervalSince1970 ?? 0)"
-        case .ci(let runs): return "ci-" + runs.map { $0.id + $0.statusLabel }.joined(separator: ",")
-        case .recentAlerts(let alerts): return "recent-" + alerts.map(\.id).joined(separator: ",")
+        case .systemStats: return "systemStats"
+        case .battery: return "battery"
+        case .shelf: return "shelf"
+        case .agents: return "agents"
+        case .openCodeUsage: return "openCodeUsage"
+        case .codexQuota: return "codexQuota"
+        case .claudeQuota: return "claudeQuota"
+        case .cursorQuota: return "cursorQuota"
+        case .ci: return "ci"
+        case .recentAlerts: return "recentAlerts"
         }
     }
 }

@@ -501,7 +501,10 @@ struct ExpandedView: View {
         .animation(.easeOut(duration: 0.14), value: state.appSwitchHint)
         .animation(.easeOut(duration: 0.14), value: state.frontmostApp)
         .animation(.easeOut(duration: 0.12), value: state.systemVolume)
-        .animation(.easeOut(duration: 0.14), value: activities.map(\.id))
+        // Keyed on contents, not identity. Identity drives the page slide (see
+        // `ExpandedActivity.id`); this only smooths a card growing or shrinking
+        // around what changed inside it.
+        .animation(.easeOut(duration: 0.14), value: activities.map(\.contentKey))
         .onChange(of: activityKinds) { _, kinds in
             state.reconcileExpandedDeck(kinds: kinds)
         }

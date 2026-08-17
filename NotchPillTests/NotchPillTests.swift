@@ -1788,7 +1788,10 @@ struct AgentSessionTests {
             showMedia: false, showActiveApp: true, showVolume: true, showClock: false,
             showCalendar: false, showTimer: false, showSystemStats: false,
             showBattery: false, showShelf: false, showAgents: true)
-        #expect(items.first?.id.hasPrefix("agents-") == true)
+        // Asked of `kind`, as the sibling ordering tests do. This used to read
+        // the id's prefix, which only worked while the id carried the session
+        // list — content the id deliberately no longer encodes.
+        #expect(items.first?.kind == "agents")
     }
 
     @Test("OpenCode usage follows live agents and is not presented as a quota")
@@ -7527,5 +7530,59 @@ struct SessionSafetyTests {
         #expect(AgentSessionScanner.permissionMode(in: text) == "bypassPermissions")
         #expect(AgentSessionScanner.permissionMode(in: "{\"type\":\"user\"}") == nil)
         #expect(AgentSessionScanner.permissionMode(in: "not json") == nil)
+    }
+}
+
+@Suite("a pause is not a new card")
+struct ActivityIdentityTests {
+    private func track(_ title: String, playing: Bool) -> ExpandedActivity {
+        .media(NowPlaying(title: title, artist: "Artist", isPlaying: playing, artwork: nil))
+    }
+
+    /// The regression this suite exists for. The deck applies `id` as the
+    /// card's SwiftUI identity, so an id that moves on pause destroys the card
+    /// and slides a replacement in — the page-turn animation, indistinguishable
+    /// from skipping a track. Fixing animation curves cannot cure it, because
+    /// the card really is a different view each time.
+    @Test func pausingKeepsTheSameCard() {
+        #expect(track("Song A", playing: true).id == track("Song A", playing: false).id)
+    }
+
+    /// A different song genuinely is a different card, and sliding to it is
+    /// the right animation — so the fix must not go too far.
+    @Test func aDifferentSongIsADifferentCard() {
+        #expect(track("Song A", playing: true).id != track("Song B", playing: true).id)
+    }
+
+    /// Pause still has to reach the *animation*, just not the identity: the
+    /// play/pause symbol morphs and the equaliser fades on this key.
+    @Test func pauseStillRegistersAsAContentChange() {
+        #expect(track("Song A", playing: true).contentKey
+                != track("Song A", playing: false).contentKey)
+    }
+
+    /// The same bug on a timer. A CPU reading moves every poll, so an id built
+    /// from it threw away the visible card and slid it back several times a
+    /// minute — while the content key still animates the size change.
+    @Test func pollingDoesNotRebuildTheCard() {
+        let a = ExpandedActivity.systemStats(SystemStats(cpuPercent: 12, memoryPercent: 40))
+        let b = ExpandedActivity.systemStats(SystemStats(cpuPercent: 87, memoryPercent: 41))
+        #expect(a.id == b.id)
+        #expect(a.contentKey != b.contentKey)
+
+        let low = ExpandedActivity.battery(BatteryStatus(level: 80, isCharging: false))
+        let high = ExpandedActivity.battery(BatteryStatus(level: 81, isCharging: false))
+        #expect(low.id == high.id)
+        #expect(low.contentKey != high.contentKey)
+    }
+
+    /// Two cards of different kinds must never collide on one identity, or the
+    /// deck would reuse one card's view for another's contents.
+    @Test func distinctKindsKeepDistinctIdentities() {
+        let ids = [ExpandedActivity.clock, .volume(50), .systemStats(SystemStats(cpuPercent: 1, memoryPercent: 1)),
+                   .battery(BatteryStatus(level: 50, isCharging: false)),
+                   .agents([]), .ci([]), .shelf(count: 2, names: []),
+                   track("Song A", playing: true)].map(\.id)
+        #expect(Set(ids).count == ids.count)
     }
 }
