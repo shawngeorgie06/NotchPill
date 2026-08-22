@@ -27,6 +27,90 @@ struct ProcessRunnerTests {
 
 // MARK: - Shelf filing
 
+@Suite("Completion folding")
+struct CompletionFoldingTests {
+    private func alert(_ id: String, title: String, kind: AlertKind = .finished,
+                       source: String? = "cmux", subtitle: String? = "finished · main",
+                       createdAt: TimeInterval? = 100) -> DevReadyAlert {
+        DevReadyAlert(id: id, title: title, subtitle: subtitle, source: source,
+                      kind: kind, createdAt: createdAt)
+    }
+
+    @MainActor
+    @Test("a session and its subagents fold into one row")
+    func subagentsFoldIntoTheSession() {
+        let state = NotchState()
+        state.enqueueDevReady([
+            alert("a", title: "NotchPill"),
+            alert("b", title: "NotchPill", subtitle: "subagent finished · main"),
+            alert("c", title: "NotchPill", subtitle: "subagent finished · main"),
+        ])
+        #expect(state.devReadyAlerts.count == 1)
+        #expect(state.devReadyAlerts.first?.completionCount == 3)
+        // Keeps the first row's identity, so a dismissal already aimed at it lands.
+        #expect(state.devReadyAlerts.first?.id == "a")
+        #expect(state.devReadyAlerts.first?.displaySubtitle == "3 finished · main")
+    }
+
+    @MainActor
+    @Test("different projects stay separate rows")
+    func projectsDoNotFold() {
+        let state = NotchState()
+        state.enqueueDevReady([
+            alert("a", title: "NotchPill"),
+            alert("b", title: "murmur-app"),
+        ])
+        #expect(state.devReadyAlerts.count == 2)
+        #expect(state.devReadyAlerts.allSatisfy { $0.completionCount == 1 })
+    }
+
+    /// A waiting alert carries the answer buttons and the reply target. Folding
+    /// two of them would leave no way to answer either.
+    @MainActor
+    @Test("questions never fold")
+    func waitingNeverFolds() {
+        let state = NotchState()
+        state.enqueueDevReady([
+            alert("a", title: "NotchPill", kind: .waiting, subtitle: "needs input"),
+            alert("b", title: "NotchPill", kind: .waiting, subtitle: "needs input"),
+        ])
+        #expect(state.devReadyAlerts.count == 2)
+    }
+
+    @Test("folding carries the newest timestamp")
+    func foldingTakesTheNewerTime() {
+        let older = alert("a", title: "NotchPill", createdAt: 100)
+        let newer = alert("b", title: "NotchPill", createdAt: 500)
+        #expect(older.folding(newer).createdAt == 500)
+        #expect(newer.folding(older).createdAt == 500)
+    }
+
+    @Test("a single completion reads exactly as before")
+    func singleIsUnchanged() {
+        let one = alert("a", title: "NotchPill")
+        #expect(one.completionCount == 1)
+        #expect(one.displaySubtitle == "finished · main")
+    }
+
+    /// The count is folded into redacted text, never into the raw subtitle —
+    /// otherwise a grouped row becomes the one path that prints a secret.
+    @Test("a folded subtitle is still redacted")
+    func foldedSubtitleStaysRedacted() {
+        var a = alert("a", title: "NotchPill", subtitle: "finished · sk-ant-api03-SECRETVALUE")
+        a.groupedCount = 4
+        let shown = a.displaySubtitle ?? ""
+        #expect(shown.hasPrefix("4 finished"))
+        #expect(!shown.contains("SECRETVALUE"))
+    }
+
+    @Test("a history entry written before folding still decodes")
+    func legacyHistoryDecodes() throws {
+        let json = #"{"id":"x","title":"NotchPill","subtitle":"finished · main","kind":"finished"}"#
+        let decoded = try JSONDecoder().decode(DevReadyAlert.self, from: Data(json.utf8))
+        #expect(decoded.completionCount == 1)
+    }
+}
+
 @Suite("ShelfFiler")
 struct ShelfFilerTests {
     private func tree(_ name: String = UUID().uuidString) throws -> (URL, URL) {

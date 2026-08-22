@@ -112,6 +112,17 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// field. Set for finished peeks, where there is no question but there is
     /// still something you are replying *to*.
     var agentMessage: String?
+    /// How many completions this row stands for.
+    ///
+    /// A session and each of its subagents send their own `finished` signal, so
+    /// one round of work in one repo across a few terminals arrives as a dozen
+    /// peeks for two or three things the user actually did. Completions for the
+    /// same project fold into one row and count up instead.
+    ///
+    /// Optional rather than defaulted: Swift's synthesized `Codable` ignores
+    /// default values, so a stored history written before this field existed
+    /// would fail to decode. Read it through `completionCount`.
+    var groupedCount: Int?
     /// How many lines the title may wrap to, when one is not enough.
     ///
     /// Peek titles are a single line because an agent's is a short label —
@@ -179,7 +190,23 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// Title and subtitle as they should appear on screen. Both are carried
     /// through from hook payloads, so neither is ours to trust.
     var displayTitle: String { SecretRedactor.redact(title) }
-    var displaySubtitle: String? { subtitle.map(SecretRedactor.redact) }
+
+    /// Redaction first, always: the count is folded into the *redacted* text,
+    /// so a grouped row can never become the one path that prints a secret a
+    /// single row would have hidden.
+    var displaySubtitle: String? {
+        let redacted = subtitle.map(SecretRedactor.redact)
+        guard completionCount > 1 else { return redacted }
+        // Keep whatever trailing context the hook supplied — the branch in
+        // "finished · main" — because that is the part that says *where*.
+        let suffix = redacted.flatMap { text -> String? in
+            guard let range = text.range(of: " · ") else { return nil }
+            return String(text[range.upperBound...])
+        }
+        let head = "\(completionCount) finished"
+        guard let suffix, !suffix.isEmpty else { return head }
+        return "\(head) · \(suffix)"
+    }
 
     /// Whether two alerts came from the same agent session.
     ///
@@ -243,6 +270,7 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         case id, title, subtitle, source, agent, bundleId, kind, message, createdAt, sessionId
         case answerSpec = "answers", deliverySpec = "delivery"
         case requestId, permissionPayload = "permission"
+        case groupedCount
     }
 
     /// Blank/whitespace-only ids are the same as absent — the shell writers omit
@@ -274,6 +302,9 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         deliverySpec = Self.normalized(try? c.decode(String.self, forKey: .deliverySpec))
         requestId = Self.normalized(try? c.decode(String.self, forKey: .requestId))
         permissionPayload = Self.normalized(try? c.decode(String.self, forKey: .permissionPayload))
+        // Absent in every signal a hook writes and in any history stored before
+        // folding existed; both mean "one completion".
+        groupedCount = try? c.decode(Int.self, forKey: .groupedCount)
     }
 
     /// Normalises a JSON `createdAt` (number or numeric string) to epoch seconds.
@@ -640,6 +671,40 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
 enum AlertKind: String, Codable { case finished, waiting }
 
 extension DevReadyAlert {
+    var completionCount: Int { max(1, groupedCount ?? 1) }
+
+    /// What a folded row is keyed on: the project, within one host app.
+    ///
+    /// `title` is the project or worktree ("NotchPill", "fix-the-thing") and
+    /// `source` the app it is running in, so two terminals working on the same
+    /// repo stay separate rows — they are separate things to go and look at —
+    /// while a session and its subagents in one place become one.
+    ///
+    /// `nil` for anything that must not fold. Only `finished` folds: a
+    /// `waiting` alert carries the answer buttons and the reply target, and
+    /// collapsing two of those would take away the ability to answer either.
+    var completionGroupKey: String? {
+        guard kind == .finished else { return nil }
+        guard let title = title.isEmpty ? nil : title else { return nil }
+        return "\(source ?? "")\u{1}\(title)"
+    }
+
+    /// Folds `other` into this row, keeping this row's identity so anything
+    /// already pointing at it — dismissal, pinning, the focus tap — still
+    /// resolves. Carries the newest timestamp so ordering stays honest.
+    func folding(_ other: DevReadyAlert) -> DevReadyAlert {
+        var merged = self
+        merged.groupedCount = completionCount + other.completionCount
+        if let theirs = other.createdAt, theirs > (createdAt ?? 0) {
+            merged.createdAt = theirs
+        }
+        // The newest message is the one worth showing; an older one is history.
+        if let message = other.agentMessage, !message.isEmpty {
+            merged.agentMessage = message
+        }
+        return merged
+    }
+
     /// Orders a burst of activity into the one thing that merits attention
     /// first, followed by the quiet backlog. A blocked agent always outranks a
     /// completion notification; among equal kinds, the newest event wins.

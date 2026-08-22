@@ -264,6 +264,14 @@ final class NotchState: ObservableObject {
             }
             if let index = devReadyAlerts.firstIndex(where: { $0.id == alert.id }) {
                 devReadyAlerts[index] = alert
+            } else if let key = alert.completionGroupKey,
+                      let index = devReadyAlerts.firstIndex(where: { $0.completionGroupKey == key }) {
+                // Fold rather than stack. A session and its subagents each send
+                // their own finished signal, so one round of work arrived as a
+                // wall of near-identical peeks. Folding into the row already on
+                // screen keeps its id, so a dismissal or tap aimed at it still
+                // lands.
+                devReadyAlerts[index] = devReadyAlerts[index].folding(alert)
             } else {
                 devReadyAlerts.append(alert)
             }
