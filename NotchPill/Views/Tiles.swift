@@ -185,115 +185,6 @@ struct CalendarTile: View {
     }
 }
 
-// MARK: - File shelf
-
-/// Drag files onto the notch to stash them here; drag them back out to Finder,
-/// AirDrop, Mail, etc. Highlights while a drag hovers the drop zone.
-struct ShelfTile: View {
-    @ObservedObject var shelf: ShelfStore
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                Image(systemName: "tray.full").font(.system(size: 13))
-                Text("Shelf").font(.system(size: 15, weight: .medium))
-                Spacer(minLength: 0)
-                if !shelf.items.isEmpty {
-                    // Share/AirDrop everything on the shelf.
-                    ShareLink(items: shelf.items.map(\.url)) {
-                        Image(systemName: "square.and.arrow.up").font(.system(size: 12))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.7))
-                    Button { shelf.clear() } label: {
-                        Image(systemName: "xmark.circle.fill").font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.4))
-                }
-            }
-            .foregroundStyle(.white.opacity(0.6))
-
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder private var content: some View {
-        if shelf.items.isEmpty {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
-                .foregroundStyle(shelf.isDropTargeted ? Color.accentColor : .white.opacity(0.25))
-                .overlay(
-                    Text("Drop files")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.4))
-                )
-                .frame(height: 44)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(shelf.isDropTargeted ? Color.accentColor.opacity(0.15) : .clear)
-                )
-        } else {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(shelf.items) { item in
-                        ShelfChip(item: item) { shelf.remove(item) }
-                    }
-                }
-            }
-            .frame(height: 44)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(shelf.isDropTargeted ? Color.accentColor : .clear, lineWidth: 1.5)
-            )
-        }
-    }
-}
-
-/// A single stashed file: icon + name, draggable out, removable.
-struct ShelfChip: View {
-    let item: ShelfStore.Item
-    let onRemove: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        VStack(spacing: 2) {
-            Image(nsImage: item.icon)
-                .resizable()
-                .frame(width: 30, height: 30)
-            Text(item.name)
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.7))
-                .lineLimit(1)
-                .frame(width: 44)
-        }
-        .padding(4)
-        .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.06)))
-        .overlay(alignment: .topTrailing) {
-            if hovering {
-                Button(action: onRemove) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white, .black)
-                }
-                .buttonStyle(.plain)
-                .offset(x: 4, y: -4)
-            }
-        }
-        .onHover { hovering = $0 }
-        // Drag the real file back out to Finder / AirDrop / any drop target.
-        .onDrag { NSItemProvider(contentsOf: item.url) ?? NSItemProvider() }
-        .contextMenu {
-            ShareLink("Share / AirDrop…", item: item.url)
-            Button("Reveal in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([item.url])
-            }
-            Button("Remove", role: .destructive, action: onRemove)
-        }
-    }
-}
-
 // MARK: - Volume HUD
 
 /// Brief overlay shown when volume is adjusted via keyboard shortcuts.
@@ -934,8 +825,6 @@ enum ExpandedActivityBuilder {
         timer: ActiveTimer?,
         systemStats: SystemStats?,
         battery: BatteryStatus?,
-        shelfCount: Int,
-        shelfNames: [String],
         agentSessions: [AgentSession] = [],
         openCodeUsage: OpenCodeUsage? = nil,
         codexQuota: CodexQuota? = nil,
@@ -954,7 +843,11 @@ enum ExpandedActivityBuilder {
         showShelf: Bool,
         showAgents: Bool = false,
         showCI: Bool = false,
-        showRecentAlerts: Bool = false
+        showRecentAlerts: Bool = false,
+        shelfItems: [ShelfCardItem] = [],
+        shelfReceipt: ShelfFilingReceipt? = nil,
+        shelfError: String? = nil,
+        shelfDropTargeted: Bool = false
     ) -> [ExpandedActivity] {
         var items: [ExpandedActivity] = []
         // Live agents lead: they are the only card that answers "what is
@@ -970,6 +863,20 @@ enum ExpandedActivityBuilder {
         if showCI, !ciRuns.isEmpty { items.append(.ci(ciRuns)) }
         if showRecentAlerts, !recentAlerts.isEmpty { items.append(.recentAlerts(recentAlerts)) }
         if showMedia, let np = nowPlaying, !np.isEmpty { items.append(.media(np)) }
+        // Directly after media, not down with battery and the clock. The deck
+        // is trimmed to `visibleCardLimit` (5 at default scale), and from the
+        // tail the shelf never survived it — a file dropped seconds ago would
+        // land, persist, and render nothing, which reads as a broken drop.
+        // It only appears when it has something to say, so the cost to the
+        // cards below it is zero the rest of the time.
+        // `shelfDropTargeted` is what makes the feature findable: with an empty
+        // shelf there is otherwise no card, so a drag over the notch had
+        // nothing to aim at and no feedback that a drop would land.
+        if showShelf, !shelfItems.isEmpty || shelfReceipt != nil || shelfError != nil
+            || shelfDropTargeted {
+            items.append(.shelf(items: shelfItems, receipt: shelfReceipt, error: shelfError,
+                                isDropTargeted: shelfDropTargeted))
+        }
         if showActiveApp {
             if let hint = appSwitchHint {
                 items.append(.appSwitch(hint))
@@ -982,7 +889,6 @@ enum ExpandedActivityBuilder {
         if showVolume, let volume = systemVolume { items.append(.volume(volume)) }
         if showSystemStats, let stats = systemStats { items.append(.systemStats(stats)) }
         if showBattery, let battery { items.append(.battery(battery)) }
-        if showShelf, shelfCount > 0 { items.append(.shelf(count: shelfCount, names: shelfNames)) }
         if showClock { items.append(.clock) }
         return items
     }
@@ -996,6 +902,8 @@ struct ExpandedActivityCard: View {
     var readability: CGFloat = 1.0
     var textScale: CGFloat = 1.0
     var expandToFill: Bool = false
+    @State private var hoveredShelfItem: UUID?
+    @ObservedObject private var destinations = DestinationStore.shared
 
     private func s(_ value: CGFloat) -> CGFloat { value * readability }
     private func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
@@ -1073,8 +981,8 @@ struct ExpandedActivityCard: View {
                 systemStatsCard(stats)
             case .battery(let status):
                 batteryCard(status)
-            case .shelf(let count, let names):
-                shelfCard(count: count, names: names)
+            case .shelf(let items, let receipt, let error, let targeted):
+                shelfCard(items: items, receipt: receipt, error: error, isDropTargeted: targeted)
             case .agents(let sessions):
                 agentsCard(sessions)
             case .openCodeUsage(let usage):
@@ -1807,22 +1715,172 @@ struct ExpandedActivityCard: View {
         .frame(minWidth: s(72), alignment: .leading)
     }
 
-    private func shelfCard(count: Int, names: [String]) -> some View {
+    @ViewBuilder
+    private func shelfCard(items: [ShelfCardItem], receipt: ShelfFilingReceipt?,
+                           error: String?, isDropTargeted: Bool) -> some View {
         VStack(alignment: .leading, spacing: s(4)) {
-            Label("Shelf", systemImage: "tray.full")
-                .font(font(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.45))
-            Text(count == 1 ? "1 file" : "\(count) files")
-                .font(font(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
-            ForEach(names, id: \.self) { name in
-                Text(name)
-                    .font(font(size: 10))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .lineLimit(1)
+            // The toast takes over the header rather than the chip row: filing
+            // one of several files must not hide the rest for ten seconds, and
+            // swapping the header keeps the card's height constant.
+            HStack(spacing: s(5)) {
+                if let error {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(font(size: 11))
+                        .foregroundStyle(.orange.opacity(0.85))
+                    Text(error)
+                        .font(font(size: 11))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                } else if let receipt {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(font(size: 11))
+                        .foregroundStyle(.green.opacity(0.8))
+                    Text("Moved to \(receipt.destinationName)")
+                        .font(font(size: 11))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    Button("Undo") { actions.undoShelfFiling() }
+                        .font(font(size: 11, weight: .medium))
+                        .foregroundStyle(NotchDesign.accent)
+                        .buttonStyle(.plain)
+                    if !destinations.pinned.contains(receipt.token.to.deletingLastPathComponent()) {
+                        Button("Pin") { destinations.pin(receipt.token.to.deletingLastPathComponent()) }
+                            .font(font(size: 11, weight: .medium))
+                            .foregroundStyle(NotchDesign.accent)
+                            .buttonStyle(.plain)
+                    }
+                } else {
+                    Label("Shelf", systemImage: "tray.full")
+                        .font(font(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.45))
+                    Spacer(minLength: 0)
+                    if !items.isEmpty {
+                        ShareLink(items: items.map(\.url)) {
+                            Image(systemName: "square.and.arrow.up").font(font(size: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white.opacity(0.55))
+                        Button { items.forEach { actions.removeShelfItem($0.id) } } label: {
+                            Image(systemName: "xmark.circle.fill").font(font(size: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white.opacity(0.35))
+                    }
+                }
+            }
+
+            // Files already on the shelf always win the space. The drop zone
+            // only stands in when there is nothing else to show — a targeting
+            // flag that failed to clear must never be able to hide the chips,
+            // which are the only route to the destination menu.
+            if !items.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: s(6)) {
+                        ForEach(items) { item in shelfChip(item) }
+                    }
+                }
+                .frame(height: s(46))
+                .overlay(
+                    RoundedRectangle(cornerRadius: s(8), style: .continuous)
+                        .strokeBorder(NotchDesign.accent,
+                                      lineWidth: isDropTargeted ? 1.4 : 0)
+                )
+            } else if isDropTargeted {
+                RoundedRectangle(cornerRadius: s(8), style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1.4, dash: [4, 3]))
+                    .foregroundStyle(NotchDesign.accent)
+                    .background(
+                        RoundedRectangle(cornerRadius: s(8), style: .continuous)
+                            .fill(NotchDesign.accent.opacity(0.15))
+                    )
+                    .overlay(
+                        Label("Drop to add", systemImage: "arrow.down.doc")
+                            .font(font(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.9))
+                    )
+                    .frame(height: s(46))
             }
         }
-        .frame(minWidth: s(100), alignment: .leading)
+        .frame(minWidth: s(108), alignment: .leading)
+    }
+
+    private func shelfChip(_ item: ShelfCardItem) -> some View {
+        // A Button, not `.onTapGesture`: `.onDrag` installs its own gesture on
+        // the same view and swallows taps often enough that clicking a chip did
+        // nothing at all. A button's click goes through AppKit and is not in
+        // competition with the drag.
+        Button {
+            presentDestinationMenu(for: item)
+        } label: {
+            VStack(spacing: s(2)) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
+                    .resizable()
+                    .frame(width: s(22), height: s(22))
+                Text(item.name)
+                    .font(font(size: 9))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(width: s(40))
+            }
+            .frame(width: s(52), height: s(42))
+            .background(
+                RoundedRectangle(cornerRadius: s(6), style: .continuous)
+                    .fill(Color.white.opacity(hoveredShelfItem == item.id ? 0.14 : 0.06))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // Always visible, never hover-only: this badge is the only thing that
+        // says a chip can be filed at all, and a control you have to discover
+        // by hovering is a control most people never find.
+        .overlay(alignment: .bottomTrailing) {
+            Image(systemName: "folder.fill")
+                .font(font(size: 8))
+                .foregroundStyle(.white.opacity(0.9))
+                .padding(s(2))
+                .background(Circle().fill(NotchDesign.accent))
+                .offset(x: s(3), y: s(3))
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .topTrailing) {
+            if hoveredShelfItem == item.id {
+                Button { actions.removeShelfItem(item.id) } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(font(size: 10))
+                        .foregroundStyle(.white, .black)
+                }
+                .buttonStyle(.plain)
+                .offset(x: s(4), y: -s(4))
+            }
+        }
+        .onHover { hoveredShelfItem = $0 ? item.id : nil }
+        .onDrag { NSItemProvider(contentsOf: item.url) ?? NSItemProvider() }
+        .contextMenu {
+            Button("Move to…") { presentDestinationMenu(for: item) }
+            ShareLink("Share / AirDrop…", item: item.url)
+            Button("Reveal in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([item.url])
+            }
+            Button("Remove", role: .destructive) { actions.removeShelfItem(item.id) }
+        }
+        .help("Click to move \(item.name) to a folder")
+    }
+
+    /// `NSMenu.popUp` runs a modal event loop, so the hold is raised for the
+    /// whole time it is on screen and dropped once a choice is made.
+    private func presentDestinationMenu(for item: ShelfCardItem) {
+        let entries = destinations.destinations()
+        LogStore.shelf("chip tapped: \(item.name) — \(entries.count) destinations")
+        actions.holdNotchOpen(true)
+        ShelfDestinationMenu.shared.present(destinations: entries) { folder in
+            LogStore.shelf("picked \(folder.lastPathComponent) for \(item.name)")
+            actions.fileShelfItem(item.id, folder)
+        }
+        actions.holdNotchOpen(false)
     }
 
     private func batterySymbol(for status: BatteryStatus) -> String {
@@ -1859,10 +1917,6 @@ struct ExpandedActivityCard: View {
     }
 }
 
-/// Cross-dissolves between two SF Symbols in place.
-///
-/// `contentTransition(.symbolEffect(.replace))` needs the value it is keyed on
-/// to change, hence the explicit animation on the symbol name.
 private struct SymbolMorph: ViewModifier {
     let enabled: Bool
     let symbol: String

@@ -4,6 +4,7 @@ struct PreferencesView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var timer = TimerStore.shared
     @ObservedObject private var updates = UpdateChecker.shared
+    @ObservedObject private var destinations = DestinationStore.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -12,6 +13,7 @@ struct PreferencesView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     collapsedSection
                     expandedSection
+                    shelfSection
                     cardShareSection
                     systemHUDSection
                     timerSection
@@ -87,6 +89,57 @@ struct PreferencesView: View {
                         .buttonStyle(.link)
                         .disabled(settings.cardWeights.isEmpty)
                 }
+            }
+        }
+    }
+
+    private var shelfSection: some View {
+        SettingsPanel(title: "Shelf", subtitle: "Folders available when filing a dropped file") {
+            HStack {
+                Text("Pinned folders")
+                Spacer()
+                Button {
+                    let panel = NSOpenPanel()
+                    panel.canChooseDirectories = true
+                    panel.canChooseFiles = false
+                    panel.allowsMultipleSelection = false
+                    if panel.runModal() == .OK, let url = panel.url {
+                        destinations.pin(url)
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.bordered)
+            }
+            if destinations.pinned.isEmpty {
+                Text("No pinned folders — recent Finder folders will still appear.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                List {
+                    ForEach(destinations.pinned, id: \.self) { url in
+                        HStack(spacing: 7) {
+                            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                                .resizable()
+                                .frame(width: 16, height: 16)
+                            Text(url.lastPathComponent)
+                                .lineLimit(1)
+                            Spacer()
+                            Button {
+                                destinations.unpin(url)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                        }
+                        .help(url.path)
+                    }
+                    .onMove { offsets, destination in
+                        destinations.movePinned(from: offsets, to: destination)
+                    }
+                }
+                .frame(height: min(CGFloat(destinations.pinned.count) * 30 + 8, 140))
             }
         }
     }

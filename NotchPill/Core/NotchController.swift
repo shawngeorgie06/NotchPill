@@ -280,7 +280,14 @@ final class NotchController {
             openURL: { url in
                 guard let u = URL(string: url) else { return }
                 NSWorkspace.shared.open(u)
-            }
+            },
+            fileShelfItem: { [weak self] id, folder in self?.shelf.fileItem(id: id, into: folder) },
+            removeShelfItem: { [weak self] id in
+                guard let self, let item = self.shelf.items.first(where: { $0.id == id }) else { return }
+                self.shelf.remove(item)
+            },
+            undoShelfFiling: { [weak self] in self?.shelf.undoLastFiling() },
+            holdNotchOpen: { [weak self] hold in self?.setInteractionHold(hold) }
         )
         return NotchRootView(state: state, shelf: shelf, timer: TimerStore.shared, metrics: metrics, actions: actions)
     }
@@ -475,11 +482,23 @@ final class NotchController {
             container.collapsedContentSizeProvider = { [weak self] in self?.collapsedContentSize() ?? .zero }
             container.expandedContentSizeProvider = { [weak self] in self?.expandedContentSize() ?? .zero }
             container.onSpacePressed = { [weak self] in self?.nowPlaying.togglePlayPause() }
+            container.onUndoShelfFiling = { [weak self] in self?.shelf.undoLastFiling() }
             container.onPillEngaged = { [weak self] in self?.engagePill(takeKey: true) }
-            container.onDropFiles = { [weak self] urls in self?.shelf.add(urls: urls) }
+            container.onDropFiles = { [weak self] urls in
+                guard let self else { return }
+                let before = self.shelf.items.count
+                self.shelf.add(urls: urls)
+                LogStore.shelf("drop: \(urls.count) url(s) — items \(before) -> \(self.shelf.items.count)"
+                    + " [\(urls.map(\.lastPathComponent).joined(separator: ", "))]")
+                // Land on the card that can actually show the result.
+                self.state.focusExpandedDeck(kind: "shelf")
+            }
             container.onDragTargetingChanged = { [weak self] targeting in
                 guard let self else { return }
                 self.shelf.isDropTargeted = targeting
+                // Switch as the drag *arrives*, so the drop zone is on screen
+                // before the file is released rather than after.
+                if targeting { self.state.focusExpandedDeck(kind: "shelf") }
                 // Keep the pill open while a drag hovers; collapse (with grace)
                 // when it leaves, mirroring hover behavior.
                 targeting ? self.pointerEnteredHot() : self.pointerExitedHot()
@@ -916,7 +935,24 @@ final class NotchController {
         window?.orderFrontRegardless()
     }
 
+    /// Set while a popover (the shelf's destination menu) owns the pointer.
+    /// Collapsing underneath one destroys its anchor view and dismisses it.
+    private var interactionHold = false
+
+    func setInteractionHold(_ hold: Bool) {
+        interactionHold = hold
+        if hold {
+            collapseWorkItem?.cancel()
+            collapseWorkItem = nil
+            pillEngaged = true
+        } else {
+            // Re-evaluate immediately: the pointer may already be well away.
+            pointerExitedHot()
+        }
+    }
+
     private func pointerExitedHot() {
+        if interactionHold { return }
         let mouse = NSEvent.mouseLocation
         if isPointerOverPill(mouse) {
             return
@@ -954,6 +990,7 @@ final class NotchController {
         let grace = state.isExpanded ? 0.18 : collapseGrace
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            if self.interactionHold { return }
             let mouse = NSEvent.mouseLocation
             if self.isPointerOverPill(mouse) {
                 return

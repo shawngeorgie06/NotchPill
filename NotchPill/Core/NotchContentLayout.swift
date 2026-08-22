@@ -807,6 +807,7 @@ enum NotchContentLayout {
         // the bottom of the pill.
         case .claudeQuota: return 70
         case .cursorQuota: return 70
+        case .shelf: return 66
         case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)
         case .recentAlerts(let alerts): return rowsHeight(header: 18, row: 22, count: alerts.count)
         // Everything else is a label over a value.

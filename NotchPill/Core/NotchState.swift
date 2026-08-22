@@ -187,6 +187,21 @@ final class NotchState: ObservableObject {
         expandedDeckKind = kinds[target]
     }
 
+    /// Jump the deck to a card by kind, for events that arrive from outside the
+    /// deck entirely — a file dragged at the notch has no idea which page the
+    /// user was reading, and landing a drop on a page that cannot show it reads
+    /// as the drop having done nothing.
+    ///
+    /// Only the kind is set. `resolvedExpandedDeckPage` prefers it over the
+    /// stored index, and `reconcileExpandedDeck` fixes the index up once the
+    /// view knows the real card order — which is the only place that order is
+    /// known.
+    func focusExpandedDeck(kind: String) {
+        guard expandedDeckKind != kind else { return }
+        expandedDeckKind = kind
+        expandedDeckDirection = 1
+    }
+
     /// Point the card transition the way a *track* change is going.
     ///
     /// The slide direction was only ever set by page moves, so skipping a track

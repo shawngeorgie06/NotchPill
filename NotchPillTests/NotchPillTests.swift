@@ -25,6 +25,298 @@ struct ProcessRunnerTests {
     }
 }
 
+// MARK: - Shelf filing
+
+@Suite("ShelfFiler")
+struct ShelfFilerTests {
+    private func tree(_ name: String = UUID().uuidString) throws -> (URL, URL) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        let destination = root.appendingPathComponent("destination")
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        return (root, destination)
+    }
+
+    @Test("files into an empty folder and returns an undo token")
+    func filesIntoEmptyFolder() throws {
+        let (root, folder) = try tree()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("report.pdf")
+        try Data("hello".utf8).write(to: source)
+        let token = try ShelfFiler.file(source, into: folder)
+        #expect(!FileManager.default.fileExists(atPath: source.path))
+        #expect(FileManager.default.fileExists(atPath: token.to.path))
+        #expect(token.to.lastPathComponent == "report.pdf")
+    }
+
+    @Test("collision adds Finder-style numeric suffixes without overwriting")
+    func collisions() throws {
+        let (root, folder) = try tree()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("report.pdf")
+        let original = folder.appendingPathComponent("report.pdf")
+        try Data("new".utf8).write(to: source)
+        try Data("original".utf8).write(to: original)
+        let first = try ShelfFiler.file(source, into: folder)
+        #expect(first.to.lastPathComponent == "report 2.pdf")
+        #expect(String(data: try Data(contentsOf: original), encoding: .utf8) == "original")
+
+        let secondSource = root.appendingPathComponent("report.pdf")
+        try Data("third".utf8).write(to: secondSource)
+        let second = try ShelfFiler.file(secondSource, into: folder)
+        #expect(second.to.lastPathComponent == "report 3.pdf")
+    }
+
+    @Test("extensionless and dotfile names get suffixes")
+    func extensionlessNames() throws {
+        let (root, folder) = try tree()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["README", ".env"] {
+            let source = root.appendingPathComponent(name)
+            let existing = folder.appendingPathComponent(name)
+            try Data("source".utf8).write(to: source)
+            try Data("existing".utf8).write(to: existing)
+            let token = try ShelfFiler.file(source, into: folder)
+            #expect(token.to.lastPathComponent == "\(name) 2")
+        }
+    }
+
+    @Test("undo restores the original path and contents")
+    func undoRestores() throws {
+        let (root, folder) = try tree()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("notes.txt")
+        try Data("notes".utf8).write(to: source)
+        let token = try ShelfFiler.file(source, into: folder)
+        try ShelfFiler.undo(token)
+        #expect(FileManager.default.fileExists(atPath: source.path))
+        #expect(!FileManager.default.fileExists(atPath: token.to.path))
+        #expect(String(data: try Data(contentsOf: source), encoding: .utf8) == "notes")
+    }
+
+    @Test("undo refuses a vanished filed file or occupied source")
+    func undoConflicts() throws {
+        let (root, folder) = try tree()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("a.txt")
+        try Data("a".utf8).write(to: source)
+        let token = try ShelfFiler.file(source, into: folder)
+        try FileManager.default.removeItem(at: token.to)
+        #expect(throws: ShelfFiler.FilingError.undoConflicted) { try ShelfFiler.undo(token) }
+
+        try Data("a".utf8).write(to: source)
+        try Data("b".utf8).write(to: token.to)
+        #expect(throws: ShelfFiler.FilingError.undoConflicted) { try ShelfFiler.undo(token) }
+    }
+
+    @Test("missing source is rejected before touching the destination")
+    func missingSource() throws {
+        let (root, folder) = try tree()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("missing.txt")
+        #expect(throws: ShelfFiler.FilingError.sourceMissing(source)) {
+            try ShelfFiler.file(source, into: folder)
+        }
+    }
+
+    @Test("a read-only destination leaves the source in place")
+    func readOnlyDestination() throws {
+        let (root, folder) = try tree()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let source = root.appendingPathComponent("locked.txt")
+        try Data("locked".utf8).write(to: source)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: folder.path)
+        do {
+            try ShelfFiler.file(source, into: folder)
+            #expect(FileManager.default.fileExists(atPath: source.path) == false)
+        } catch let error as ShelfFiler.FilingError {
+            #expect(error == .destinationUnwritable(folder))
+            #expect(FileManager.default.fileExists(atPath: source.path))
+        }
+    }
+}
+
+@Suite("FinderRecentFolders")
+struct FinderRecentFoldersTests {
+    private func bookmark(_ url: URL) throws -> Data {
+        try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+    }
+
+    @Test("resolves directories, filters files, and preserves order")
+    func resolvesAndLimits() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let one = root.appendingPathComponent("one")
+        let two = root.appendingPathComponent("two")
+        let file = root.appendingPathComponent("file.txt")
+        try FileManager.default.createDirectory(at: one, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: two, withIntermediateDirectories: true)
+        try Data().write(to: file)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let defaults = UserDefaults(suiteName: "finder-tests.\(UUID().uuidString)")!
+        defaults.set([
+            ["file-bookmark": try bookmark(one)],
+            ["file-bookmark": try bookmark(file)],
+            ["file-bookmark": try bookmark(two)]
+        ], forKey: FinderRecentFolders.defaultsKey)
+        let result = FinderRecentFolders.load(defaults: defaults, limit: 2)
+        #expect(result.map { $0.path } == [one, two].map { $0.standardizedFileURL.path })
+    }
+
+    @Test("malformed and absent data returns an empty list")
+    func malformedIsEmpty() {
+        let defaults = UserDefaults(suiteName: "finder-tests.\(UUID().uuidString)")!
+        #expect(FinderRecentFolders.load(defaults: defaults).isEmpty)
+        defaults.set(["not a dictionary"], forKey: FinderRecentFolders.defaultsKey)
+        #expect(FinderRecentFolders.load(defaults: defaults).isEmpty)
+    }
+}
+
+@MainActor
+@Suite("DestinationStore")
+struct DestinationStoreTests {
+    private func folder(_ name: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("dest-\(name)-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    @Test("pinned precede recents and duplicates remain pinned")
+    func orderingAndDeduplication() throws {
+        let pinned = try folder("pinned")
+        let recent = try folder("recent")
+        let defaults = UserDefaults(suiteName: "destination-tests.\(UUID().uuidString)")!
+        let store = DestinationStore(defaults: defaults, recents: { [pinned, recent] })
+        store.pin(pinned)
+        #expect(store.destinations().map(\.url) == [pinned, recent])
+        #expect(store.destinations().first?.source == .pinned)
+        try? FileManager.default.removeItem(at: pinned)
+        #expect(store.pinned == [pinned])
+        #expect(store.destinations().map(\.url) == [recent])
+        try? FileManager.default.removeItem(at: recent)
+    }
+
+    @Test("recents are capped at six")
+    func recentLimit() throws {
+        let urls = try (0..<8).map { try folder("recent-\($0)") }
+        defer { urls.forEach { try? FileManager.default.removeItem(at: $0) } }
+        let store = DestinationStore(
+            defaults: UserDefaults(suiteName: "destination-tests.\(UUID().uuidString)")!,
+            recents: { urls }
+        )
+        #expect(store.destinations().count == 6)
+    }
+}
+
+@Suite("ExpandedActivityBuilder shelf")
+struct ExpandedActivityShelfTests {
+    private func build(
+        shelfItems: [ShelfCardItem],
+        receipt: ShelfFilingReceipt? = nil,
+        error: String? = nil
+    ) -> [ExpandedActivity] {
+        ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            showMedia: false, showActiveApp: false, showVolume: false,
+            showClock: false, showCalendar: false, showTimer: false,
+            showSystemStats: false, showBattery: false, showShelf: true,
+            shelfItems: shelfItems, shelfReceipt: receipt, shelfError: error)
+    }
+
+    @Test("an empty shelf has no card without a receipt or error")
+    func emptyShelfIsHidden() {
+        #expect(build(shelfItems: []).isEmpty)
+    }
+
+    /// A drop arrives from outside the deck and knows nothing about which page
+    /// is showing. Landing on any other card makes the drop look like it did
+    /// nothing at all.
+    @MainActor
+    @Test("a drop pulls the deck to the shelf from any other card")
+    func dropFocusesTheShelf() {
+        let kinds = ["agents", "media", "shelf", "battery"]
+        let state = NotchState()
+        state.selectExpandedDeckPage(1, kinds: kinds)
+        #expect(state.resolvedExpandedDeckPage(for: kinds) == 1)
+
+        state.focusExpandedDeck(kind: "shelf")
+        #expect(state.resolvedExpandedDeckPage(for: kinds) == 2)
+    }
+
+    /// The shelf is not always on the deck — it appears only when it has
+    /// something to show. Asking for a card that is not there must not strand
+    /// the deck on a page that does not exist.
+    @MainActor
+    @Test("focusing a card the deck does not have leaves it in range")
+    func focusingAnAbsentCardIsSafe() {
+        let kinds = ["agents", "media"]
+        let state = NotchState()
+        state.focusExpandedDeck(kind: "shelf")
+        let page = state.resolvedExpandedDeckPage(for: kinds)
+        #expect(kinds.indices.contains(page))
+    }
+
+    /// Without this the feature is invisible: an empty shelf draws no card, so
+    /// a file dragged at the notch has nothing to aim at and gives no sign that
+    /// releasing would do anything.
+    @Test("a hovering drag reveals the drop zone on an empty shelf")
+    func dragRevealsDropZone() {
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            showMedia: false, showActiveApp: false, showVolume: false,
+            showClock: false, showCalendar: false, showTimer: false,
+            showSystemStats: false, showBattery: false, showShelf: true,
+            shelfItems: [], shelfReceipt: nil, shelfError: nil,
+            shelfDropTargeted: true)
+        #expect(items.contains { $0.kind == "shelf" })
+        if case .shelf(_, _, _, let targeted) = items.first {
+            #expect(targeted)
+        } else {
+            Issue.record("expected a shelf card while a drag is targeting")
+        }
+    }
+
+    /// The deck is trimmed to `visibleCardLimit` — 5 at default scale. From the
+    /// tail of the priority order the shelf never survived that cut, so a
+    /// dropped file rendered nothing at all and the drop looked broken.
+    @Test("a dropped file survives the visible-card trim")
+    func shelfSurvivesTheTrim() {
+        let item = ShelfCardItem(id: UUID(), name: "report.txt",
+                                 url: URL(fileURLWithPath: "/tmp/report.txt"))
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: NowPlaying(title: "Song", artist: "Artist", isPlaying: true),
+            nextEvent: nil, appSwitchHint: nil, frontmostApp: "Safari",
+            systemVolume: 42, timer: nil,
+            systemStats: SystemStats(cpuPercent: 10, memoryPercent: 20),
+            battery: BatteryStatus(level: 50, isCharging: false),
+            showMedia: true, showActiveApp: true, showVolume: true,
+            showClock: true, showCalendar: false, showTimer: false,
+            showSystemStats: true, showBattery: true, showShelf: true,
+            shelfItems: [item], shelfReceipt: nil, shelfError: nil)
+        let limit = NotchContentLayout.visibleCardLimit(forUserScale: 1.0)
+        #expect(items.prefix(limit).contains { $0.kind == "shelf" })
+    }
+
+    @Test("an empty shelf stays visible while the receipt is live")
+    func receiptKeepsCard() {
+        let receipt = ShelfFilingReceipt(
+            token: ShelfFiler.UndoToken(from: URL(fileURLWithPath: "/tmp/a"), to: URL(fileURLWithPath: "/tmp/b/a")),
+            destinationName: "b", itemName: "a", expiresAt: .now)
+        #expect(build(shelfItems: [], receipt: receipt).count == 1)
+    }
+
+    @Test("receipt expiry timestamps do not reanimate the shelf card")
+    func receiptTimeDoesNotChangeContentKey() {
+        let token = ShelfFiler.UndoToken(from: URL(fileURLWithPath: "/tmp/a"), to: URL(fileURLWithPath: "/tmp/b/a"))
+        let first = ShelfFilingReceipt(token: token, destinationName: "b", itemName: "a", expiresAt: .now)
+        let second = ShelfFilingReceipt(token: token, destinationName: "b", itemName: "a", expiresAt: .now.addingTimeInterval(5))
+        #expect(build(shelfItems: [], receipt: first).first?.contentKey == build(shelfItems: [], receipt: second).first?.contentKey)
+    }
+}
+
 // MARK: - Update version comparison
 
 @Suite("UpdateChecker version compare")
@@ -156,8 +448,6 @@ struct ExpandedActivityBuilderTests {
             timer: nil,
             systemStats: nil,
             battery: nil,
-            shelfCount: 0,
-            shelfNames: [],
             showMedia: true,
             showActiveApp: true,
             showVolume: true,
@@ -186,8 +476,6 @@ struct ExpandedActivityBuilderTests {
             timer: nil,
             systemStats: nil,
             battery: nil,
-            shelfCount: 0,
-            shelfNames: [],
             showMedia: false,
             showActiveApp: false,
             showVolume: false,
@@ -1771,7 +2059,7 @@ struct AgentSessionTests {
         let items = ExpandedActivityBuilder.activities(
             nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
             systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
-            shelfCount: 0, shelfNames: [], agentSessions: [],
+            agentSessions: [],
             showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
             showCalendar: false, showTimer: false, showSystemStats: false,
             showBattery: false, showShelf: false, showAgents: true)
@@ -1783,7 +2071,6 @@ struct AgentSessionTests {
         let items = ExpandedActivityBuilder.activities(
             nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: "Xcode",
             systemVolume: 40, timer: nil, systemStats: nil, battery: nil,
-            shelfCount: 0, shelfNames: [],
             agentSessions: [session("a", .working, at: Date())],
             showMedia: false, showActiveApp: true, showVolume: true, showClock: false,
             showCalendar: false, showTimer: false, showSystemStats: false,
@@ -1801,7 +2088,6 @@ struct AgentSessionTests {
         let items = ExpandedActivityBuilder.activities(
             nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
             systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
-            shelfCount: 0, shelfNames: [],
             agentSessions: [session("a", .working, at: Date())], openCodeUsage: usage,
             showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
             showCalendar: false, showTimer: false, showSystemStats: false,
@@ -1814,7 +2100,6 @@ struct AgentSessionTests {
         let items = ExpandedActivityBuilder.activities(
             nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
             systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
-            shelfCount: 0, shelfNames: [],
             agentSessions: [session("a", .working, at: Date())],
             showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
             showCalendar: false, showTimer: false, showSystemStats: false,
@@ -7129,7 +7414,10 @@ struct ActivityKindLabelTests {
         let cases: [ExpandedActivity] = [
             .claudeQuota(quota), .cursorQuota(cursor), .activeApp(name: "x"),
             .systemStats(SystemStats(cpuPercent: 1, memoryPercent: 1)),
-            .ci([]), .agents([]), .clock, .shelf(count: 1, names: ["a"]),
+            .ci([]), .agents([]), .clock,
+            .shelf(items: [ShelfCardItem(id: UUID(), name: "a",
+                                         url: URL(fileURLWithPath: "/tmp/a"))],
+                   receipt: nil, error: nil),
         ]
         for activity in cases {
             let label = activity.kindLabel
@@ -7581,7 +7869,7 @@ struct ActivityIdentityTests {
     @Test func distinctKindsKeepDistinctIdentities() {
         let ids = [ExpandedActivity.clock, .volume(50), .systemStats(SystemStats(cpuPercent: 1, memoryPercent: 1)),
                    .battery(BatteryStatus(level: 50, isCharging: false)),
-                   .agents([]), .ci([]), .shelf(count: 2, names: []),
+                   .agents([]), .ci([]), .shelf(items: [], receipt: nil, error: nil),
                    track("Song A", playing: true)].map(\.id)
         #expect(Set(ids).count == ids.count)
     }

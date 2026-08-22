@@ -16,6 +16,7 @@ final class NotchContainerView: NSView {
     var onHotExited: () -> Void = {}
     var onPillEngaged: () -> Void = {}
     var onSpacePressed: () -> Void = {}
+    var onUndoShelfFiling: () -> Void = {}
     var onDragTargetingChanged: (Bool) -> Void = { _ in }
     var onDropFiles: ([URL]) -> Void = { _ in }
 
@@ -257,6 +258,7 @@ final class NotchContainerView: NSView {
         guard !event.isARepeat else { return }
         switch event.keyCode {
         case 49: onSpacePressed()
+        case 6 where event.modifierFlags.contains(.command): onUndoShelfFiling()
         default: super.keyDown(with: event)
         }
     }
@@ -284,8 +286,20 @@ final class NotchContainerView: NSView {
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard isFileDrag(sender) else { return [] }
         let inside = dragInDropZone(sender)
+        if inside != lastLoggedInside {
+            lastLoggedInside = inside
+            let local = convert(sender.draggingLocation, from: nil)
+            LogStore.shelf("drag \(inside ? "entered" : "left") drop zone"
+                + " — point \(Int(local.x)),\(Int(local.y)) rect \(rectDescription(dropRect))")
+        }
         onDragTargetingChanged(inside)
         return inside ? .copy : []
+    }
+
+    private var lastLoggedInside: Bool?
+
+    private func rectDescription(_ rect: CGRect) -> String {
+        "\(Int(rect.minX)),\(Int(rect.minY)) \(Int(rect.width))x\(Int(rect.height))"
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
@@ -293,12 +307,29 @@ final class NotchContainerView: NSView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard isFileDrag(sender) else { return false }
+        // A completed drop never sends `draggingExited` — AppKit goes straight
+        // to `performDragOperation` and `concludeDragOperation`. Leaving the
+        // targeting flag set strands the shelf card on its drop zone, so the
+        // files land and the chips never appear.
+        defer { onDragTargetingChanged(false) }
+        LogStore.shelf("performDragOperation reached")
+        guard isFileDrag(sender) else {
+            LogStore.shelf("drop rejected: pasteboard carries no file URL")
+            return false
+        }
         let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
         guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self],
                                                                options: options) as? [URL],
-              !urls.isEmpty else { return false }
+              !urls.isEmpty else {
+            LogStore.shelf("drop rejected: no readable URLs on the pasteboard")
+            return false
+        }
         onDropFiles(urls)
         return true
+    }
+
+    /// Belt and braces: a drag the view declines still ends here.
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        onDragTargetingChanged(false)
     }
 }

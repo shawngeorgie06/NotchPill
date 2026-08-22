@@ -27,6 +27,17 @@ struct NotchActions {
     var focusAgentSession: (AgentSession) -> Void = { _ in }
     /// Open a URL (a CI run) in the default browser.
     var openURL: (String) -> Void = { _ in }
+    /// Move a shelf item into a folder.
+    var fileShelfItem: (UUID, URL) -> Void = { _, _ in }
+    /// Drop a shelf item without filing it.
+    var removeShelfItem: (UUID) -> Void = { _ in }
+    /// Put the most recently filed item back where it came from.
+    var undoShelfFiling: () -> Void = {}
+    /// Hold the pill open while a popover owns the pointer. A popover is its
+    /// own window sitting *below* the notch, so reaching for it leaves the
+    /// hover region, collapses the pill, and takes the popover's anchor view
+    /// with it — the menu vanishes before it can be clicked.
+    var holdNotchOpen: (Bool) -> Void = { _ in }
 
     static let noop = NotchActions(
         togglePlayPause: {}, next: {}, previous: {},
@@ -37,6 +48,9 @@ struct NotchActions {
         answer: { _, _ in },
         clearRecentActivity: {},
         focusAgentSession: { _ in },
-        openURL: { _ in }
+        openURL: { _ in },
+        fileShelfItem: { _, _ in },
+        removeShelfItem: { _ in },
+        undoShelfFiling: {}
     )
 }

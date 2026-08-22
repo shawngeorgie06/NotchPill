@@ -54,8 +54,6 @@ enum NotchContentSnapshot {
             timer: timer.active,
             systemStats: state.systemStats,
             battery: state.battery,
-            shelfCount: shelf.items.count,
-            shelfNames: shelf.items.prefix(3).map(\.name),
             agentSessions: agentSessions,
             openCodeUsage: state.openCodeUsage,
             codexQuota: state.codexQuota,
@@ -74,13 +72,42 @@ enum NotchContentSnapshot {
             showShelf: settings.showExpandedShelf,
             showAgents: settings.showExpandedAgents,
             showCI: settings.showExpandedCI,
-            showRecentAlerts: settings.showExpandedRecentActivity
+            showRecentAlerts: settings.showExpandedRecentActivity,
+            shelfItems: shelf.items.map { ShelfCardItem(id: $0.id, name: $0.name, url: $0.url) },
+            shelfReceipt: shelf.receipt,
+            shelfError: shelf.lastError,
+            shelfDropTargeted: shelf.isDropTargeted
         ), pinnedKind: settings.pinnedActivityKind)
         // Smaller pill, fewer cards. The builder already returns them in
         // priority order, so this drops the least important tail rather than
         // shrinking everything past the point of being readable.
         let limit = NotchContentLayout.visibleCardLimit(
             forUserScale: CGFloat(settings.notchScale))
-        return Array(all.prefix(limit))
+        let visible = Array(all.prefix(limit))
+        logShelfDiagnostics(all: all, visible: visible, shelf: shelf, settings: settings)
+        return visible
+    }
+
+    /// Diagnostic only, and only when asked for: `NOTCHPILL_LOG_SHELF=1`.
+    /// Answers the three questions a missing card raises at once — is the
+    /// setting on, does the shelf have anything in it, and did the card survive
+    /// the visible-card trim. Logged only when the answer changes.
+    nonisolated(unsafe) private static var lastShelfShape: String?
+
+    private static func logShelfDiagnostics(all: [ExpandedActivity],
+                                            visible: [ExpandedActivity],
+                                            shelf: ShelfStore,
+                                            settings: AppSettings) {
+        guard LogStore.tracesShelf else { return }
+        let shape = "showExpandedShelf=\(settings.showExpandedShelf)"
+            + " items=\(shelf.items.count)"
+            + " targeted=\(shelf.isDropTargeted)"
+            + " built=\(all.contains { $0.kind == "shelf" })"
+            + " visible=\(visible.contains { $0.kind == "shelf" })"
+            + " limit=\(visible.count)/\(all.count)"
+            + " deck=[\(visible.map(\.kind).joined(separator: ","))]"
+        guard shape != lastShelfShape else { return }
+        lastShelfShape = shape
+        LogStore.shelf(shape)
     }
 }

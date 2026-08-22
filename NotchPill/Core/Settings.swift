@@ -397,7 +397,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedTimer: true,
             Keys.showExpandedSystemStats: false,
             Keys.showExpandedBattery: false,
-            Keys.showExpandedShelf: false,
+            Keys.showExpandedShelf: true,
             Keys.showExpandedAgents: true,
             Keys.showExpandedCI: true,
             Keys.showClaudeUsage: false,
@@ -504,7 +504,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedTimer: true,
             Keys.showExpandedSystemStats: false,
             Keys.showExpandedBattery: false,
-            Keys.showExpandedShelf: false,
+            Keys.showExpandedShelf: true,
             Keys.showExpandedAgents: true,
             Keys.showExpandedCI: true,
             Keys.showExpandedRecentActivity: false,
@@ -542,7 +542,7 @@ final class AppSettings: ObservableObject {
         showExpandedTimer = true
         showExpandedSystemStats = false
         showExpandedBattery = false
-        showExpandedShelf = false
+        showExpandedShelf = true
         showExpandedAgents = true
         showExpandedCI = true
         showExpandedRecentActivity = false

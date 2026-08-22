@@ -686,6 +686,12 @@ enum CollapsedChip: Equatable, Identifiable {
 }
 
 /// Live activity shown in the expanded pill (status cards, not utility panels).
+struct ShelfCardItem: Identifiable, Equatable, Hashable {
+    let id: UUID
+    let name: String
+    let url: URL
+}
+
 enum ExpandedActivity: Equatable, Identifiable {
     case media(NowPlaying)
     case appSwitch(String)
@@ -696,7 +702,8 @@ enum ExpandedActivity: Equatable, Identifiable {
     case timer(ActiveTimer)
     case systemStats(SystemStats)
     case battery(BatteryStatus)
-    case shelf(count: Int, names: [String])
+    case shelf(items: [ShelfCardItem], receipt: ShelfFilingReceipt?, error: String?,
+               isDropTargeted: Bool = false)
     case agents([AgentSession])
     case openCodeUsage(OpenCodeUsage)
     case codexQuota(CodexQuota)
@@ -750,7 +757,8 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .timer(let t): return "timer-\(t.endDate.timeIntervalSince1970)"
         case .systemStats(let s): return "stats-\(s.cpuPercent)-\(s.memoryPercent)"
         case .battery(let b): return "battery-\(b.level)-\(b.isCharging)"
-        case .shelf(let count, _): return "shelf-\(count)"
+        case .shelf(let items, let receipt, let error, let targeted):
+            return "shelf-\(items.map(\.name).joined(separator: "|"))-\(receipt?.itemName ?? "")-\(error ?? "")-\(targeted)"
         case .agents(let list): return "agents-" + list.map(\.id).joined(separator: ",")
         case .openCodeUsage(let usage): return "opencode-\(usage.totalTokens)-\(usage.cost)"
         case .codexQuota(let quota): return "codex-quota-\(quota.usedPercent)"
