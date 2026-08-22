@@ -107,6 +107,20 @@ final class LogStore: ObservableObject {
     nonisolated static let mirrorsToStdout =
         ProcessInfo.processInfo.environment["NOTCHPILL_LOG_STDOUT"] == "1"
 
+    /// Shelf tracing, off unless `NOTCHPILL_LOG_SHELF=1`.
+    ///
+    /// A drop crosses three layers before anything is visible — the drag
+    /// callbacks, the store, and the card the deck chose to render — and a
+    /// failure at any of them looks identical from the outside: nothing
+    /// happens. These lines say which layer stopped.
+    nonisolated static let tracesShelf =
+        ProcessInfo.processInfo.environment["NOTCHPILL_LOG_SHELF"] == "1"
+
+    nonisolated static func shelf(_ message: String) {
+        guard tracesShelf else { return }
+        log("shelf", message)
+    }
+
     nonisolated static let lineFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
