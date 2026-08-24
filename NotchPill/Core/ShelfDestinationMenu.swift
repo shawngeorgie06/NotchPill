@@ -57,8 +57,14 @@ final class ShelfDestinationMenu: NSObject {
         // And NotchPill is a menu-bar accessory whose panel never activates, so
         // the menu belongs to an inactive app and may not take events. It has
         // to be frontmost for the duration.
+        // A context menu item runs its action while that menu's own tracking
+        // loop is still unwinding, and a second `popUp` started inside it is
+        // swallowed — which is why "Move to…" did nothing on the first attempt
+        // and worked on the second. One turn of the run loop is not enough to
+        // clear the session; a short delay is.
         let location = NSEvent.mouseLocation
-        DispatchQueue.main.async {
+        let delay = NSApp.currentEvent?.type == .rightMouseDown ? 0.12 : 0.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             NSApp.activate(ignoringOtherApps: true)
             let started = Date()
             // `in: nil` makes the location screen-relative, which is what

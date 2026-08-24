@@ -130,6 +130,12 @@ fi
 say ""
 say "  While you are dropping onto the shelf, or an undo is showing, the card"
 say "  goes to the very front and survives regardless of the order above."
+say ""
+say "  IMPORTANT: the expanded pill shows ONE card at a time. The dots under it"
+say "  are pages — scroll sideways over the pill, or click a dot, to reach the"
+say "  others. A card listed as [visible] above may still need paging to."
+say "  More slots: Preferences -> Expanded Pill -> size. 100% gives 5, under"
+say "  85% gives only 3."
 rule
 
 # ---------- hooks ----------
