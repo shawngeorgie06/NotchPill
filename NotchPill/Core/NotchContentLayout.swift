@@ -104,12 +104,14 @@ enum NotchContentLayout {
     /// readable full-width page, so adding media, quota, CI, or another agent
     /// never turns the notch into a wider or denser strip of tiny cards.
     static func expandedDeckLayout(metrics: NotchMetrics, activities: [ExpandedActivity],
-                                   page: Int? = nil) -> NotchContentLayoutMetrics {
+                                   page: Int? = nil,
+                                   tokenRows: Int = 0) -> NotchContentLayoutMetrics {
         let maxW = metrics.maxExpandedRenderedWidth
         let preferredWidth = 360 * metrics.userScale
         let width = min(maxW, max(metrics.notchWidth + 112, preferredWidth))
         let cardHeight = min(expandedContentCeiling,
-                             max(56, expandedContentBaseHeight(activities, page: page)))
+                             max(56, expandedContentBaseHeight(activities, page: page,
+                                                              tokenRows: tokenRows)))
         // The page dot is part of the deck's frame of reference, even when
         // there is only one card. A consistent footer says "this is page 1"
         // rather than making media, active app, or any other one-page setup
@@ -125,8 +127,9 @@ enum NotchContentLayout {
     }
 
     static func expandedDeckSize(metrics: NotchMetrics, activities: [ExpandedActivity],
-                                 page: Int? = nil) -> CGSize {
-        expandedDeckLayout(metrics: metrics, activities: activities, page: page).size
+                                 page: Int? = nil, tokenRows: Int = 0) -> CGSize {
+        expandedDeckLayout(metrics: metrics, activities: activities,
+                           page: page, tokenRows: tokenRows).size
     }
 
     /// Every nonempty deck gets its footer, including a single-page deck. This
@@ -748,13 +751,14 @@ enum NotchContentLayout {
     /// guessing, so a transient mismatch between the view's page and the
     /// layout's cannot produce a collapsed pill.
     static func expandedContentBaseHeight(_ activities: [ExpandedActivity],
-                                          page: Int? = nil) -> CGFloat {
+                                          page: Int? = nil,
+                                          tokenRows: Int = 0) -> CGFloat {
         guard !activities.isEmpty else { return 66 }
         let measured: CGFloat
         if let page, activities.indices.contains(page) {
-            measured = expandedCardBaseHeight(activities[page])
+            measured = expandedCardBaseHeight(activities[page], tokenRows: tokenRows)
         } else {
-            measured = activities.map(expandedCardBaseHeight).max() ?? 66
+            measured = activities.map { expandedCardBaseHeight($0, tokenRows: tokenRows) }.max() ?? 66
         }
         return min(expandedContentCeiling, max(48, measured))
     }
@@ -785,8 +789,22 @@ enum NotchContentLayout {
         header + row * CGFloat(min(expandedMaxCardRows, max(1, count)))
     }
 
-    private static func expandedCardBaseHeight(_ activity: ExpandedActivity) -> CGFloat {
+    /// Height the folded token lines need on a quota card.
+    ///
+    /// A total line at 11pt plus one 9pt line per model shown, over the small
+    /// pad above them. Declared here rather than left to the view, because a
+    /// card that renders more than its budget pushes the deck's page dots off
+    /// the bottom of the pill — the same drift `agentsRow` documents.
+    static func tokenLinesHeight(modelRows: Int) -> CGFloat {
+        guard modelRows > 0 else { return 0 }
+        return 3 + 14 + 12 * CGFloat(modelRows)
+    }
+
+    private static func expandedCardBaseHeight(_ activity: ExpandedActivity,
+                                               tokenRows: Int = 0) -> CGFloat {
         switch activity {
+        case .claudeQuota: return 70 + tokenLinesHeight(modelRows: tokenRows)
+        case .codexQuota: return 56 + tokenLinesHeight(modelRows: tokenRows)
         // Artwork and title over a transport row. Still the tallest card, and
         // the reason the old rule keyed off it — but it wants ~78, not the 96
         // the whole row was being sized to.
@@ -798,14 +816,12 @@ enum NotchContentLayout {
         case .agents(let sessions): return rowsHeight(header: agentsHeader, row: agentsRow,
                                                       count: sessions.count)
         case .openCodeUsage: return 56
-        case .codexQuota: return 56
         // Header (13) + 3 + meter (15pt value 18, 2, bar 4, 2, 9pt caption 11
         // = 37) + 3 + a 10pt trailing line (13). The trailing line is the
         // "extra $x" on Claude and the "38 of 2000 · renews in 27d" on Cursor;
         // both were budgeted as if it were not there, so the card overflowed
         // its allowance by exactly one line and pushed the deck's page dots off
         // the bottom of the pill.
-        case .claudeQuota: return 70
         case .cursorQuota: return 70
         case .shelf: return 66
         case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)

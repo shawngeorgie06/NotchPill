@@ -1156,7 +1156,7 @@ struct ExpandedActivityCard: View {
                         .foregroundStyle(.white.opacity(0.45))
                         .lineLimit(1)
                 }
-                ForEach(usage.models(for: tool).prefix(2), id: \.model) { entry in
+                ForEach(usage.models(for: tool).prefix(usage.modelRows(for: tool)), id: \.model) { entry in
                     HStack(spacing: s(4)) {
                         Text(Self.shortModel(entry.model))
                             .font(font(size: 9))

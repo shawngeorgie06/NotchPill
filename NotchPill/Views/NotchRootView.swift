@@ -6,6 +6,7 @@ import SwiftUI
 struct NotchRootView: View {
     @ObservedObject var state: NotchState
     @ObservedObject var shelf: ShelfStore
+    @ObservedObject var tokens: TokenUsageStore = .shared
     @ObservedObject var timer: TimerStore
     let metrics: NotchMetrics
     let actions: NotchActions
@@ -40,7 +41,8 @@ struct NotchRootView: View {
         if state.isExpanded || state.isCollapsing {
             return NotchContentLayout.expandedDeckLayout(
                 metrics: metrics, activities: expandedActivities,
-                page: state.resolvedExpandedDeckPage(for: expandedActivities.map(\.kind)))
+                page: state.resolvedExpandedDeckPage(for: expandedActivities.map(\.kind)),
+                tokenRows: settings.showTokenUsage ? tokens.summary.widestModelRows : 0)
         }
         return NotchContentLayout.collapsedLayout(metrics: metrics, chips: collapsedChips)
     }

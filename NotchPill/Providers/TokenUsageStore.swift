@@ -19,6 +19,23 @@ struct TokenUsageSummary: Equatable {
 
     var isEmpty: Bool { byTool.values.allSatisfy { $0.isEmpty } }
 
+    /// Model lines a quota card will draw: at most two, and none at all when
+    /// the tool did no work in the period.
+    ///
+    /// The height budget and the view both read this, so a card cannot render
+    /// more rows than it reserved and push the page dots off the pill.
+    static let maxModelRows = 2
+
+    func modelRows(for tool: String) -> Int {
+        guard total(for: tool) > 0 else { return 0 }
+        return min(Self.maxModelRows, (byTool[tool] ?? [:]).count)
+    }
+
+    /// The tallest card's worth, for sizing a deck that may show either.
+    var widestModelRows: Int {
+        max(modelRows(for: Self.claude), modelRows(for: Self.codex))
+    }
+
     static let claude = "Claude Code"
     static let codex = "Codex"
 }

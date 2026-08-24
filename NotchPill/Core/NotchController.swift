@@ -566,7 +566,9 @@ final class NotchController {
         // while showing another.
         return NotchContentLayout.expandedDeckSize(
             metrics: metrics, activities: activities,
-            page: state.resolvedExpandedDeckPage(for: activities.map(\.kind)))
+            page: state.resolvedExpandedDeckPage(for: activities.map(\.kind)),
+            tokenRows: AppSettings.shared.showTokenUsage
+                ? TokenUsageStore.shared.summary.widestModelRows : 0)
     }
 
     private func devReadyContentSize() -> CGSize {

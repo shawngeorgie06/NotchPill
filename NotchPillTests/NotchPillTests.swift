@@ -111,6 +111,62 @@ struct TokenLedgerTests {
     }
 }
 
+@Suite("Token line budget")
+struct TokenLineBudgetTests {
+    private let metrics = NotchMetrics(notchWidth: 185, notchHeight: 32,
+                                       designExpandedWidth: 720,
+                                       designExpandedHeight: 128,
+                                       scale: 0.54)
+
+    /// The card grew and its budget has to grow with it. A card that renders
+    /// more than it reserved pushes the deck's page dots off the pill.
+    @Test("a quota card reserves room for the token lines it draws")
+    func budgetGrowsWithRows() {
+        let quota = ClaudeQuota(sessionPercent: 7, weeklyPercent: 85)
+        let cards: [ExpandedActivity] = [.claudeQuota(quota)]
+        let bare = NotchContentLayout.expandedDeckSize(metrics: metrics, activities: cards,
+                                                       page: 0, tokenRows: 0).height
+        let one = NotchContentLayout.expandedDeckSize(metrics: metrics, activities: cards,
+                                                      page: 0, tokenRows: 1).height
+        let two = NotchContentLayout.expandedDeckSize(metrics: metrics, activities: cards,
+                                                      page: 0, tokenRows: 2).height
+        #expect(one > bare)
+        #expect(two > one)
+    }
+
+    @Test("no token lines costs no height")
+    func noRowsNoCost() {
+        #expect(NotchContentLayout.tokenLinesHeight(modelRows: 0) == 0)
+        #expect(NotchContentLayout.tokenLinesHeight(modelRows: 2) > 0)
+    }
+
+    /// The view draws `modelRows(for:)` lines and the budget reserves the same
+    /// number, so the two cannot drift apart.
+    @Test("the row count the view draws is the one the budget reserves")
+    func rowCountIsShared() {
+        let summary = TokenUsageSummary(byTool: [
+            TokenUsageSummary.claude: [
+                "a": TokenTally(input: 3, output: 0),
+                "b": TokenTally(input: 2, output: 0),
+                "c": TokenTally(input: 1, output: 0),
+            ],
+        ])
+        // Three models, but a card only ever draws two.
+        #expect(summary.modelRows(for: TokenUsageSummary.claude) == 2)
+        #expect(summary.modelRows(for: TokenUsageSummary.codex) == 0)
+        #expect(summary.widestModelRows == 2)
+    }
+
+    @Test("a tool that did nothing reserves nothing")
+    func idleToolCostsNothing() {
+        let summary = TokenUsageSummary(byTool: [
+            TokenUsageSummary.claude: ["a": TokenTally(input: 0, output: 0)],
+        ])
+        #expect(summary.modelRows(for: TokenUsageSummary.claude) == 0)
+        #expect(summary.widestModelRows == 0)
+    }
+}
+
 @Suite("Token usage summary")
 struct TokenUsageSummaryTests {
     private func summary() -> TokenUsageSummary {
