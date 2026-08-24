@@ -888,7 +888,14 @@ enum ExpandedActivityBuilder {
             if shelfDropTargeted || shelfReceipt != nil || shelfError != nil {
                 items.insert(card, at: 0)
             } else {
-                items.append(card)
+                // Files on the shelf are files the user cannot otherwise see.
+                // Behind the usage cards this card was trimmed away on any
+                // ordinary deck, so a dropped file became invisible again the
+                // moment its undo expired — parked somewhere with no way back
+                // to it. Live agents still lead; nothing else outranks knowing
+                // you are holding something.
+                let afterAgents = items.first?.kind == "agents" ? 1 : 0
+                items.insert(card, at: afterAgents)
             }
         }
         if showActiveApp {

@@ -484,22 +484,48 @@ struct ExpandedActivityShelfTests {
         #expect(items.first?.kind == "shelf")
     }
 
-    /// A shelf merely holding files has no claim on the front of the deck.
-    @Test("an idle shelf does not jump the queue")
-    func idleShelfStaysInPlace() {
+    /// Files on the shelf are files that are invisible anywhere else. Behind
+    /// the usage cards this was trimmed on any ordinary deck, so a dropped file
+    /// disappeared the moment its undo expired.
+    @Test("a shelf holding files stays visible on a full deck")
+    func loadedShelfSurvivesAFullDeck() {
         let item = ShelfCardItem(id: UUID(), name: "a.txt",
                                  url: URL(fileURLWithPath: "/tmp/a.txt"))
+        let quota = ClaudeQuota(sessionPercent: 7, weeklyPercent: 85)
         let items = ExpandedActivityBuilder.activities(
             nowPlaying: NowPlaying(title: "Song", artist: "Artist", isPlaying: true),
-            nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            nextEvent: nil, appSwitchHint: nil, frontmostApp: "Safari",
             systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
-            showMedia: true, showActiveApp: false, showVolume: false,
-            showClock: false, showCalendar: false, showTimer: false,
+            agentSessions: [], claudeQuota: quota, ciRuns: [],
+            showMedia: true, showActiveApp: true, showVolume: false,
+            showClock: true, showCalendar: false, showTimer: false,
             showSystemStats: false, showBattery: false, showShelf: true,
+            showAgents: true, showCI: true,
             shelfItems: [item], shelfReceipt: nil, shelfError: nil,
             shelfDropTargeted: false)
-        #expect(items.first?.kind == "media")
-        #expect(items.contains { $0.kind == "shelf" })
+        let limit = NotchContentLayout.visibleCardLimit(forUserScale: 0.75)
+        #expect(items.prefix(limit).contains { $0.kind == "shelf" })
+    }
+
+    /// Live agents answer "what is running right now" and keep the lead.
+    @Test("live agents still come first")
+    func agentsOutrankTheShelf() {
+        let item = ShelfCardItem(id: UUID(), name: "a.txt",
+                                 url: URL(fileURLWithPath: "/tmp/a.txt"))
+        let session = AgentSession(id: "s1", agent: "claude-code", project: "NotchPill",
+                                   state: .working, lastActivity: Date())
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            agentSessions: [session],
+            showMedia: false, showActiveApp: false, showVolume: false,
+            showClock: false, showCalendar: false, showTimer: false,
+            showSystemStats: false, showBattery: false, showShelf: true,
+            showAgents: true,
+            shelfItems: [item], shelfReceipt: nil, shelfError: nil,
+            shelfDropTargeted: false)
+        #expect(items.first?.kind == "agents")
+        #expect(items.dropFirst().first?.kind == "shelf")
     }
 
     /// Without this the feature is invisible: an empty shelf draws no card, so
