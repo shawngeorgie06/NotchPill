@@ -1,0 +1,140 @@
+#!/bin/bash
+# NotchPill self-diagnosis.
+#
+# Answers the two questions a "nothing happens" report always turns on:
+# which display the pill can live on, and whether the card you are looking
+# for survives the deck's visible-card limit.
+#
+# Run:  bash diagnose-notchpill.sh
+# Then paste the whole output back.
+
+set -u
+DOMAIN="com.local.notchpill"
+APP="/Applications/NotchPill.app"
+
+say() { printf '%s\n' "$*"; }
+rule() { printf '%s\n' "------------------------------------------------------------"; }
+
+# A default that was never written falls back to what the app registers.
+pref() {
+  local value
+  value=$(defaults read "$DOMAIN" "$1" 2>/dev/null)
+  if [ -z "$value" ]; then printf '%s' "$2"; else printf '%s' "$value"; fi
+}
+
+on_off() { [ "$1" = "1" ] && printf 'ON' || printf 'off'; }
+
+say "NotchPill self-diagnosis  ($(date '+%Y-%m-%d %H:%M:%S'))"
+rule
+
+# ---------- app ----------
+if [ -d "$APP" ]; then
+  VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+            "$APP/Contents/Info.plist" 2>/dev/null || echo "unreadable")
+  say "Installed     $VERSION"
+else
+  say "Installed     NOT FOUND at $APP"
+fi
+
+if pgrep -f "$APP/Contents/MacOS/NotchPill" >/dev/null 2>&1; then
+  say "Running       yes (pid $(pgrep -f "$APP/Contents/MacOS/NotchPill" | head -1))"
+else
+  say "Running       NO  <-- the app is not running; nothing will appear"
+fi
+
+CRASH=$(ls -t "$HOME/Library/Logs/DiagnosticReports/" 2>/dev/null | grep -i notchpill | head -1)
+[ -n "$CRASH" ] && say "Last crash    $CRASH"
+rule
+
+# ---------- displays ----------
+say "Displays"
+BUILTIN_COUNT=0
+EXTERNAL_COUNT=0
+while IFS= read -r line; do
+  case "$line" in
+    *"Display Type: Built-in"*|*"Built-In: Yes"*) BUILTIN_COUNT=$((BUILTIN_COUNT+1)) ;;
+  esac
+done < <(system_profiler SPDisplaysDataType 2>/dev/null)
+
+system_profiler SPDisplaysDataType 2>/dev/null \
+  | grep -E "Resolution|Display Type|Built-In|Main Display|Mirror" \
+  | sed 's/^ */  /'
+
+TOTAL=$(system_profiler SPDisplaysDataType 2>/dev/null | grep -c "Resolution")
+EXTERNAL_COUNT=$((TOTAL - BUILTIN_COUNT))
+say ""
+say "  built-in displays: $BUILTIN_COUNT   other displays: $EXTERNAL_COUNT"
+if [ "$BUILTIN_COUNT" -eq 0 ] && [ "$TOTAL" -gt 0 ]; then
+  say "  -> No built-in display (lid closed / clamshell)."
+  say "     Before 1.49.0 the pill hid itself completely in this state."
+fi
+rule
+
+# ---------- placement ----------
+MODE=$(pref notchDisplayMode "builtInThenExternal")
+say "Display mode  $MODE"
+case "$MODE" in
+  builtInOnly)
+    say "              Built-in only. With the lid closed the pill will not appear."
+    say "              Fix: Preferences -> Display -> allow an external display." ;;
+  builtInThenExternal)
+    say "              Built-in preferred; external used only when there is no built-in." 
+    say "              With the lid OPEN the pill stays on the laptop by design." ;;
+  mainDisplay)
+    say "              Follows whichever display holds the menu bar." ;;
+esac
+rule
+
+# ---------- the deck ----------
+SCALE=$(pref notchScale "1.0")
+LIMIT=$(awk -v s="$SCALE" 'BEGIN { if (s < 0.85) print 3; else if (s < 1.0) print 4; else print 5 }')
+say "Pill size     $(awk -v s="$SCALE" 'BEGIN{printf "%d%%", s*100}')  ->  $LIMIT cards visible at once"
+
+EXP_SHELF=$(pref showExpandedShelf 1)
+COL_SHELF=$(pref showFileShelf 1)
+say ""
+say "Shelf settings"
+say "  Expanded Pill -> 'File shelf - drop files here' : $(on_off "$EXP_SHELF")"
+say "  Collapsed     -> 'Dropped file count'           : $(on_off "$COL_SHELF")"
+if [ "$EXP_SHELF" != "1" ]; then
+  say "  -> THE CARD IS OFF. Dropping a file will store it and show nothing."
+  say "     Fix: Preferences -> Expanded Pill -> 'File shelf - drop files here'."
+fi
+
+say ""
+say "Cards competing for those $LIMIT slots (in priority order):"
+i=0
+add() {
+  i=$((i+1))
+  if [ "$i" -le "$LIMIT" ]; then say "   $i. $1   [visible]"; else say "   $i. $1   [TRIMMED - never drawn]"; fi
+}
+[ "$(pref showExpandedAgents 1)" = "1" ] && add "Live agents"
+[ "$(pref showClaudeUsage 0)" = "1" ]    && add "Claude usage"
+[ "$(pref showCursorUsage 0)" = "1" ]    && add "Cursor usage"
+[ "$(pref showExpandedCI 1)" = "1" ]     && add "CI status"
+[ "$(pref showExpandedMedia 1)" = "1" ]  && add "Now playing"
+[ "$EXP_SHELF" = "1" ]                   && add "File shelf (idle)"
+say ""
+say "  Note: from 1.50.0 the shelf jumps to the FRONT while you are dropping"
+say "  onto it or an undo is showing, so it survives regardless of the above."
+rule
+
+# ---------- hooks ----------
+say "Agent hooks"
+for f in "$HOME/.claude/settings.json"; do
+  [ -f "$f" ] || continue
+  BAD=$(grep -o '/private/tmp/[^"]*NotchPill[^"]*' "$f" 2>/dev/null | head -3)
+  if [ -n "$BAD" ]; then
+    say "  DEAD PATH in $f:"
+    printf '    %s\n' $BAD
+  else
+    say "  $f: no dead build paths"
+  fi
+done
+rule
+
+say "Next steps"
+say "  1. Menu bar NotchPill icon -> 'Copy Diagnostics', then paste that too."
+say "  2. To test dropping: drag a file onto the notch and HOLD it there."
+say "     A dashed 'Drop to add' box should appear before you let go."
+say "     If it does not, the card is off or the app is not running."
