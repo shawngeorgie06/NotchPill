@@ -108,6 +108,33 @@ SHELF_ITEMS=$(defaults read "$DOMAIN" shelfBookmarks 2>/dev/null | grep -c "leng
 say "Files on the shelf: $SHELF_ITEMS"
 
 say ""
+say "Token usage"
+TOK=$(pref showTokenUsage 0)
+PERIOD=$(pref tokenUsagePeriod today)
+say "  Preferences -> 'Show tokens used' : $(on_off "$TOK")  (counting: $PERIOD)"
+if [ "$TOK" != "1" ]; then
+  say "  -> OFF, and off is the default. No token figures are drawn anywhere."
+  say "     Fix: Preferences -> 'Show tokens used'."
+fi
+# The figures are extra lines on the Claude usage and Codex usage cards.
+# With neither card on screen there is nowhere for them to appear.
+if [ "$TOK" = "1" ] \
+   && [ "$(pref showClaudeUsage 0)" != "1" ] \
+   && [ "$(pref showExpandedAgents 1)" != "1" ]; then
+  say "  -> Tokens are drawn ON the Claude usage / Codex usage cards, and"
+  say "     neither is enabled. Turn on 'Claude usage' (or 'Live agents',"
+  say "     which carries the Codex card) to see them."
+fi
+CC=$(find "$HOME/.claude/projects" -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')
+CX=$(find "$HOME/.codex/sessions" -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')
+say "  Claude Code transcripts found : $CC"
+say "  Codex transcripts found       : $CX"
+[ "$CC" = "0" ] && [ "$CX" = "0" ] && \
+  say "  -> Nothing to count: no transcripts under ~/.claude/projects or ~/.codex/sessions."
+say "  Cursor: not counted. Cursor keeps no local per-token transcript, so"
+say "          only its quota card can be shown, never a token total."
+
+say ""
 say "Cards competing for those $LIMIT slots (in priority order):"
 i=0
 add() {
