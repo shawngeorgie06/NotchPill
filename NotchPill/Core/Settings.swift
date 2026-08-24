@@ -200,6 +200,20 @@ final class AppSettings: ObservableObject {
     /// Stored as the raw value of `NotchGeometry.DisplayMode`. Defaults to
     /// falling back to an external display, which changes nothing while the lid
     /// is open and gives a docked Mac a pill where it previously had none.
+    /// Show tokens used on the Claude and Codex cards.
+    @Published var showTokenUsage: Bool {
+        didSet { defaults.set(showTokenUsage, forKey: Keys.showTokenUsage) }
+    }
+
+    /// How far back those figures reach. Raw value of `TokenUsagePeriod`.
+    @Published var tokenUsagePeriod: String {
+        didSet { defaults.set(tokenUsagePeriod, forKey: Keys.tokenUsagePeriod) }
+    }
+
+    var resolvedTokenPeriod: TokenUsagePeriod {
+        TokenUsagePeriod(rawValue: tokenUsagePeriod) ?? .today
+    }
+
     @Published var notchDisplayMode: String {
         didSet { defaults.set(notchDisplayMode, forKey: Keys.notchDisplayMode) }
     }
@@ -372,6 +386,8 @@ final class AppSettings: ObservableObject {
         static let cardWeights = "cardWeights"
         static let notchScale = "notchScale"
         static let notchDisplayMode = "notchDisplayMode"
+        static let showTokenUsage = "showTokenUsage"
+        static let tokenUsagePeriod = "tokenUsagePeriod"
         static let showDevReadyPings = "showDevReadyPings"
         static let persistLog = "persistLog"
         static let captionScale = "captionScale"
@@ -421,6 +437,8 @@ final class AppSettings: ObservableObject {
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.notchDisplayMode: NotchGeometry.DisplayMode.builtInThenExternal.rawValue,
+            Keys.showTokenUsage: false,
+            Keys.tokenUsagePeriod: TokenUsagePeriod.today.rawValue,
             Keys.showDevReadyPings: true,
             Keys.persistLog: false,
             Keys.captionScale: 1.0,
@@ -465,6 +483,9 @@ final class AppSettings: ObservableObject {
         notchScale = AppSettings.clampNotchScale(defaults.double(forKey: Keys.notchScale))
         notchDisplayMode = defaults.string(forKey: Keys.notchDisplayMode)
             ?? NotchGeometry.DisplayMode.builtInThenExternal.rawValue
+        showTokenUsage = defaults.bool(forKey: Keys.showTokenUsage)
+        tokenUsagePeriod = defaults.string(forKey: Keys.tokenUsagePeriod)
+            ?? TokenUsagePeriod.today.rawValue
         showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
         persistLog = defaults.object(forKey: Keys.persistLog) as? Bool ?? false
         let storedCaptionScale = defaults.double(forKey: Keys.captionScale)
@@ -528,6 +549,8 @@ final class AppSettings: ObservableObject {
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
             Keys.notchDisplayMode: NotchGeometry.DisplayMode.builtInThenExternal.rawValue,
+            Keys.showTokenUsage: false,
+            Keys.tokenUsagePeriod: TokenUsagePeriod.today.rawValue,
             Keys.showDevReadyPings: true,
             Keys.persistLog: false,
             Keys.captionScale: 1.0,

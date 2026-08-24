@@ -924,6 +924,10 @@ struct ExpandedActivityCard: View {
     var textScale: CGFloat = 1.0
     var expandToFill: Bool = false
     @State private var hoveredShelfItem: UUID?
+    /// Nil when the setting is off, which is also how the token lines are
+    /// suppressed — the card asks for nothing it was not given.
+    var tokenUsage: TokenUsageSummary?
+    var tokenPeriod: TokenUsagePeriod = .today
     @ObservedObject private var destinations = DestinationStore.shared
 
     private func s(_ value: CGFloat) -> CGFloat { value * readability }
@@ -1123,6 +1127,7 @@ struct ExpandedActivityCard: View {
             Text([quota.resetLabel, quota.updatedLabel].compactMap { $0 }.joined(separator: " · "))
                 .font(font(size: 10))
                 .foregroundStyle(.white.opacity(0.5))
+            tokenLines(TokenUsageSummary.codex, tokenUsage, period: tokenPeriod)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1131,6 +1136,65 @@ struct ExpandedActivityCard: View {
     /// Claude's two limits side by side. Showing only the session window hides
     /// the weekly one you actually run into on a heavy week; showing only the
     /// weekly hides the one that stops you mid-afternoon.
+
+    /// Tokens used, folded into the card for the tool that used them.
+    ///
+    /// A tool total with its models beneath: the total answers "how much", the
+    /// breakdown answers "by which model", and on a card this size only the
+    /// largest two earn a line. Cache reads are not counted — see `TokenTally`.
+    @ViewBuilder
+    private func tokenLines(_ tool: String, _ usage: TokenUsageSummary?,
+                            period: TokenUsagePeriod) -> some View {
+        if let usage, usage.total(for: tool) > 0 {
+            VStack(alignment: .leading, spacing: s(1)) {
+                HStack(spacing: s(4)) {
+                    Text(Self.compactTokens(usage.total(for: tool)))
+                        .font(font(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                    Text("tokens · \(period.shortLabel)")
+                        .font(font(size: 9))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .lineLimit(1)
+                }
+                ForEach(usage.models(for: tool).prefix(2), id: \.model) { entry in
+                    HStack(spacing: s(4)) {
+                        Text(Self.shortModel(entry.model))
+                            .font(font(size: 9))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text(Self.compactTokens(entry.tokens))
+                            .font(font(size: 9))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+            }
+            .padding(.top, s(1))
+        }
+    }
+
+    /// 213_100 -> "213.1K". Two significant places, because the difference
+    /// between 1.1M and 1.9M is the whole point of showing it.
+    static func compactTokens(_ value: Int) -> String {
+        let n = Double(value)
+        switch n {
+        case 1_000_000_000...: return String(format: "%.1fB", n / 1_000_000_000)
+        case 1_000_000...: return String(format: "%.1fM", n / 1_000_000)
+        case 1_000...: return String(format: "%.1fK", n / 1_000)
+        default: return String(value)
+        }
+    }
+
+    /// "claude-opus-4-8" -> "opus-4-8". The vendor prefix is already the card.
+    static func shortModel(_ raw: String) -> String {
+        var name = raw
+        for prefix in ["claude-", "anthropic/", "openai/", "gpt-"] where name.hasPrefix(prefix) {
+            name = String(name.dropFirst(prefix.count))
+            if prefix == "gpt-" { name = "gpt-" + name }
+        }
+        return name
+    }
+
     private func claudeQuotaCard(_ quota: ClaudeQuota) -> some View {
         VStack(alignment: .leading, spacing: s(3)) {
             cardHeader(symbol: "asterisk", title: "Claude · limits")
@@ -1162,6 +1226,7 @@ struct ExpandedActivityCard: View {
                     .foregroundStyle(.white.opacity(0.5))
                     .lineLimit(1)
             }
+            tokenLines(TokenUsageSummary.claude, tokenUsage, period: tokenPeriod)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

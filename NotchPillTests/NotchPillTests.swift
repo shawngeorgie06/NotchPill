@@ -27,6 +27,143 @@ struct ProcessRunnerTests {
 
 // MARK: - Shelf filing
 
+@Suite("Token ledger")
+struct TokenLedgerTests {
+    @Test("Claude usage sums per model and per day")
+    func claudeSums() {
+        let text = """
+        {"timestamp":"2026-08-24T10:00:00.000Z","message":{"model":"claude-opus-5","usage":{"input_tokens":100,"output_tokens":20}}}
+        {"timestamp":"2026-08-24T11:00:00.000Z","message":{"model":"claude-opus-5","usage":{"input_tokens":50,"output_tokens":5}}}
+        {"timestamp":"2026-08-23T10:00:00.000Z","message":{"model":"claude-sonnet-5","usage":{"input_tokens":7,"output_tokens":3}}}
+        """
+        let buckets = TokenLedger.claudeBuckets(in: text)
+        #expect(buckets["2026-08-24"]?["claude-opus-5"] == TokenTally(input: 150, output: 25))
+        #expect(buckets["2026-08-23"]?["claude-sonnet-5"] == TokenTally(input: 7, output: 3))
+    }
+
+    /// Cache reads outnumber real tokens roughly thirty to one, so counting
+    /// them turns a readable figure into a meaningless one.
+    @Test("cache tokens are excluded")
+    func cacheIsExcluded() {
+        let text = """
+        {"timestamp":"2026-08-24T10:00:00.000Z","message":{"model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":2,"cache_read_input_tokens":900000,"cache_creation_input_tokens":5000}}}
+        """
+        #expect(TokenLedger.claudeBuckets(in: text)["2026-08-24"]?["claude-opus-5"]
+                == TokenTally(input: 10, output: 2))
+    }
+
+    @Test("synthetic and unusable records are skipped")
+    func skipsNoise() {
+        let text = """
+        {"timestamp":"2026-08-24T10:00:00.000Z","message":{"model":"<synthetic>","usage":{"input_tokens":5,"output_tokens":5}}}
+        {"timestamp":"2026-08-24T10:00:00.000Z","message":{"model":"claude-opus-5","usage":{"input_tokens":0,"output_tokens":0}}}
+        not json at all
+        {"timestamp":"2026-08-24T10:00:00.000Z","message":{"model":"claude-opus-5"}}
+        """
+        #expect(TokenLedger.claudeBuckets(in: text).isEmpty)
+    }
+
+    /// Codex reports a running total, not a per-turn delta. Summing the
+    /// records would multiply one session by its number of turns.
+    @Test("Codex totals are taken, not summed")
+    func codexTakesTheNewestTotal() {
+        let text = """
+        {"timestamp":"2026-08-24T09:00:00.000Z","payload":{"type":"session_meta","model":"gpt-5.6-terra"}}
+        {"timestamp":"2026-08-24T10:00:00.000Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}
+        {"timestamp":"2026-08-24T10:05:00.000Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":300,"output_tokens":40}}}}
+        """
+        let buckets = TokenLedger.codexBuckets(in: text)
+        #expect(buckets["2026-08-24"]?["gpt-5.6-terra"] == TokenTally(input: 300, output: 40))
+        #expect(buckets.values.flatMap(\.values).count == 1)
+    }
+
+    @Test("a Codex session with no model named still counts")
+    func codexWithoutAModel() {
+        let text = """
+        {"timestamp":"2026-08-24T10:00:00.000Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5,"output_tokens":1}}}}
+        """
+        #expect(TokenLedger.codexBuckets(in: text)["2026-08-24"]?["codex"] == TokenTally(input: 5, output: 1))
+    }
+
+    @Test("merging combines days and models without losing either")
+    func mergeKeepsEverything() {
+        let a: TokenLedger.Buckets = ["2026-08-24": ["opus": TokenTally(input: 1, output: 1)]]
+        let b: TokenLedger.Buckets = ["2026-08-24": ["opus": TokenTally(input: 2, output: 3),
+                                                     "sonnet": TokenTally(input: 4, output: 0)],
+                                      "2026-08-23": ["opus": TokenTally(input: 9, output: 9)]]
+        let merged = TokenLedger.merge(a, b)
+        #expect(merged["2026-08-24"]?["opus"] == TokenTally(input: 3, output: 4))
+        #expect(merged["2026-08-24"]?["sonnet"] == TokenTally(input: 4, output: 0))
+        #expect(merged["2026-08-23"]?["opus"] == TokenTally(input: 9, output: 9))
+    }
+
+    @Test("a period sums only the days inside it")
+    func periodFiltering() {
+        let buckets: TokenLedger.Buckets = [
+            "2026-08-24": ["opus": TokenTally(input: 10, output: 1)],
+            "2026-08-20": ["opus": TokenTally(input: 100, output: 10)],
+            "2026-07-01": ["opus": TokenTally(input: 1000, output: 100)],
+        ]
+        let day = TokenLedger.dayComponents(year: 2026, month: 8, day: 22)
+        #expect(TokenLedger.total(buckets, since: day)["opus"] == TokenTally(input: 10, output: 1))
+        #expect(TokenLedger.total(buckets, since: nil)["opus"]
+                == TokenTally(input: 1110, output: 111))
+    }
+}
+
+@Suite("Token usage summary")
+struct TokenUsageSummaryTests {
+    private func summary() -> TokenUsageSummary {
+        TokenUsageSummary(byTool: [
+            TokenUsageSummary.claude: [
+                "claude-opus-5": TokenTally(input: 364, output: 182_100),
+                "claude-opus-4-7": TokenTally(input: 110, output: 30_600),
+            ],
+            TokenUsageSummary.codex: ["gpt-5.6-terra": TokenTally(input: 900, output: 100)],
+        ])
+    }
+
+    @Test("a tool total is the sum of its models")
+    func toolTotals() {
+        #expect(summary().total(for: TokenUsageSummary.claude) == 213_174)
+        #expect(summary().total(for: TokenUsageSummary.codex) == 1_000)
+        #expect(summary().total(for: "Cursor") == 0)
+    }
+
+    @Test("models are ordered largest first")
+    func modelOrder() {
+        let models = summary().models(for: TokenUsageSummary.claude)
+        #expect(models.first?.model == "claude-opus-5")
+        #expect(models.last?.model == "claude-opus-4-7")
+    }
+
+    @Test("figures are shortened to two significant places")
+    func compactFormatting() {
+        #expect(ExpandedActivityCard.compactTokens(213_174) == "213.2K")
+        #expect(ExpandedActivityCard.compactTokens(1_100_000) == "1.1M")
+        #expect(ExpandedActivityCard.compactTokens(2_500_000_000) == "2.5B")
+        #expect(ExpandedActivityCard.compactTokens(842) == "842")
+    }
+
+    @Test("the vendor prefix is dropped from a model name")
+    func modelNames() {
+        #expect(ExpandedActivityCard.shortModel("claude-opus-4-8") == "opus-4-8")
+        #expect(ExpandedActivityCard.shortModel("gpt-5.6-terra") == "gpt-5.6-terra")
+    }
+
+    @Test("a period cutoff is derived from the calendar, not a fixed span")
+    func periodCutoffs() {
+        let launch = Date(timeIntervalSince1970: 1_000_000)
+        #expect(TokenUsagePeriod.all.cutoff(launchedAt: launch) == nil)
+        #expect(TokenUsagePeriod.session.cutoff(launchedAt: launch) == launch)
+        let today = TokenUsagePeriod.today.cutoff(launchedAt: launch)
+        #expect(today == Calendar.current.startOfDay(for: Date()))
+        if let week = TokenUsagePeriod.week.cutoff(launchedAt: launch), let today {
+            #expect(week < today)
+        }
+    }
+}
+
 @Suite("Display selection")
 struct DisplaySelectionTests {
     /// A 14" Pro: notch measured from the two auxiliary areas.

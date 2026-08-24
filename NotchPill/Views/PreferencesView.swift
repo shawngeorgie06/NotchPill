@@ -15,6 +15,7 @@ struct PreferencesView: View {
                     collapsedSection
                     expandedSection
                     shelfSection
+                    tokenSection
                     cardShareSection
                     systemHUDSection
                     timerSection
@@ -234,6 +235,27 @@ struct PreferencesView: View {
                  + "top centre under the menu bar. With the lid closed there is no "
                  + "built-in display at all, which is why the pill used to vanish "
                  + "while docked.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var tokenSection: some View {
+        SettingsPanel(title: "Token Usage",
+                      subtitle: "Tokens used, on the Claude and Codex cards") {
+            Toggle("Show tokens used", isOn: $settings.showTokenUsage)
+            Picker("Count", selection: $settings.tokenUsagePeriod) {
+                ForEach(TokenUsagePeriod.allCases, id: \.rawValue) { period in
+                    Text(period.label).tag(period.rawValue)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(!settings.showTokenUsage)
+            Text("Counts prompt and generated tokens per model. Cache reads are "
+                 + "excluded: they are re-counted on every request and outnumber "
+                 + "the rest roughly thirty to one, which buries the real figure. "
+                 + "Cursor is not included \u{2014} it meters requests, not tokens.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

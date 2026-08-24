@@ -779,6 +779,12 @@ final class NotchController {
     ///   The reply composer still takes key explicitly when it opens, which is
     ///   the one place typing into the notch is meant to happen.
     private func engagePill(takeKey: Bool) {
+        // Refreshed when the pill opens rather than on a timer: the figures are
+        // only ever read here, and scanning transcripts nobody is looking at is
+        // work for nothing. The store rate-limits itself regardless.
+        if AppSettings.shared.showTokenUsage {
+            TokenUsageStore.shared.refresh(period: AppSettings.shared.resolvedTokenPeriod)
+        }
         collapseWorkItem?.cancel()
         collapseWorkItem = nil
         expandWorkItem?.cancel()

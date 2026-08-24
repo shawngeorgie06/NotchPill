@@ -467,6 +467,7 @@ struct ExpandedView: View {
     @ObservedObject var settings = AppSettings.shared
     @ObservedObject var state: NotchState
     @ObservedObject var shelf: ShelfStore
+    @ObservedObject var tokens: TokenUsageStore = .shared
     @ObservedObject var timer: TimerStore
     let actions: NotchActions
     let activities: [ExpandedActivity]
@@ -524,7 +525,9 @@ struct ExpandedView: View {
                         onCancelTimer: { timer.cancel() },
                         readability: readability,
                         textScale: textScale,
-                        expandToFill: true
+                        expandToFill: true,
+                        tokenUsage: settings.showTokenUsage ? tokens.summary : nil,
+                        tokenPeriod: settings.resolvedTokenPeriod
                     )
                     .id(activities[clampedPage].id)
                     .transition(pageTransition)
