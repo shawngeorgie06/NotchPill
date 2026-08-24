@@ -11,6 +11,7 @@ struct PreferencesView: View {
             header
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    displaySection
                     collapsedSection
                     expandedSection
                     shelfSection
@@ -41,7 +42,9 @@ struct PreferencesView: View {
                 Toggle("Active agent", isOn: $settings.showCollapsedAgents)
                 Toggle("App switch banner", isOn: $settings.showCollapsedAppSwitch)
                 Toggle("Next calendar event", isOn: $settings.showCalendar)
-                Toggle("File shelf count", isOn: $settings.showFileShelf)
+                Toggle("Dropped file count", isOn: $settings.showFileShelf)
+                    .help("A count only. The files themselves live on the "
+                          + "expanded pill's File shelf card.")
                 Toggle("CPU & memory", isOn: $settings.showCollapsedSystemStats)
                 Toggle("Battery", isOn: $settings.showCollapsedBattery)
             }
@@ -216,6 +219,27 @@ struct PreferencesView: View {
         }
     }
 
+    private var displaySection: some View {
+        SettingsPanel(title: "Display", subtitle: "Which screen the pill appears on") {
+            Picker("Show the pill on", selection: $settings.notchDisplayMode) {
+                Text("Built-in display only")
+                    .tag(NotchGeometry.DisplayMode.builtInOnly.rawValue)
+                Text("Built-in, or an external display when it is unavailable")
+                    .tag(NotchGeometry.DisplayMode.builtInThenExternal.rawValue)
+                Text("Whichever display has the menu bar")
+                    .tag(NotchGeometry.DisplayMode.mainDisplay.rawValue)
+            }
+            .pickerStyle(.radioGroup)
+            Text("An external display has no notch, so the pill is placed at the "
+                 + "top centre under the menu bar. With the lid closed there is no "
+                 + "built-in display at all, which is why the pill used to vanish "
+                 + "while docked.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var expandedSection: some View {
         SettingsPanel(title: "Expanded Pill", subtitle: "Cards when you hover the notch") {
             sizeSlider
@@ -259,7 +283,9 @@ struct PreferencesView: View {
             Toggle("Clock", isOn: $settings.showExpandedClock)
             Toggle("CPU & memory", isOn: $settings.showExpandedSystemStats)
             Toggle("Battery", isOn: $settings.showExpandedBattery)
-            Toggle("File shelf", isOn: $settings.showExpandedShelf)
+            Toggle("File shelf — drop files here", isOn: $settings.showExpandedShelf)
+                .help("The card that holds dropped files and files them into folders. "
+                      + "Turn this on to use drag and drop.")
         }
     }
 

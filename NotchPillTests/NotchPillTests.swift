@@ -27,6 +27,100 @@ struct ProcessRunnerTests {
 
 // MARK: - Shelf filing
 
+@Suite("Display selection")
+struct DisplaySelectionTests {
+    /// A 14" Pro: notch measured from the two auxiliary areas.
+    private func builtInNotched(isMain: Bool = true) -> NotchGeometry.Candidate {
+        let frame = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        return NotchGeometry.Candidate(
+            isBuiltIn: true, isMain: isMain,
+            frame: frame,
+            visibleFrame: CGRect(x: 0, y: 0, width: 1512, height: 944),
+            safeTop: 38,
+            left: CGRect(x: 0, y: 944, width: 656, height: 38),
+            right: CGRect(x: 856, y: 944, width: 656, height: 38))
+    }
+
+    /// An external monitor: no cutout, no safe-area inset, menu bar only if it
+    /// is the main display.
+    private func external(isMain: Bool, hasMenuBar: Bool = true,
+                          origin: CGPoint = CGPoint(x: 1512, y: 0)) -> NotchGeometry.Candidate {
+        let frame = CGRect(origin: origin, size: CGSize(width: 2560, height: 1440))
+        let barHeight: CGFloat = hasMenuBar ? 24 : 0
+        return NotchGeometry.Candidate(
+            isBuiltIn: false, isMain: isMain,
+            frame: frame,
+            visibleFrame: CGRect(x: frame.minX, y: frame.minY,
+                                 width: frame.width, height: frame.height - barHeight),
+            safeTop: 0)
+    }
+
+    @Test("the built-in display still wins while the lid is open")
+    func builtInPreferred() {
+        let screens = [builtInNotched(), external(isMain: false)]
+        let choice = NotchGeometry.choose(screens, mode: .builtInThenExternal)
+        #expect(choice?.index == 0)
+        #expect(choice?.source == .measured)
+    }
+
+    /// The bug: in clamshell the built-in screen leaves `NSScreen.screens`, so
+    /// the old rule found nothing and hid the overlay entirely.
+    @Test("clamshell falls back to the external display")
+    func clamshellUsesExternal() {
+        let screens = [external(isMain: true)]
+        #expect(NotchGeometry.choose(screens, mode: .builtInOnly) == nil)
+
+        let choice = NotchGeometry.choose(screens, mode: .builtInThenExternal)
+        #expect(choice?.index == 0)
+        #expect(choice?.source == .external)
+    }
+
+    @Test("an external placeholder sits at top centre under the menu bar")
+    func placeholderIsCentred() {
+        let monitor = external(isMain: true)
+        let rect = NotchGeometry.placeholderNotch(for: monitor)
+        #expect(abs(rect.midX - monitor.frame.midX) < 0.5)
+        #expect(abs(rect.maxY - monitor.frame.maxY) < 0.5)
+        #expect(rect.height == 24)
+    }
+
+    /// A secondary display with no menu bar of its own reports no inset at all;
+    /// a zero-height rect would give the pill no neck to hang from.
+    @Test("a display with no menu bar still gets a usable height")
+    func noMenuBarStillHasHeight() {
+        let rect = NotchGeometry.placeholderNotch(for: external(isMain: false, hasMenuBar: false))
+        #expect(rect.height == NotchGeometry.standardMenuBarHeight)
+    }
+
+    @Test("main-display mode follows the monitor when it holds the menu bar")
+    func mainDisplayModeFollowsTheMenuBar() {
+        let screens = [builtInNotched(isMain: false), external(isMain: true)]
+        let choice = NotchGeometry.choose(screens, mode: .mainDisplay)
+        #expect(choice?.index == 1)
+        #expect(choice?.source == .external)
+    }
+
+    @Test("main-display mode still measures a built-in main display")
+    func mainDisplayModeMeasuresBuiltIn() {
+        let screens = [builtInNotched(isMain: true), external(isMain: false)]
+        let choice = NotchGeometry.choose(screens, mode: .mainDisplay)
+        #expect(choice?.index == 0)
+        #expect(choice?.source == .measured)
+    }
+
+    @Test("built-in-only keeps the old behaviour exactly")
+    func builtInOnlyUnchanged() {
+        #expect(NotchGeometry.choose([external(isMain: true)], mode: .builtInOnly) == nil)
+        #expect(NotchGeometry.choose([builtInNotched()], mode: .builtInOnly)?.index == 0)
+    }
+
+    @Test("no displays at all resolves to nothing rather than crashing")
+    func noScreens() {
+        #expect(NotchGeometry.choose([], mode: .builtInThenExternal) == nil)
+        #expect(NotchGeometry.choose([], mode: .mainDisplay) == nil)
+    }
+}
+
 @Suite("Completion folding")
 struct CompletionFoldingTests {
     private func alert(_ id: String, title: String, kind: AlertKind = .finished,

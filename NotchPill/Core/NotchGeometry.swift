@@ -24,6 +24,52 @@ struct NotchGeometry {
     enum Source: String {
         case measured
         case assumed
+        /// A display with no cutout at all — an external monitor. The pill is
+        /// placed at top centre against the menu bar instead of being fitted to
+        /// hardware, so nothing about it is a measurement of a notch.
+        case external
+    }
+
+    /// Which display the overlay is allowed to live on.
+    ///
+    /// The pill only ever ran on the built-in display, which is right when the
+    /// lid is open and useless the moment it is not: in clamshell the built-in
+    /// screen leaves `NSScreen.screens` entirely, so the overlay hid itself and
+    /// the app looked dead while docked.
+    enum DisplayMode: String, CaseIterable {
+        /// Built-in only. What every version before this did.
+        case builtInOnly
+        /// Built-in when it is there, otherwise the best external display.
+        /// Nothing moves while the lid is open; clamshell gains a pill.
+        case builtInThenExternal
+        /// Wherever the menu bar is. For a desk where the monitor is primary
+        /// and the laptop is off to one side.
+        case mainDisplay
+    }
+
+    /// One display, as the selection rule needs to see it.
+    ///
+    /// Plain values rather than `NSScreen` so the rule can be exercised against
+    /// clamshell and dual-monitor layouts that cannot be attached to CI.
+    struct Candidate: Equatable {
+        var isBuiltIn: Bool
+        var isMain: Bool
+        var frame: CGRect
+        var visibleFrame: CGRect
+        var safeTop: CGFloat
+        var left: CGRect?
+        var right: CGRect?
+
+        init(isBuiltIn: Bool, isMain: Bool, frame: CGRect, visibleFrame: CGRect,
+             safeTop: CGFloat, left: CGRect? = nil, right: CGRect? = nil) {
+            self.isBuiltIn = isBuiltIn
+            self.isMain = isMain
+            self.frame = frame
+            self.visibleFrame = visibleFrame
+            self.safeTop = safeTop
+            self.left = left
+            self.right = right
+        }
     }
 
     // Expanded overlay *design* dimensions (before shrink). The pill hangs below
@@ -112,16 +158,100 @@ struct NotchGeometry {
     /// notch rect it carries is then the assumed one, and callers now have
     /// `hasPhysicalNotch` to tell the two apart instead of drawing hardware
     /// that is not there.
-    static func current() -> NotchGeometry? {
-        for screen in NSScreen.screens {
-            guard screen.safeAreaInsets.top > 0 else { continue }
-            guard isBuiltIn(screen) else { continue }
-            guard let resolved = resolvedNotch(for: screen) else { continue }
-            return NotchGeometry(screen: screen, notchRect: resolved.rect,
-                                 source: resolved.source)
+    static func current(mode: DisplayMode = .builtInThenExternal) -> NotchGeometry? {
+        let screens = NSScreen.screens
+        let candidates = screens.map { screen in
+            Candidate(isBuiltIn: isBuiltIn(screen),
+                      isMain: screen == NSScreen.main,
+                      frame: screen.frame,
+                      visibleFrame: screen.visibleFrame,
+                      safeTop: screen.safeAreaInsets.top,
+                      left: screen.auxiliaryTopLeftArea,
+                      right: screen.auxiliaryTopRightArea)
         }
-        return nil
+        guard let choice = choose(candidates, mode: mode),
+              screens.indices.contains(choice.index) else { return nil }
+        return NotchGeometry(screen: screens[choice.index],
+                             notchRect: choice.rect,
+                             source: choice.source)
     }
+
+    /// Picks the display and the rect to hang the pill from.
+    ///
+    /// Built-in always wins when it qualifies, in every mode that allows it, so
+    /// plugging in a monitor never moves a pill that is already where the user
+    /// expects it. Only when there is no usable built-in display — clamshell,
+    /// or a Mac mini — does an external one come into play.
+    static func choose(_ candidates: [Candidate],
+                       mode: DisplayMode) -> (index: Int, rect: CGRect, source: Source)? {
+        func builtIn() -> (Int, CGRect, Source)? {
+            for (index, candidate) in candidates.enumerated() {
+                guard candidate.isBuiltIn, candidate.safeTop > 0 else { continue }
+                guard let resolved = resolveNotch(inFrame: candidate.frame,
+                                                  safeTop: candidate.safeTop,
+                                                  left: candidate.left,
+                                                  right: candidate.right) else { continue }
+                return (index, resolved.rect, resolved.source)
+            }
+            return nil
+        }
+
+        func external(preferMain: Bool) -> (Int, CGRect, Source)? {
+            let usable = candidates.enumerated().filter { $0.element.frame.width > 0 }
+            guard !usable.isEmpty else { return nil }
+            let picked = (preferMain ? usable.first { $0.element.isMain } : nil)
+                ?? usable.first { $0.element.isMain }
+                ?? usable.first { !$0.element.isBuiltIn }
+                ?? usable.first!
+            return (picked.offset, placeholderNotch(for: picked.element), .external)
+        }
+
+        switch mode {
+        case .builtInOnly:
+            return builtIn().map { ($0.0, $0.1, $0.2) }
+        case .builtInThenExternal:
+            if let found = builtIn() { return (found.0, found.1, found.2) }
+            return external(preferMain: true).map { ($0.0, $0.1, $0.2) }
+        case .mainDisplay:
+            // A built-in main display still gets its real notch measured.
+            if let main = candidates.enumerated().first(where: { $0.element.isMain }),
+               main.element.isBuiltIn, main.element.safeTop > 0,
+               let resolved = resolveNotch(inFrame: main.element.frame,
+                                           safeTop: main.element.safeTop,
+                                           left: main.element.left,
+                                           right: main.element.right) {
+                return (main.offset, resolved.rect, resolved.source)
+            }
+            if let found = external(preferMain: true) { return (found.0, found.1, found.2) }
+            return builtIn().map { ($0.0, $0.1, $0.2) }
+        }
+    }
+
+    /// Where to hang the pill on a display with no cutout.
+    ///
+    /// Centred at the top, as wide as a notch would be, and as deep as that
+    /// display's menu bar so the pill still emerges from under it rather than
+    /// floating in the content area. A secondary display with no menu bar of
+    /// its own reports no inset, so a standard bar height stands in.
+    static func placeholderNotch(for candidate: Candidate) -> CGRect {
+        let measuredInset = candidate.frame.maxY - candidate.visibleFrame.maxY
+        let inset: CGFloat
+        if candidate.safeTop > 0 {
+            inset = candidate.safeTop
+        } else if measuredInset >= 8 {
+            inset = measuredInset
+        } else {
+            inset = standardMenuBarHeight
+        }
+        let width: CGFloat = 200
+        return CGRect(x: candidate.frame.midX - width / 2,
+                      y: candidate.frame.maxY - inset,
+                      width: width,
+                      height: inset)
+    }
+
+    /// macOS menu bar height on a display without a notch.
+    static let standardMenuBarHeight: CGFloat = 24
 
     /// True when the screen is the internal display (as opposed to an external
     /// monitor that might also report a safe-area inset).

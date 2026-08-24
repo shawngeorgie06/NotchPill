@@ -417,7 +417,7 @@ final class NotchController {
     /// Shows the overlay only on a built-in notched display. On external-only /
     /// clamshell / no-notch arrangements, the window is hidden and disabled.
     private func rebuildForCurrentDisplays() {
-        guard let geometry = NotchGeometry.current() else {
+        guard let geometry = NotchGeometry.current(mode: AppSettings.shared.resolvedDisplayMode) else {
             // No notched display any more — clamshell, or the lid closed while
             // docked. Hiding the window is not enough: everything that decides
             // hover, click passthrough and browser-flank exclusion reads

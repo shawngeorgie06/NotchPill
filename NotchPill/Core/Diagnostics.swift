@@ -27,7 +27,7 @@ enum Diagnostics {
     }
 
     private static func printGeometry() {
-        guard let geo = NotchGeometry.current() else {
+        guard let geo = NotchGeometry.current(mode: AppSettings.shared.resolvedDisplayMode) else {
             print("GEOMETRY: no built-in notched display detected (overlay would be hidden).")
             return
         }

@@ -195,6 +195,19 @@ final class AppSettings: ObservableObject {
     /// User size for the expanded pill, as a multiplier on the design scale.
     /// Clamped on write so a hand-edited plist cannot produce a pill that is
     /// invisible or wider than the screen.
+    /// Which display the pill lives on.
+    ///
+    /// Stored as the raw value of `NotchGeometry.DisplayMode`. Defaults to
+    /// falling back to an external display, which changes nothing while the lid
+    /// is open and gives a docked Mac a pill where it previously had none.
+    @Published var notchDisplayMode: String {
+        didSet { defaults.set(notchDisplayMode, forKey: Keys.notchDisplayMode) }
+    }
+
+    var resolvedDisplayMode: NotchGeometry.DisplayMode {
+        NotchGeometry.DisplayMode(rawValue: notchDisplayMode) ?? .builtInThenExternal
+    }
+
     @Published var notchScale: Double {
         didSet {
             let clamped = AppSettings.clampNotchScale(notchScale)
@@ -358,6 +371,7 @@ final class AppSettings: ObservableObject {
         static let pinnedActivityKind = "pinnedActivityKind"
         static let cardWeights = "cardWeights"
         static let notchScale = "notchScale"
+        static let notchDisplayMode = "notchDisplayMode"
         static let showDevReadyPings = "showDevReadyPings"
         static let persistLog = "persistLog"
         static let captionScale = "captionScale"
@@ -406,6 +420,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedRecentActivity: false,
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
+            Keys.notchDisplayMode: NotchGeometry.DisplayMode.builtInThenExternal.rawValue,
             Keys.showDevReadyPings: true,
             Keys.persistLog: false,
             Keys.captionScale: 1.0,
@@ -448,6 +463,8 @@ final class AppSettings: ObservableObject {
         pinnedActivityKind = defaults.string(forKey: Keys.pinnedActivityKind) ?? ""
         cardWeights = (defaults.dictionary(forKey: Keys.cardWeights) as? [String: Double]) ?? [:]
         notchScale = AppSettings.clampNotchScale(defaults.double(forKey: Keys.notchScale))
+        notchDisplayMode = defaults.string(forKey: Keys.notchDisplayMode)
+            ?? NotchGeometry.DisplayMode.builtInThenExternal.rawValue
         showDevReadyPings = defaults.object(forKey: Keys.showDevReadyPings) as? Bool ?? true
         persistLog = defaults.object(forKey: Keys.persistLog) as? Bool ?? false
         let storedCaptionScale = defaults.double(forKey: Keys.captionScale)
@@ -510,6 +527,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedRecentActivity: false,
             Keys.pinnedActivityKind: "",
             Keys.notchScale: AppSettings.defaultNotchScale,
+            Keys.notchDisplayMode: NotchGeometry.DisplayMode.builtInThenExternal.rawValue,
             Keys.showDevReadyPings: true,
             Keys.persistLog: false,
             Keys.captionScale: 1.0,

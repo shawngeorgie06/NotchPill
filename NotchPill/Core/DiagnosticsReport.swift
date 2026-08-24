@@ -114,8 +114,8 @@ enum DiagnosticsReport {
                     screen.backingScaleFactor, screen.safeAreaInsets.top)
             },
             notchDescription: {
-                guard let geo = NotchGeometry.current() else {
-                    return "none found — overlay hidden"
+                guard let geo = NotchGeometry.current(mode: AppSettings.shared.resolvedDisplayMode) else {
+                    return "none found — overlay hidden (mode: \(AppSettings.shared.notchDisplayMode))"
                 }
                 let r = geo.notchRect
                 let onMain = geo.screen == NSScreen.main
@@ -123,9 +123,15 @@ enum DiagnosticsReport {
                 // pill hanging detached from the notch: "assumed" means these
                 // numbers are a 200pt guess rather than a reading, and the
                 // pill's neck and shoulders are built on them.
-                let note = geo.source == .assumed
-                    ? " · ASSUMED (could not read the display — pill may not line up)"
-                    : " · measured"
+                let note: String
+                switch geo.source {
+                case .measured:
+                    note = " · measured"
+                case .assumed:
+                    note = " · ASSUMED (could not read the display — pill may not line up)"
+                case .external:
+                    note = " · EXTERNAL (no cutout on this display — placed under the menu bar)"
+                }
                 return String(format: "%.0f,%.0f %.0f×%.0f on %@display%@",
                               r.origin.x, r.origin.y, r.width, r.height,
                               onMain ? "main " : "secondary ", note)
