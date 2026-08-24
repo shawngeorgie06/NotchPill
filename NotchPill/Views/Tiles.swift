@@ -874,8 +874,22 @@ enum ExpandedActivityBuilder {
         // nothing to aim at and no feedback that a drop would land.
         if showShelf, !shelfItems.isEmpty || shelfReceipt != nil || shelfError != nil
             || shelfDropTargeted {
-            items.append(.shelf(items: shelfItems, receipt: shelfReceipt, error: shelfError,
-                                isDropTargeted: shelfDropTargeted))
+            let card = ExpandedActivity.shelf(items: shelfItems, receipt: shelfReceipt,
+                                              error: shelfError,
+                                              isDropTargeted: shelfDropTargeted)
+            // Position is not a nicety here — the deck is trimmed to
+            // `visibleCardLimit`, which is three at a 75% pill. A machine
+            // showing agents plus two usage cards fills that before the shelf
+            // is reached, so a dropped file landed, persisted, and rendered
+            // nothing at all. Sitting mid-order is enough for a shelf that
+            // merely holds files; it is not enough while someone is actively
+            // dropping onto it or waiting on an undo, and those must survive
+            // any limit down to one.
+            if shelfDropTargeted || shelfReceipt != nil || shelfError != nil {
+                items.insert(card, at: 0)
+            } else {
+                items.append(card)
+            }
         }
         if showActiveApp {
             if let hint = appSwitchHint {

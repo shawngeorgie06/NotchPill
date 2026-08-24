@@ -436,6 +436,72 @@ struct ExpandedActivityShelfTests {
         #expect(kinds.indices.contains(page))
     }
 
+    /// Reported from a 14" Pro at a 75% pill, which allows only three cards.
+    /// With live agents and both usage cards ahead of it the shelf was trimmed
+    /// away on every drop: the file landed, persisted, and rendered nothing.
+    @Test("a drop survives the trim on a small pill with a full deck")
+    func dropSurvivesACrowdedDeck() {
+        let quota = ClaudeQuota(sessionPercent: 7, weeklyPercent: 85)
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: NowPlaying(title: "Song", artist: "Artist", isPlaying: true),
+            nextEvent: nil, appSwitchHint: nil, frontmostApp: "Safari",
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            agentSessions: [], claudeQuota: quota, ciRuns: [],
+            showMedia: true, showActiveApp: true, showVolume: false,
+            showClock: true, showCalendar: false, showTimer: false,
+            showSystemStats: false, showBattery: false, showShelf: true,
+            showAgents: true, showCI: true,
+            shelfItems: [], shelfReceipt: nil, shelfError: nil,
+            shelfDropTargeted: true)
+
+        // 0.75 is the reported pill size, which allows three cards.
+        let limit = NotchContentLayout.visibleCardLimit(forUserScale: 0.75)
+        #expect(limit == 3)
+        #expect(items.prefix(limit).contains { $0.kind == "shelf" })
+    }
+
+    /// The undo lives on the shelf card, so trimming it away strands the file
+    /// wherever it was just moved with no way back.
+    @Test("a live receipt survives the trim too")
+    func receiptSurvivesTheTrim() {
+        let receipt = ShelfFilingReceipt(
+            token: ShelfFiler.UndoToken(from: URL(fileURLWithPath: "/tmp/a.txt"),
+                                        to: URL(fileURLWithPath: "/tmp/dst/a.txt")),
+            destinationName: "dst", itemName: "a.txt",
+            expiresAt: Date().addingTimeInterval(10))
+        let quota = ClaudeQuota(sessionPercent: 7, weeklyPercent: 85)
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: NowPlaying(title: "Song", artist: "Artist", isPlaying: true),
+            nextEvent: nil, appSwitchHint: nil, frontmostApp: "Safari",
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            agentSessions: [], claudeQuota: quota, ciRuns: [],
+            showMedia: true, showActiveApp: true, showVolume: false,
+            showClock: true, showCalendar: false, showTimer: false,
+            showSystemStats: false, showBattery: false, showShelf: true,
+            showAgents: true, showCI: true,
+            shelfItems: [], shelfReceipt: receipt, shelfError: nil,
+            shelfDropTargeted: false)
+        #expect(items.first?.kind == "shelf")
+    }
+
+    /// A shelf merely holding files has no claim on the front of the deck.
+    @Test("an idle shelf does not jump the queue")
+    func idleShelfStaysInPlace() {
+        let item = ShelfCardItem(id: UUID(), name: "a.txt",
+                                 url: URL(fileURLWithPath: "/tmp/a.txt"))
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: NowPlaying(title: "Song", artist: "Artist", isPlaying: true),
+            nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            showMedia: true, showActiveApp: false, showVolume: false,
+            showClock: false, showCalendar: false, showTimer: false,
+            showSystemStats: false, showBattery: false, showShelf: true,
+            shelfItems: [item], shelfReceipt: nil, shelfError: nil,
+            shelfDropTargeted: false)
+        #expect(items.first?.kind == "media")
+        #expect(items.contains { $0.kind == "shelf" })
+    }
+
     /// Without this the feature is invisible: an empty shelf draws no card, so
     /// a file dragged at the notch has nothing to aim at and gives no sign that
     /// releasing would do anything.
