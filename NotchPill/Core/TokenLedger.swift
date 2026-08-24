@@ -1,19 +1,31 @@
 import Foundation
 
-/// Tokens a model actually worked on: prompt in, generation out.
+/// Tokens a request consumed, kept apart because they are not equivalent.
 ///
-/// Cache reads are deliberately absent. They are re-counted on every request
-/// and billed at a fraction, and in a real transcript they outnumber the rest
-/// roughly thirty to one — a "total" including them reads in the billions and
-/// says nothing about how much work was done.
+/// Splitting them matters more than it looks. On a cached session the `input`
+/// field reads a few hundred tokens across a whole day — the prompt is served
+/// from cache, so it lands in `cacheRead` instead. Counting only input and
+/// output therefore reports generation and calls it usage, which is how a busy
+/// day came out as 120K.
+///
+/// `total` is what was paid full price for: fresh prompt, generation, and the
+/// cache writes that put new context in place. `cacheRead` is real work too but
+/// billed at a fraction and re-counted every turn, so it is carried separately
+/// rather than folded in or thrown away.
 struct TokenTally: Equatable, Codable {
     var input: Int = 0
     var output: Int = 0
+    var cacheWrite: Int = 0
+    var cacheRead: Int = 0
 
-    var total: Int { input + output }
+    /// Full-price tokens.
+    var total: Int { input + output + cacheWrite }
 
     static func + (lhs: TokenTally, rhs: TokenTally) -> TokenTally {
-        TokenTally(input: lhs.input + rhs.input, output: lhs.output + rhs.output)
+        TokenTally(input: lhs.input + rhs.input,
+                   output: lhs.output + rhs.output,
+                   cacheWrite: lhs.cacheWrite + rhs.cacheWrite,
+                   cacheRead: lhs.cacheRead + rhs.cacheRead)
     }
 }
 
@@ -52,8 +64,10 @@ enum TokenLedger {
                   model != "<synthetic>", !model.isEmpty,
                   let day = day(from: object["timestamp"]) else { continue }
             let tally = TokenTally(input: int(usage["input_tokens"]),
-                                   output: int(usage["output_tokens"]))
-            guard tally.total > 0 else { continue }
+                                   output: int(usage["output_tokens"]),
+                                   cacheWrite: int(usage["cache_creation_input_tokens"]),
+                                   cacheRead: int(usage["cache_read_input_tokens"]))
+            guard tally.total > 0 || tally.cacheRead > 0 else { continue }
             buckets[day, default: [:]][model, default: TokenTally()] =
                 (buckets[day]?[model] ?? TokenTally()) + tally
         }
@@ -82,8 +96,10 @@ enum TokenLedger {
                   let totals = info["total_token_usage"] as? [String: Any],
                   let day = day(from: object["timestamp"]) else { continue }
             let tally = TokenTally(input: int(totals["input_tokens"]),
-                                   output: int(totals["output_tokens"]))
-            if tally.total > 0 { newest = (day, tally) }
+                                   output: int(totals["output_tokens"]),
+                                   cacheWrite: int(totals["cache_write_input_tokens"]),
+                                   cacheRead: int(totals["cached_input_tokens"]))
+            if tally.total > 0 || tally.cacheRead > 0 { newest = (day, tally) }
         }
 
         guard let newest else { return [:] }

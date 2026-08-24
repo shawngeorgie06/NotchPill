@@ -37,19 +37,34 @@ struct TokenLedgerTests {
         {"timestamp":"2026-08-23T10:00:00.000Z","message":{"model":"claude-sonnet-5","usage":{"input_tokens":7,"output_tokens":3}}}
         """
         let buckets = TokenLedger.claudeBuckets(in: text)
-        #expect(buckets["2026-08-24"]?["claude-opus-5"] == TokenTally(input: 150, output: 25))
-        #expect(buckets["2026-08-23"]?["claude-sonnet-5"] == TokenTally(input: 7, output: 3))
+        #expect(buckets["2026-08-24"]?["claude-opus-5"]?.total == 175)
+        #expect(buckets["2026-08-23"]?["claude-sonnet-5"]?.total == 10)
     }
 
-    /// Cache reads outnumber real tokens roughly thirty to one, so counting
-    /// them turns a readable figure into a meaningless one.
-    @Test("cache tokens are excluded")
-    func cacheIsExcluded() {
+    /// Cache writes are fresh tokens at full price and belong in the total.
+    /// Cache reads are re-sent every turn and billed at a fraction, so they are
+    /// carried beside it. Counting only input and output reported generation
+    /// and called it usage — a day of real work came out as 120K.
+    @Test("cache writes count, cache reads are carried separately")
+    func cacheIsSplitNotDropped() {
         let text = """
         {"timestamp":"2026-08-24T10:00:00.000Z","message":{"model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":2,"cache_read_input_tokens":900000,"cache_creation_input_tokens":5000}}}
         """
-        #expect(TokenLedger.claudeBuckets(in: text)["2026-08-24"]?["claude-opus-5"]
-                == TokenTally(input: 10, output: 2))
+        let tally = TokenLedger.claudeBuckets(in: text)["2026-08-24"]?["claude-opus-5"]
+        #expect(tally?.total == 5012)
+        #expect(tally?.cacheRead == 900_000)
+    }
+
+    /// The shape that broke the number: a fully cached turn reports almost no
+    /// `input`, so anything ignoring cache writes reads as output alone.
+    @Test("a cached turn still reports what it cost")
+    func cachedTurnIsNotInvisible() {
+        let text = """
+        {"timestamp":"2026-08-24T10:00:00.000Z","message":{"model":"claude-opus-5","usage":{"input_tokens":2,"output_tokens":1200,"cache_creation_input_tokens":113900,"cache_read_input_tokens":42100000}}}
+        """
+        let tally = TokenLedger.claudeBuckets(in: text)["2026-08-24"]?["claude-opus-5"]
+        #expect(tally?.total == 115_102)
+        #expect(tally?.cacheRead == 42_100_000)
     }
 
     @Test("synthetic and unusable records are skipped")
@@ -73,7 +88,7 @@ struct TokenLedgerTests {
         {"timestamp":"2026-08-24T10:05:00.000Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":300,"output_tokens":40}}}}
         """
         let buckets = TokenLedger.codexBuckets(in: text)
-        #expect(buckets["2026-08-24"]?["gpt-5.6-terra"] == TokenTally(input: 300, output: 40))
+        #expect(buckets["2026-08-24"]?["gpt-5.6-terra"]?.total == 340)
         #expect(buckets.values.flatMap(\.values).count == 1)
     }
 
@@ -82,7 +97,7 @@ struct TokenLedgerTests {
         let text = """
         {"timestamp":"2026-08-24T10:00:00.000Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5,"output_tokens":1}}}}
         """
-        #expect(TokenLedger.codexBuckets(in: text)["2026-08-24"]?["codex"] == TokenTally(input: 5, output: 1))
+        #expect(TokenLedger.codexBuckets(in: text)["2026-08-24"]?["codex"]?.total == 6)
     }
 
     @Test("merging combines days and models without losing either")
@@ -92,9 +107,9 @@ struct TokenLedgerTests {
                                                      "sonnet": TokenTally(input: 4, output: 0)],
                                       "2026-08-23": ["opus": TokenTally(input: 9, output: 9)]]
         let merged = TokenLedger.merge(a, b)
-        #expect(merged["2026-08-24"]?["opus"] == TokenTally(input: 3, output: 4))
-        #expect(merged["2026-08-24"]?["sonnet"] == TokenTally(input: 4, output: 0))
-        #expect(merged["2026-08-23"]?["opus"] == TokenTally(input: 9, output: 9))
+        #expect(merged["2026-08-24"]?["opus"]?.total == 7)
+        #expect(merged["2026-08-24"]?["sonnet"]?.total == 4)
+        #expect(merged["2026-08-23"]?["opus"]?.total == 18)
     }
 
     @Test("a period sums only the days inside it")
@@ -105,9 +120,8 @@ struct TokenLedgerTests {
             "2026-07-01": ["opus": TokenTally(input: 1000, output: 100)],
         ]
         let day = TokenLedger.dayComponents(year: 2026, month: 8, day: 22)
-        #expect(TokenLedger.total(buckets, since: day)["opus"] == TokenTally(input: 10, output: 1))
-        #expect(TokenLedger.total(buckets, since: nil)["opus"]
-                == TokenTally(input: 1110, output: 111))
+        #expect(TokenLedger.total(buckets, since: day)["opus"]?.total == 11)
+        #expect(TokenLedger.total(buckets, since: nil)["opus"]?.total == 1221)
     }
 }
 
@@ -182,6 +196,7 @@ struct TokenUsageSummaryTests {
     @Test("a tool total is the sum of its models")
     func toolTotals() {
         #expect(summary().total(for: TokenUsageSummary.claude) == 213_174)
+        #expect(summary().cached(for: TokenUsageSummary.claude) == 0)
         #expect(summary().total(for: TokenUsageSummary.codex) == 1_000)
         #expect(summary().total(for: "Cursor") == 0)
     }

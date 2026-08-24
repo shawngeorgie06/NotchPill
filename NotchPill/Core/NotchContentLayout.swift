@@ -797,7 +797,8 @@ enum NotchContentLayout {
     /// the bottom of the pill — the same drift `agentsRow` documents.
     static func tokenLinesHeight(modelRows: Int) -> CGFloat {
         guard modelRows > 0 else { return 0 }
-        return 3 + 14 + 12 * CGFloat(modelRows)
+        // pad + the 11pt total + the 9pt cached line + one 9pt line per model
+        return 3 + 14 + 12 + 12 * CGFloat(modelRows)
     }
 
     private static func expandedCardBaseHeight(_ activity: ExpandedActivity,

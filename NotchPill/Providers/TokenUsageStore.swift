@@ -6,8 +6,15 @@ struct TokenUsageSummary: Equatable {
     /// Tool → model → tally, already filtered to the chosen period.
     var byTool: [String: [String: TokenTally]] = [:]
 
+    /// Full-price tokens: fresh prompt, generation, and cache writes.
     func total(for tool: String) -> Int {
         (byTool[tool] ?? [:]).values.reduce(0) { $0 + $1.total }
+    }
+
+    /// Cached context re-sent each turn. Real, but billed at a fraction, so it
+    /// is reported beside the total rather than inside it.
+    func cached(for tool: String) -> Int {
+        (byTool[tool] ?? [:]).values.reduce(0) { $0 + $1.cacheRead }
     }
 
     /// Models for a tool, largest first — the order a reader wants them in.
@@ -27,7 +34,7 @@ struct TokenUsageSummary: Equatable {
     static let maxModelRows = 2
 
     func modelRows(for tool: String) -> Int {
-        guard total(for: tool) > 0 else { return 0 }
+        guard total(for: tool) > 0 || cached(for: tool) > 0 else { return 0 }
         return min(Self.maxModelRows, (byTool[tool] ?? [:]).count)
     }
 
@@ -106,7 +113,7 @@ final class TokenUsageStore: ObservableObject {
 
     private static var cacheURL: URL {
         let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".notchpill")
-        return dir.appendingPathComponent("token-cache.json")
+        return dir.appendingPathComponent("token-cache-v2.json")
     }
 
     init() { loadCache() }

@@ -1145,7 +1145,7 @@ struct ExpandedActivityCard: View {
     @ViewBuilder
     private func tokenLines(_ tool: String, _ usage: TokenUsageSummary?,
                             period: TokenUsagePeriod) -> some View {
-        if let usage, usage.total(for: tool) > 0 {
+        if let usage, usage.total(for: tool) > 0 || usage.cached(for: tool) > 0 {
             VStack(alignment: .leading, spacing: s(1)) {
                 HStack(spacing: s(4)) {
                     Text(Self.compactTokens(usage.total(for: tool)))
@@ -1154,6 +1154,15 @@ struct ExpandedActivityCard: View {
                     Text("tokens · \(period.shortLabel)")
                         .font(font(size: 9))
                         .foregroundStyle(.white.opacity(0.45))
+                        .lineLimit(1)
+                }
+                // Cached context is most of the traffic on a long session and
+                // a fraction of the cost. Beside the total it is context;
+                // inside it, it would be the only number you ever saw.
+                if usage.cached(for: tool) > 0 {
+                    Text("+\(Self.compactTokens(usage.cached(for: tool))) cached")
+                        .font(font(size: 9))
+                        .foregroundStyle(.white.opacity(0.4))
                         .lineLimit(1)
                 }
                 ForEach(usage.models(for: tool).prefix(usage.modelRows(for: tool)), id: \.model) { entry in
