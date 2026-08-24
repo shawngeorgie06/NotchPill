@@ -101,6 +101,12 @@ if [ "$EXP_SHELF" != "1" ]; then
   say "     Fix: Preferences -> Expanded Pill -> 'File shelf - drop files here'."
 fi
 
+# `grep -c` prints 0 and exits non-zero when nothing matches, so a `|| echo 0`
+# fallback appends a second count and every later numeric test fails.
+SHELF_ITEMS=$(defaults read "$DOMAIN" shelfBookmarks 2>/dev/null | grep -c "length =")
+[ -z "$SHELF_ITEMS" ] && SHELF_ITEMS=0
+say "Files on the shelf: $SHELF_ITEMS"
+
 say ""
 say "Cards competing for those $LIMIT slots (in priority order):"
 i=0
@@ -109,14 +115,21 @@ add() {
   if [ "$i" -le "$LIMIT" ]; then say "   $i. $1   [visible]"; else say "   $i. $1   [TRIMMED - never drawn]"; fi
 }
 [ "$(pref showExpandedAgents 1)" = "1" ] && add "Live agents"
+# From 1.51.0 a shelf holding files sits directly behind live agents; an
+# empty one is not built at all until something is dropped on it.
+if [ "$EXP_SHELF" = "1" ] && [ "$SHELF_ITEMS" -gt 0 ]; then
+  add "File shelf ($SHELF_ITEMS file(s))"
+fi
 [ "$(pref showClaudeUsage 0)" = "1" ]    && add "Claude usage"
 [ "$(pref showCursorUsage 0)" = "1" ]    && add "Cursor usage"
 [ "$(pref showExpandedCI 1)" = "1" ]     && add "CI status"
 [ "$(pref showExpandedMedia 1)" = "1" ]  && add "Now playing"
-[ "$EXP_SHELF" = "1" ]                   && add "File shelf (idle)"
+if [ "$EXP_SHELF" = "1" ] && [ "$SHELF_ITEMS" -eq 0 ]; then
+  say "   -- File shelf: empty, so no card until a file is dropped on it"
+fi
 say ""
-say "  Note: from 1.50.0 the shelf jumps to the FRONT while you are dropping"
-say "  onto it or an undo is showing, so it survives regardless of the above."
+say "  While you are dropping onto the shelf, or an undo is showing, the card"
+say "  goes to the very front and survives regardless of the order above."
 rule
 
 # ---------- hooks ----------
