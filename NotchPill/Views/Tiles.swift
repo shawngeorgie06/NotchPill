@@ -1929,6 +1929,16 @@ struct ExpandedActivityCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Drag a chip straight into Finder, Mail, Messages -- the way a file
+        // leaves the shelf without picking a folder first. The click above is
+        // AppKit's and does not compete with this.
+        .onDrag {
+            LogStore.shelf("dragging out \(item.name)")
+            ShelfDragHold.shared.begin(hold: actions.holdNotchOpen)
+            // A file-URL provider is what Finder and every share target read;
+            // `contentsOf:` also gives the drag its real file icon.
+            return NSItemProvider(contentsOf: item.url) ?? NSItemProvider()
+        }
         // Always visible, never hover-only: this badge is the only thing that
         // says a chip can be filed at all, and a control you have to discover
         // by hovering is a control most people never find.
@@ -1953,10 +1963,9 @@ struct ExpandedActivityCard: View {
             }
         }
         .onHover { hoveredShelfItem = $0 ? item.id : nil }
-        .onDrag { NSItemProvider(contentsOf: item.url) ?? NSItemProvider() }
         .contextMenu {
             Button("Move to…") { presentDestinationMenu(for: item) }
-            ShareLink("Share / AirDrop…", item: item.url)
+            Button("Share / AirDrop…") { ShelfDestinationMenu.airDrop(item.url) }
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([item.url])
             }

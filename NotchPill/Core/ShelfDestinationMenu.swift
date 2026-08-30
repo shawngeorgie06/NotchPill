@@ -19,6 +19,8 @@ final class ShelfDestinationMenu: NSObject {
 
     /// - Parameter onPick: called with the chosen folder. Not called if the
     ///   menu is dismissed without a choice.
+    /// - Parameter onPick: called with the chosen folder. Not called if the
+    ///   menu is dismissed without a choice.
     func present(destinations: [FileDestination], onPick: @escaping (URL) -> Void) {
         self.onPick = onPick
 
@@ -107,6 +109,27 @@ final class ShelfDestinationMenu: NSObject {
         guard let url = sender.representedObject as? URL else { return }
         onPick?(url)
         onPick = nil
+    }
+
+    /// Sends a file with AirDrop from a nonactivating panel.
+    ///
+    /// SwiftUI's `ShareLink` is what this replaces: it anchors its picker to
+    /// the presenting view, and the pill's panel never becomes key, so the
+    /// sheet had nowhere to attach and silently did nothing. Going through
+    /// AppKit -- after making the app frontmost -- gives the picker a real
+    /// window to open in.
+    static func airDrop(_ url: URL) {
+        NSApp.activate(ignoringOtherApps: true)
+        guard let service = NSSharingService(named: .sendViaAirDrop) else {
+            LogStore.shelf("AirDrop service unavailable")
+            return
+        }
+        guard service.canPerform(withItems: [url]) else {
+            LogStore.shelf("AirDrop cannot send \(url.lastPathComponent)")
+            return
+        }
+        LogStore.shelf("AirDrop \(url.lastPathComponent)")
+        service.perform(withItems: [url])
     }
 
     @objc private func chooseOtherFolder(_ sender: NSMenuItem) {
