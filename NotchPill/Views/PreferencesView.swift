@@ -14,6 +14,7 @@ struct PreferencesView: View {
                     displaySection
                     collapsedSection
                     expandedSection
+                    cardOrderSection
                     shelfSection
                     tokenSection
                     cardShareSection
@@ -369,6 +370,34 @@ struct PreferencesView: View {
                  : "While muted, the arrows leave the volume alone. Unmute from the menu bar or the mute key first.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var cardOrderSection: some View {
+        SettingsPanel(title: "Card Order",
+                      subtitle: "Drag to choose which cards you see first") {
+            Text("The pill shows only the first few cards that have something in them, so this is really a priority list. Cards with nothing to say are skipped rather than taking a place.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            List {
+                ForEach(Array(settings.resolvedCardOrder.enumerated()), id: \.element) { index, kind in
+                    HStack(spacing: 8) {
+                        Text("\(index + 1)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18, alignment: .trailing)
+                        Text(ExpandedActivity.allKinds.first { $0.kind == kind }?.label ?? kind)
+                        Spacer()
+                        Image(systemName: "line.3.horizontal")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, 1)
+                }
+                .onMove { settings.moveCards(from: $0, to: $1) }
+            }
+            .frame(height: 260)
+            .listStyle(.plain)
+            Button("Reset to default order") { settings.resetCardOrder() }
         }
     }
 

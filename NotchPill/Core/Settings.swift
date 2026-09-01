@@ -149,6 +149,34 @@ final class AppSettings: ObservableObject {
 
     nonisolated static let cardWeightRange: ClosedRange<Double> = 0.4...3.0
 
+    /// The order cards are considered in, most important first.
+    ///
+    /// Stored as kinds rather than indices so that adding a card kind in a
+    /// later version does not silently reshuffle an order someone has already
+    /// arranged: unknown kinds fall back to their built-in position.
+    @Published var cardOrder: [String] {
+        didSet { defaults.set(cardOrder, forKey: Keys.cardOrder) }
+    }
+
+    /// The stored order, repaired against the current build: kinds that no
+    /// longer exist are dropped, and kinds this version added are appended in
+    /// their built-in position rather than being lost.
+    var resolvedCardOrder: [String] {
+        let known = ExpandedActivity.allKinds.map(\.kind)
+        let kept = cardOrder.filter(known.contains)
+        return kept + known.filter { !kept.contains($0) }
+    }
+
+    func moveCards(from source: IndexSet, to destination: Int) {
+        var order = resolvedCardOrder
+        order.move(fromOffsets: source, toOffset: destination)
+        cardOrder = order
+    }
+
+    func resetCardOrder() {
+        cardOrder = ExpandedActivity.allKinds.map(\.kind)
+    }
+
     /// Not every card wants an equal share out of the box. CI is three short
     /// rows of "repo — passed"; at an equal split it took half the row to say
     /// very little, and the first thing anyone does is drag it back down. The
@@ -410,6 +438,7 @@ final class AppSettings: ObservableObject {
         static let showExpandedRecentActivity = "showExpandedRecentActivity"
         static let pinnedActivityKind = "pinnedActivityKind"
         static let cardWeights = "cardWeights"
+        static let cardOrder = "cardOrder"
         static let notchScale = "notchScale"
         static let notchDisplayMode = "notchDisplayMode"
         static let showTokenUsage = "showTokenUsage"
@@ -514,6 +543,8 @@ final class AppSettings: ObservableObject {
         showExpandedRecentActivity = defaults.bool(forKey: Keys.showExpandedRecentActivity)
         pinnedActivityKind = defaults.string(forKey: Keys.pinnedActivityKind) ?? ""
         cardWeights = (defaults.dictionary(forKey: Keys.cardWeights) as? [String: Double]) ?? [:]
+        cardOrder = (defaults.array(forKey: Keys.cardOrder) as? [String])
+            ?? ExpandedActivity.allKinds.map(\.kind)
         notchScale = AppSettings.clampNotchScale(defaults.double(forKey: Keys.notchScale))
         notchDisplayMode = defaults.string(forKey: Keys.notchDisplayMode)
             ?? NotchGeometry.DisplayMode.builtInThenExternal.rawValue
@@ -635,6 +666,7 @@ final class AppSettings: ObservableObject {
         returnFocusAfterReply = true
         pinnedActivityKind = ""
         cardWeights = [:]
+        cardOrder = ExpandedActivity.allKinds.map(\.kind)
         notchScale = AppSettings.defaultNotchScale
         showDevReadyPings = true
         devReadyDuration = AppSettings.defaultDevReadyDuration

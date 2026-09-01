@@ -8534,4 +8534,51 @@ struct ClipboardPrivacyTests {
         let short = NotchContentLayout.clipboardHeight([items[0]])
         #expect(tall > short)
     }
+
+    // MARK: - Card order
+
+    /// The whole point of the setting: a card the user puts first is drawn
+    /// first, whatever the build order thought.
+    @Test func userOrderOutranksBuildOrder() {
+        func deck(order: [String]) -> [String] {
+            ExpandedActivityBuilder.activities(
+                nowPlaying: nil, nextEvent: nil, appSwitchHint: nil,
+                frontmostApp: nil, systemVolume: nil, timer: nil,
+                systemStats: nil, battery: BatteryStatus(level: 80, isCharging: false),
+                showMedia: false, showActiveApp: false, showVolume: false,
+                showClock: true, showCalendar: false, showTimer: false,
+                showSystemStats: false, showBattery: true, showShelf: false,
+                cardOrder: order
+            ).map(\.kind)
+        }
+        // Battery is built before the clock, so the clock leading is only
+        // possible if the user's order is what decides.
+        #expect(deck(order: ["clock", "battery"]) == ["clock", "battery"])
+        #expect(deck(order: ["battery", "clock"]) == ["battery", "clock"])
+    }
+
+    /// A stored order from an older build must not lose the cards that version
+    /// did not have, or upgrading would silently drop them off the deck.
+    @MainActor @Test func unknownKindsKeepTheirBuiltInPlace() {
+        let settings = AppSettings.shared
+        let saved = settings.cardOrder
+        defer { settings.cardOrder = saved }
+
+        settings.cardOrder = ["clock", "battery"]
+        let resolved = settings.resolvedCardOrder
+        #expect(resolved.prefix(2) == ["clock", "battery"])
+        #expect(Set(resolved) == Set(ExpandedActivity.allKinds.map(\.kind)),
+                "every known kind has to survive, not just the stored ones")
+        #expect(resolved.count == Set(resolved).count, "no duplicates")
+    }
+
+    /// A kind that no longer exists is dropped rather than carried forever.
+    @MainActor @Test func staleKindsAreDiscarded() {
+        let settings = AppSettings.shared
+        let saved = settings.cardOrder
+        defer { settings.cardOrder = saved }
+
+        settings.cardOrder = ["nonsenseCard", "clock"]
+        #expect(!settings.resolvedCardOrder.contains("nonsenseCard"))
+    }
 }

@@ -848,7 +848,8 @@ enum ExpandedActivityBuilder {
         shelfReceipt: ShelfFilingReceipt? = nil,
         shelfError: String? = nil,
         shelfDropTargeted: Bool = false,
-        clipboard: [ClipboardEntry] = []
+        clipboard: [ClipboardEntry] = [],
+        cardOrder: [String] = ExpandedActivity.allKinds.map(\.kind)
     ) -> [ExpandedActivity] {
         var items: [ExpandedActivity] = []
         // Live agents lead: they are the only card that answers "what is
@@ -922,7 +923,43 @@ enum ExpandedActivityBuilder {
         if showSystemStats, let stats = systemStats { items.append(.systemStats(stats)) }
         if showBattery, let battery { items.append(.battery(battery)) }
         if showClock { items.append(.clock) }
-        return items
+        return applyUserOrder(to: items, order: cardOrder)
+    }
+
+    /// Reorders the built deck to the user's arrangement.
+    ///
+    /// The build order above is a default, not a policy. Everything it does to
+    /// hoist a card -- the shelf sitting behind the agents, the clipboard
+    /// behind the shelf -- exists because the deck is trimmed to
+    /// `visibleCardLimit` and a card at the tail is simply never drawn. Once
+    /// the order is the user's, those become the starting arrangement rather
+    /// than something to work around.
+    ///
+    /// A shelf that is being dropped onto, or is holding an undo, still jumps
+    /// the queue. That is not ordering, it is a transient state that must
+    /// survive any limit down to one card, and no arrangement should be able to
+    /// hide a file the user is dropping right now.
+    private static func applyUserOrder(to items: [ExpandedActivity],
+                                      order: [String]) -> [ExpandedActivity] {
+        let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+        var sorted = items.enumerated().sorted { lhs, rhs in
+            let l = rank[lhs.element.kind] ?? order.count
+            let r = rank[rhs.element.kind] ?? order.count
+            // Ties keep their build order: two cards of one kind never happen
+            // today, but a stable sort means that stays a non-event if they do.
+            return l == r ? lhs.offset < rhs.offset : l < r
+        }.map(\.element)
+
+        if let urgent = sorted.firstIndex(where: {
+            if case .shelf(_, let receipt, let error, let targeted) = $0 {
+                return targeted || receipt != nil || error != nil
+            }
+            return false
+        }), urgent != 0 {
+            let card = sorted.remove(at: urgent)
+            sorted.insert(card, at: 0)
+        }
+        return sorted
     }
 }
 

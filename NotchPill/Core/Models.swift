@@ -838,6 +838,29 @@ enum ExpandedActivity: Equatable, Identifiable {
         }
     }
 
+    /// Every card kind, in the order the deck uses when the user has not said
+    /// otherwise. The settings list is built from this, so a card can be
+    /// reordered before it has ever had content to show.
+    static let allKinds: [(kind: String, label: String)] = [
+        ("agents", "Live agents"),
+        ("shelf", "File shelf"),
+        ("clipboard", "Clipboard"),
+        ("openCodeUsage", "OpenCode usage"),
+        ("codexQuota", "Codex quota"),
+        ("claudeQuota", "Claude quota"),
+        ("cursorQuota", "Cursor quota"),
+        ("ci", "CI status"),
+        ("recentAlerts", "Recent activity"),
+        ("media", "Now playing"),
+        ("activeApp", "Active app"),
+        ("calendar", "Calendar"),
+        ("timer", "Timer"),
+        ("volume", "Volume"),
+        ("systemStats", "CPU & memory"),
+        ("battery", "Battery"),
+        ("clock", "Clock"),
+    ]
+
     /// Human label for the settings row.
     var kindLabel: String {
         switch self {
