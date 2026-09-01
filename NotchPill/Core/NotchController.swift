@@ -168,6 +168,7 @@ final class NotchController {
         relayoutTriggers.append(state.$codexQuota.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(state.$claudeQuota.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(state.$cursorQuota.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(ClipboardStore.shared.$entries.map { _ in () }.eraseToAnyPublisher())
 
         Publishers.MergeMany(relayoutTriggers)
         .receive(on: RunLoop.main)
@@ -380,6 +381,16 @@ final class NotchController {
         }
         agentSessions.start()
         devReady.start()
+
+        // The clipboard is only watched while the setting is on, and turning it
+        // off clears what was already remembered rather than merely hiding it.
+        if AppSettings.shared.showClipboard { ClipboardStore.shared.start() }
+        AppSettings.shared.$showClipboard
+            .removeDuplicates()
+            .sink { on in
+                if on { ClipboardStore.shared.start() } else { ClipboardStore.shared.stop() }
+            }
+            .store(in: &cancellables)
 
         // Secondary providers can warm up after the notch is on screen.
         DispatchQueue.main.async { [weak self] in

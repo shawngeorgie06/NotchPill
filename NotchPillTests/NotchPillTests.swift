@@ -8478,3 +8478,60 @@ struct CodexUsageResilienceTests {
         func bump() { value += 1 }
     }
 }
+
+@Suite("the clipboard forgets what it should never have kept")
+struct ClipboardPrivacyTests {
+    /// The rule the card depends on: a value the log redactor would hide is a
+    /// value the clipboard must not store. If `SecretRedactor` stops matching
+    /// a shape, the clipboard silently starts remembering it, and nothing else
+    /// in the app would notice.
+    @Test func redactableValuesAreRecognised() {
+        let secrets = [
+            "sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLL",
+            "ghp_AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIII",
+            "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abcdefghijklmnop",
+        ]
+        for secret in secrets {
+            #expect(SecretRedactor.redact(secret) != secret,
+                    "clipboard would have stored \(secret.prefix(12))…")
+        }
+    }
+
+    @Test func ordinaryTextIsLeftAlone() {
+        for text in ["git status", "~/Projects/NotchPill", "meet at 3pm"] {
+            #expect(SecretRedactor.redact(text) == text)
+        }
+    }
+
+    @Test func previewCollapsesWhitespace() {
+        let entry = ClipboardEntry(id: UUID(),
+                                   text: "first line\nsecond line\n\n    third",
+                                   copiedAt: Date())
+        #expect(!entry.preview.contains("\n"))
+        #expect(!entry.preview.contains("  "))
+    }
+
+    /// The row grows with the copy: a word takes one line, a paragraph four.
+    @Test func rowHeightFollowsHowMuchWasCopied() {
+        func lines(_ text: String) -> Int {
+            ClipboardEntry(id: UUID(), text: text, copiedAt: Date()).displayLines
+        }
+        #expect(lines("ok") == 1)
+        #expect(lines(String(repeating: "x", count: 100)) == 2)
+        #expect(lines(String(repeating: "x", count: 5000)) == ClipboardEntry.maxLines,
+                "a huge paste must stop growing, not take the whole pill")
+    }
+
+    /// The invariant that keeps the page dots on screen: the view draws
+    /// `displayLines` per row, so the budget has to reserve the same.
+    @Test func budgetCoversWhatTheViewDraws() {
+        let items = [
+            ClipboardEntry(id: UUID(), text: "short", copiedAt: Date()),
+            ClipboardEntry(id: UUID(), text: String(repeating: "y", count: 400),
+                           copiedAt: Date()),
+        ]
+        let tall = NotchContentLayout.clipboardHeight(items)
+        let short = NotchContentLayout.clipboardHeight([items[0]])
+        #expect(tall > short)
+    }
+}

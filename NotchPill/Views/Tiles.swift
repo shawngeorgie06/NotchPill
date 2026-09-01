@@ -847,7 +847,8 @@ enum ExpandedActivityBuilder {
         shelfItems: [ShelfCardItem] = [],
         shelfReceipt: ShelfFilingReceipt? = nil,
         shelfError: String? = nil,
-        shelfDropTargeted: Bool = false
+        shelfDropTargeted: Bool = false,
+        clipboard: [ClipboardEntry] = []
     ) -> [ExpandedActivity] {
         var items: [ExpandedActivity] = []
         // Live agents lead: they are the only card that answers "what is
@@ -898,6 +899,16 @@ enum ExpandedActivityBuilder {
                 items.insert(card, at: afterAgents)
             }
         }
+
+        // Directly behind the shelf, for the same reason the shelf sits high:
+        // an opt-in card at the tail is trimmed away on any deck carrying
+        // agents and a usage card, so turning the setting on appeared to do
+        // nothing at all.
+        if !clipboard.isEmpty {
+            let after = items.lastIndex { $0.kind == "shelf" }.map { $0 + 1 }
+                ?? (items.first?.kind == "agents" ? 1 : 0)
+            items.insert(.clipboard(clipboard), at: min(after, items.count))
+        }
         if showActiveApp {
             if let hint = appSwitchHint {
                 items.append(.appSwitch(hint))
@@ -924,6 +935,7 @@ struct ExpandedActivityCard: View {
     var textScale: CGFloat = 1.0
     var expandToFill: Bool = false
     @State private var hoveredShelfItem: UUID?
+    @State private var hoveredClipboardClear = false
     /// Nil when the setting is off, which is also how the token lines are
     /// suppressed — the card asks for nothing it was not given.
     var tokenUsage: TokenUsageSummary?
@@ -1020,6 +1032,8 @@ struct ExpandedActivityCard: View {
                 cursorQuotaCard(quota)
             case .ci(let runs):
                 ciCard(runs)
+            case .clipboard(let items):
+                clipboardCard(items)
             case .recentAlerts(let alerts):
                 recentAlertsCard(alerts)
             }
@@ -1320,6 +1334,78 @@ struct ExpandedActivityCard: View {
     }
 
     /// GitHub Actions for the repos you have agents working in.
+    private func clipboardCard(_ items: [ClipboardEntry]) -> some View {
+        VStack(alignment: .leading, spacing: s(3)) {
+            cardHeader(icon: {
+                Image(systemName: "doc.on.clipboard").font(.system(size: s(9)))
+            }, title: "Clipboard", trailing: {
+                if !items.isEmpty {
+                    // Pushed to the far edge so it is never next to the first
+                    // entry -- this button throws away everything, and a
+                    // destructive control should not sit under a wandering
+                    // pointer on its way to the list.
+                    Spacer(minLength: s(6))
+                    Button { ClipboardStore.shared.clear() } label: {
+                        HStack(spacing: s(3)) {
+                            Image(systemName: "trash")
+                                .font(.system(size: s(8)))
+                            Text("Clear")
+                                .font(font(size: 9, weight: .medium))
+                        }
+                        .foregroundStyle(.white.opacity(hoveredClipboardClear ? 0.95 : 0.5))
+                        .padding(.horizontal, s(5))
+                        .padding(.vertical, s(2))
+                        .background(
+                            Capsule().fill(Color.white.opacity(hoveredClipboardClear ? 0.16 : 0.07))
+                        )
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { hoveredClipboardClear = $0 }
+                    .help("Forget every remembered copy")
+                }
+            })
+
+            if items.isEmpty {
+                Text("Nothing copied yet.")
+                    .font(font(size: 10))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: s(2)) {
+                    ForEach(items) { entry in
+                        Button { ClipboardStore.shared.copyBack(entry) } label: {
+                            HStack(alignment: .top, spacing: s(5)) {
+                                Text(entry.preview)
+                                    .font(font(size: 10))
+                                    .foregroundStyle(.white.opacity(0.85))
+                                    .lineLimit(entry.displayLines)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(relativeStart(for: entry.copiedAt))
+                                    .font(font(size: 8))
+                                    .foregroundStyle(.white.opacity(0.4))
+                                    .fixedSize()
+                            }
+                            .padding(.horizontal, s(4))
+                            .padding(.vertical, s(2))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: s(4), style: .continuous)
+                                    .fill(Color.white.opacity(0.06))
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Copy again")
+                    }
+                }
+            }
+        }
+    }
+
     private func ciCard(_ runs: [CIRun]) -> some View {
         VStack(alignment: .leading, spacing: s(3)) {
             cardHeader(symbol: "checkmark.seal", title: "CI")

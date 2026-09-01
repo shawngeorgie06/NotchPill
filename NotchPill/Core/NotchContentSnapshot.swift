@@ -76,7 +76,8 @@ enum NotchContentSnapshot {
             shelfItems: shelf.items.map { ShelfCardItem(id: $0.id, name: $0.name, url: $0.url) },
             shelfReceipt: shelf.receipt,
             shelfError: shelf.lastError,
-            shelfDropTargeted: shelf.isDropTargeted
+            shelfDropTargeted: shelf.isDropTargeted,
+            clipboard: settings.showClipboard ? ClipboardStore.shared.entries : []
         ), pinnedKind: settings.pinnedActivityKind)
         // Smaller pill, fewer cards. The builder already returns them in
         // priority order, so this drops the least important tail rather than

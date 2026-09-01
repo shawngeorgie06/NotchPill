@@ -7,6 +7,10 @@ struct NotchRootView: View {
     @ObservedObject var state: NotchState
     @ObservedObject var shelf: ShelfStore
     @ObservedObject var tokens: TokenUsageStore = .shared
+    /// Observed for its side effect on the deck: `expandedActivities` reads
+    /// `ClipboardStore.shared`, and without a dependency here a new copy
+    /// never redraws the card.
+    @ObservedObject var clipboard: ClipboardStore = .shared
     @ObservedObject var timer: TimerStore
     let metrics: NotchMetrics
     let actions: NotchActions
@@ -470,6 +474,10 @@ struct ExpandedView: View {
     @ObservedObject var state: NotchState
     @ObservedObject var shelf: ShelfStore
     @ObservedObject var tokens: TokenUsageStore = .shared
+    /// Observed for its side effect on the deck: `expandedActivities` reads
+    /// `ClipboardStore.shared`, and without a dependency here a new copy
+    /// never redraws the card.
+    @ObservedObject var clipboard: ClipboardStore = .shared
     @ObservedObject var timer: TimerStore
     let actions: NotchActions
     let activities: [ExpandedActivity]

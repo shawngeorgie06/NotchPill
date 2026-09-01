@@ -89,6 +89,12 @@ final class AppSettings: ObservableObject {
     @Published var showExpandedBattery: Bool {
         didSet { defaults.set(showExpandedBattery, forKey: Keys.showExpandedBattery) }
     }
+    /// Off by default: a clipboard holds passwords and tokens, so remembering
+    /// them is something to opt into, never something that just starts.
+    @Published var showClipboard: Bool {
+        didSet { defaults.set(showClipboard, forKey: Keys.showClipboard) }
+    }
+
     @Published var showExpandedShelf: Bool {
         didSet { defaults.set(showExpandedShelf, forKey: Keys.showExpandedShelf) }
     }
@@ -376,6 +382,7 @@ final class AppSettings: ObservableObject {
         static let showExpandedSystemStats = "showExpandedSystemStats"
         static let showExpandedBattery = "showExpandedBattery"
         static let showExpandedShelf = "showExpandedShelf"
+        static let showClipboard = "showClipboard"
         static let showExpandedAgents = "showExpandedAgents"
         static let showExpandedCI = "showExpandedCI"
         static let showClaudeUsage = "showClaudeUsage"
@@ -428,6 +435,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedSystemStats: false,
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: true,
+            Keys.showClipboard: false,
             Keys.showExpandedAgents: true,
             Keys.showExpandedCI: true,
             Keys.showClaudeUsage: false,
@@ -472,6 +480,7 @@ final class AppSettings: ObservableObject {
         showExpandedSystemStats = defaults.bool(forKey: Keys.showExpandedSystemStats)
         showExpandedBattery = defaults.bool(forKey: Keys.showExpandedBattery)
         showExpandedShelf = defaults.bool(forKey: Keys.showExpandedShelf)
+        showClipboard = defaults.bool(forKey: Keys.showClipboard)
         showExpandedAgents = defaults.bool(forKey: Keys.showExpandedAgents)
         showExpandedCI = defaults.bool(forKey: Keys.showExpandedCI)
         showClaudeUsage = defaults.bool(forKey: Keys.showClaudeUsage)
@@ -543,6 +552,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedSystemStats: false,
             Keys.showExpandedBattery: false,
             Keys.showExpandedShelf: true,
+            Keys.showClipboard: false,
             Keys.showExpandedAgents: true,
             Keys.showExpandedCI: true,
             Keys.showExpandedRecentActivity: false,

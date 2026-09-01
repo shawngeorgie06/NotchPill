@@ -785,6 +785,20 @@ enum NotchContentLayout {
     static let agentsHeader: CGFloat = 18
     static let agentsRow: CGFloat = 63
 
+    /// Clipboard rows are not uniform: each is as tall as its own copy needs,
+    /// so a one-line snippet does not reserve the room a paragraph would.
+    /// Capped the same way `rowsHeight` caps, so a long history scrolls rather
+    /// than growing the pill without limit.
+    static func clipboardHeight(_ items: [ClipboardEntry]) -> CGFloat {
+        let lineHeight: CGFloat = 12
+        let rowPadding: CGFloat = 8
+        let shown = items.prefix(expandedMaxCardRows)
+        let rows = shown.reduce(CGFloat(0)) { total, entry in
+            total + rowPadding + lineHeight * CGFloat(entry.displayLines)
+        }
+        return 18 + max(lineHeight + rowPadding, rows)
+    }
+
     private static func rowsHeight(header: CGFloat, row: CGFloat, count: Int) -> CGFloat {
         header + row * CGFloat(min(expandedMaxCardRows, max(1, count)))
     }
@@ -826,6 +840,7 @@ enum NotchContentLayout {
         case .cursorQuota: return 70
         case .shelf: return 66
         case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)
+        case .clipboard(let items): return clipboardHeight(items)
         case .recentAlerts(let alerts): return rowsHeight(header: 18, row: 22, count: alerts.count)
         // Everything else is a label over a value.
         default: return 56
@@ -839,6 +854,9 @@ enum NotchContentLayout {
         case .timer: return 96
         case .systemStats: return 96
         case .shelf: return 108
+        // A clipboard line is text and wants the room; anything narrower
+        // truncates every entry into uselessness.
+        case .clipboard: return 340
         // Widest card by design: three rows of "project … status" need the room,
         // and a truncated project name defeats the point of the card.
         case .agents: return 210

@@ -776,6 +776,7 @@ enum ExpandedActivity: Equatable, Identifiable {
     case cursorQuota(CursorQuota)
     case ci([CIRun])
     case recentAlerts([DevReadyAlert])
+    case clipboard([ClipboardEntry])
 
     /// Stable identity for the *kind* of card, unlike `id`, which changes with
     /// the content. Weights are stored against this.
@@ -797,6 +798,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .cursorQuota: return "cursorQuota"
         case .ci: return "ci"
         case .recentAlerts: return "recentAlerts"
+        case .clipboard: return "clipboard"
         }
     }
 
@@ -832,6 +834,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .cursorQuota(let quota): return "cursor-quota-\(quota.used)-\(quota.limit)"
         case .ci(let runs): return "ci-" + runs.map { $0.id + $0.statusLabel }.joined(separator: ",")
         case .recentAlerts(let alerts): return "recent-" + alerts.map(\.id).joined(separator: ",")
+        case .clipboard(let items): return "clip-" + items.map { $0.id.uuidString }.joined(separator: ",")
         }
     }
 
@@ -854,6 +857,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .cursorQuota: return "Cursor quota"
         case .ci: return "CI status"
         case .recentAlerts: return "Recent activity"
+        case .clipboard: return "Clipboard"
         }
     }
 
@@ -894,6 +898,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .cursorQuota: return "cursorQuota"
         case .ci: return "ci"
         case .recentAlerts: return "recentAlerts"
+        case .clipboard: return "clipboard"
         }
     }
 }

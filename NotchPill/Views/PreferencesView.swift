@@ -165,6 +165,7 @@ struct PreferencesView: View {
         if settings.showExpandedSystemStats { out.append(("systemStats", "CPU & memory")) }
         if settings.showExpandedBattery { out.append(("battery", "Battery")) }
         if settings.showExpandedShelf { out.append(("shelf", "File shelf")) }
+        if settings.showClipboard { out.append(("clipboard", "Clipboard")) }
         if settings.showExpandedClock { out.append(("clock", "Clock")) }
         return out
     }
@@ -306,6 +307,12 @@ struct PreferencesView: View {
             Toggle("CPU & memory", isOn: $settings.showExpandedSystemStats)
             Toggle("Battery", isOn: $settings.showExpandedBattery)
             Toggle("File shelf — drop files here", isOn: $settings.showExpandedShelf)
+            Toggle("Clipboard — recent copies", isOn: $settings.showClipboard)
+            Text("Kept in memory only and never written to disk. Passwords marked "
+                 + "concealed by your password manager, and anything that looks "
+                 + "like a key or token, are not remembered.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
                 .help("The card that holds dropped files and files them into folders. "
                       + "Turn this on to use drag and drop.")
         }
