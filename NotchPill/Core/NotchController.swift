@@ -98,8 +98,12 @@ final class NotchController {
         hotZoneKeys.start()
 
         hoverMonitor.onEnter = { [weak self] in
-            self?.hotZoneKeys.updatePointerInHotZone(true)
-            self?.pointerEnteredHot()
+            // A dip lands the pointer in the hot zone by design. Treating that
+            // as a hover reopens the pill, which collapses, which dips again --
+            // the pill and the cursor both flickering until the pointer moves.
+            guard let self, !self.isDippingPointer else { return }
+            self.hotZoneKeys.updatePointerInHotZone(true)
+            self.pointerEnteredHot()
         }
         hoverMonitor.onExit = { [weak self] in
             self?.hotZoneKeys.updatePointerInHotZone(false)
@@ -821,6 +825,120 @@ final class NotchController {
         if takeKey { window?.makeKey() }
     }
 
+    /// Hovering the notch inside another app's full-screen window reveals that
+    /// window's title bar along with the menu bar, and macOS leaves it revealed
+    /// while the pointer rests up there -- which, once the pill has collapsed,
+    /// just means a bar sitting over the app's tabs.
+    ///
+    /// The title bar belongs to that app, so NotchPill cannot hide it directly.
+    /// Re-activating the owning application makes macOS re-evaluate the
+    /// full-screen chrome, which retracts it. The app is already frontmost, so
+    /// this is a nudge rather than an app switch -- nothing the user sees moves
+    /// except the bar they wanted gone.
+    private func retractFullScreenChromeIfNeeded() {
+        guard AppSettings.shared.retractFullScreenChrome else { return }
+        guard let front = NSWorkspace.shared.frontmostApplication,
+              front.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            LogStore.log("notch", "fullscreen: no other frontmost app")
+            return
+        }
+        guard hasFullScreenWindow(pid: front.processIdentifier) else {
+            LogStore.log("notch", "fullscreen: \(front.localizedName ?? "?") has no full-screen window")
+            return
+        }
+        LogStore.log("notch", "fullscreen: retracting chrome for \(front.localizedName ?? "?")")
+        // The panel sits at menu-bar level and joins every space, so while it is
+        // on screen the window server can treat the top strip as occupied and
+        // hold the revealed title bar there. Taking it away for a beat is what
+        // actually lets the bar go; re-activating the owner alone did not.
+        dipPointerThroughTitleBar()
+
+    }
+
+    /// Moves the pointer a few points into the revealed title bar and straight
+    /// back, so the owning app sees the mouse-enter and mouse-exit pair it is
+    /// waiting for.
+    ///
+    /// The bar hides on the pointer leaving *its* window. A pointer that only
+    /// ever hovered the notch never entered it, so the app has nothing to react
+    /// to and the bar sits over the tabs until you go and touch it. Nothing
+    /// NotchPill does to its own window changes that -- re-activating the owner
+    /// and taking the panel off screen were both tried and neither works.
+    ///
+    /// Moving someone's cursor is a real intrusion, so this is opt-in, scoped
+    /// to a collapse over a full-screen window, and puts the pointer back where
+    /// it was within about 60ms. It is skipped outright while a mouse button is
+    /// down, where a dip would corrupt a drag rather than merely surprise.
+    private func dipPointerThroughTitleBar() {
+        guard NSEvent.pressedMouseButtons == 0 else { return }
+        guard !isDippingPointer, Date() >= nextDipAllowedAt else { return }
+        guard let screen = geometry?.screen else { return }
+        isDippingPointer = true
+        // One dip per collapse at most. Without a floor, a dip that fails to
+        // dismiss the bar simply runs again on the next collapse it causes.
+        nextDipAllowedAt = Date().addingTimeInterval(Self.dipCooldown)
+        let origin = NSEvent.mouseLocation
+        // Cocoa measures from the bottom of the primary screen, Core Graphics
+        // from its top, so every warp coordinate flips through that height --
+        // not through this screen's, which is only the same on the primary one.
+        let primaryMaxY = NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY
+        let flipped = CGPoint(x: origin.x, y: primaryMaxY - origin.y)
+        let target = CGPoint(x: origin.x,
+                             y: primaryMaxY - screen.frame.maxY + Self.titleBarDipDepth)
+
+        CGWarpMouseCursorPosition(target)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            CGWarpMouseCursorPosition(flipped)
+            // The warp suppresses real mouse input briefly; without this the
+            // next hand movement is swallowed and the pointer feels stuck.
+            CGAssociateMouseAndMouseCursorPosition(1)
+            // Stay deaf to hover for a beat longer than the warp: the monitor
+            // polls, so the pointer can still be read at the dip position for
+            // a tick or two after it has actually been put back.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                self?.isDippingPointer = false
+            }
+        }
+    }
+
+    /// How far into the title bar the pointer dips. Enough to land inside the
+    /// bar (33pt on this display) without reaching the tabs below it.
+    private static let titleBarDipDepth: CGFloat = 16
+
+    /// True while a dip is in flight, so hover is ignored for its duration.
+    private var isDippingPointer = false
+    private var nextDipAllowedAt = Date.distantPast
+    private static let dipCooldown: TimeInterval = 1.5
+
+    /// True when the app owns a full-screen window.
+    ///
+    /// A full-screen window is *not* the size of its screen: it starts below
+    /// the menu-bar strip, so on a 1470x956 display it measures 1470x923 at
+    /// y=33. Matching the screen size exactly finds nothing, which is why this
+    /// matches the width and allows the height to fall short by a menu bar.
+    private func hasFullScreenWindow(pid: pid_t) -> Bool {
+        guard let info = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return false }
+        let screens = NSScreen.screens.map(\.frame.size)
+        for window in info {
+            guard window[kCGWindowOwnerPID as String] as? pid_t == pid,
+                  window[kCGWindowLayer as String] as? Int == 0,
+                  let bounds = window[kCGWindowBounds as String] as? [String: CGFloat],
+                  let w = bounds["Width"], let h = bounds["Height"] else { continue }
+            if screens.contains(where: {
+                abs($0.width - w) < 2 && h >= $0.height - Self.menuBarStripAllowance && h <= $0.height + 2
+            }) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// How far short of the screen height a full-screen window may fall and
+    /// still count: the menu-bar strip it sits below, with room to spare.
+    private static let menuBarStripAllowance: CGFloat = 60
+
     /// Skip a track, and aim the card transition the same way first.
     ///
     /// Order matters: the direction has to be set before the new track reaches
@@ -1034,6 +1152,7 @@ final class NotchController {
             self.pillEngaged = false
             self.state.setExpanded(false)
             self.applyWindowFrame(animated: true)
+            self.retractFullScreenChromeIfNeeded()
         }
         collapseWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + grace, execute: item)

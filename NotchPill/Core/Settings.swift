@@ -295,6 +295,13 @@ final class AppSettings: ObservableObject {
     @Published var devReadySound: String {
         didSet { defaults.set(devReadySound, forKey: Keys.devReadySound) }
     }
+    /// After the pill collapses over a full-screen window, nudge that window's
+    /// owner back to the front so macOS re-evaluates its auto-hiding title bar.
+    /// Without it the revealed title bar can sit over the app's own tabs until
+    /// the pointer wanders into it.
+    @Published var retractFullScreenChrome: Bool {
+        didSet { defaults.set(retractFullScreenChrome, forKey: Keys.retractFullScreenChrome) }
+    }
     /// Whether the notch's arrow shortcuts drive system output volume at all.
     /// Off leaves the keys to macOS.
     @Published var notchVolumeControl: Bool {
@@ -415,6 +422,7 @@ final class AppSettings: ObservableObject {
         static let devReadySound = "devReadySound"
         static let followUpReminders = "followUpReminders"
         static let quietWhenLocked = "quietWhenLocked"
+        static let retractFullScreenChrome = "retractFullScreenChrome"
         static let notchVolumeControl = "notchVolumeControl"
         static let volumeControlWhileMuted = "volumeControlWhileMuted"
         static let showVolumeHUD = "showVolumeHUD"
@@ -467,6 +475,7 @@ final class AppSettings: ObservableObject {
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
             Keys.devReadySound: DevReadySound.glass.rawValue,
+            Keys.retractFullScreenChrome: false,
             Keys.notchVolumeControl: true,
             Keys.volumeControlWhileMuted: false,
             Keys.showVolumeHUD: true,
@@ -521,6 +530,7 @@ final class AppSettings: ObservableObject {
         devReadyPlaySound = defaults.object(forKey: Keys.devReadyPlaySound) as? Bool ?? true
         let storedSound = defaults.string(forKey: Keys.devReadySound) ?? DevReadySound.glass.rawValue
         devReadySound = DevReadySound(rawValue: storedSound)?.rawValue ?? DevReadySound.glass.rawValue
+        retractFullScreenChrome = defaults.object(forKey: Keys.retractFullScreenChrome) as? Bool ?? false
         notchVolumeControl = defaults.object(forKey: Keys.notchVolumeControl) as? Bool ?? true
         volumeControlWhileMuted = defaults.object(forKey: Keys.volumeControlWhileMuted) as? Bool ?? false
         showVolumeHUD = defaults.object(forKey: Keys.showVolumeHUD) as? Bool ?? true
@@ -585,6 +595,7 @@ final class AppSettings: ObservableObject {
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
             Keys.devReadySound: DevReadySound.glass.rawValue,
+            Keys.retractFullScreenChrome: false,
             Keys.notchVolumeControl: true,
             Keys.volumeControlWhileMuted: false,
             Keys.showVolumeHUD: true,
@@ -629,6 +640,7 @@ final class AppSettings: ObservableObject {
         devReadyDuration = AppSettings.defaultDevReadyDuration
         devReadyPlaySound = true
         devReadySound = DevReadySound.glass.rawValue
+        retractFullScreenChrome = false
         notchVolumeControl = true
         volumeControlWhileMuted = false
         showVolumeHUD = true

@@ -18,6 +18,7 @@ struct PreferencesView: View {
                     tokenSection
                     cardShareSection
                     audioSection
+                    fullScreenSection
                     systemHUDSection
                     timerSection
                     devReadySection
@@ -366,6 +367,15 @@ struct PreferencesView: View {
             Text(settings.volumeControlWhileMuted
                  ? "Pressing up while muted unmutes at the level you muted at; the arrows step normally after that."
                  : "While muted, the arrows leave the volume alone. Unmute from the menu bar or the mute key first.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var fullScreenSection: some View {
+        SettingsPanel(title: "Full Screen", subtitle: "Behaviour over full-screen windows") {
+            Toggle("Retract the title bar when the pill closes", isOn: $settings.retractFullScreenChrome)
+            Text("Hovering the notch in a full-screen app reveals that window's title bar, over the app's own tabs. It only hides once the pointer has been inside it, so NotchPill briefly dips the pointer into the bar and puts it straight back — about 60ms. It is skipped while a mouse button is down.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
