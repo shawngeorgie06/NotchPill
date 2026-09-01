@@ -295,6 +295,18 @@ final class AppSettings: ObservableObject {
     @Published var devReadySound: String {
         didSet { defaults.set(devReadySound, forKey: Keys.devReadySound) }
     }
+    /// Whether the notch's arrow shortcuts drive system output volume at all.
+    /// Off leaves the keys to macOS.
+    @Published var notchVolumeControl: Bool {
+        didSet { defaults.set(notchVolumeControl, forKey: Keys.notchVolumeControl) }
+    }
+    /// What the arrows do while the output device is muted. Off treats mute as
+    /// a lock -- the notch will not move the level until you unmute elsewhere.
+    /// On restores the system-key behaviour: the first press up unmutes at the
+    /// level you muted at, and the arrows step normally after that.
+    @Published var volumeControlWhileMuted: Bool {
+        didSet { defaults.set(volumeControlWhileMuted, forKey: Keys.volumeControlWhileMuted) }
+    }
     /// Each system HUD is separately opt-in. The providers may continue to
     /// observe their public system state, but no visual interruption is shown
     /// unless the corresponding HUD is enabled.
@@ -403,6 +415,8 @@ final class AppSettings: ObservableObject {
         static let devReadySound = "devReadySound"
         static let followUpReminders = "followUpReminders"
         static let quietWhenLocked = "quietWhenLocked"
+        static let notchVolumeControl = "notchVolumeControl"
+        static let volumeControlWhileMuted = "volumeControlWhileMuted"
         static let showVolumeHUD = "showVolumeHUD"
         static let showBrightnessHUD = "showBrightnessHUD"
         static let showMicrophoneHUD = "showMicrophoneHUD"
@@ -453,6 +467,8 @@ final class AppSettings: ObservableObject {
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
             Keys.devReadySound: DevReadySound.glass.rawValue,
+            Keys.notchVolumeControl: true,
+            Keys.volumeControlWhileMuted: false,
             Keys.showVolumeHUD: true,
             Keys.showBrightnessHUD: true,
             Keys.showMicrophoneHUD: true,
@@ -505,6 +521,8 @@ final class AppSettings: ObservableObject {
         devReadyPlaySound = defaults.object(forKey: Keys.devReadyPlaySound) as? Bool ?? true
         let storedSound = defaults.string(forKey: Keys.devReadySound) ?? DevReadySound.glass.rawValue
         devReadySound = DevReadySound(rawValue: storedSound)?.rawValue ?? DevReadySound.glass.rawValue
+        notchVolumeControl = defaults.object(forKey: Keys.notchVolumeControl) as? Bool ?? true
+        volumeControlWhileMuted = defaults.object(forKey: Keys.volumeControlWhileMuted) as? Bool ?? false
         showVolumeHUD = defaults.object(forKey: Keys.showVolumeHUD) as? Bool ?? true
         showBrightnessHUD = defaults.object(forKey: Keys.showBrightnessHUD) as? Bool ?? true
         showMicrophoneHUD = defaults.object(forKey: Keys.showMicrophoneHUD) as? Bool ?? true
@@ -567,6 +585,8 @@ final class AppSettings: ObservableObject {
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
             Keys.devReadySound: DevReadySound.glass.rawValue,
+            Keys.notchVolumeControl: true,
+            Keys.volumeControlWhileMuted: false,
             Keys.showVolumeHUD: true,
             Keys.showBrightnessHUD: true,
             Keys.showMicrophoneHUD: true,
@@ -609,6 +629,8 @@ final class AppSettings: ObservableObject {
         devReadyDuration = AppSettings.defaultDevReadyDuration
         devReadyPlaySound = true
         devReadySound = DevReadySound.glass.rawValue
+        notchVolumeControl = true
+        volumeControlWhileMuted = false
         showVolumeHUD = true
         showBrightnessHUD = true
         showMicrophoneHUD = true

@@ -90,8 +90,8 @@ final class NotchController {
         hotZoneKeys.onTogglePlayPause = { [weak self] in self?.nowPlaying.togglePlayPause() }
         hotZoneKeys.onNext = { [weak self] in self?.handleNextShortcut() }
         hotZoneKeys.onPrevious = { [weak self] in self?.handlePreviousShortcut() }
-        hotZoneKeys.onVolumeUp = { [weak self] in self?.volume.volumeUp() }
-        hotZoneKeys.onVolumeDown = { [weak self] in self?.volume.volumeDown() }
+        hotZoneKeys.onVolumeUp = { [weak self] in self?.changeVolume(up: true) }
+        hotZoneKeys.onVolumeDown = { [weak self] in self?.changeVolume(up: false) }
         hotZoneKeys.pointerInHotZone = { [weak self] in
             self?.refreshShortcutArming() ?? false
         }
@@ -223,8 +223,17 @@ final class NotchController {
             .store(in: &cancellables)
     }
 
+    /// Both arrow shortcuts funnel through here so the settings gate is
+    /// applied in exactly one place.
+    private func changeVolume(up: Bool) {
+        let settings = AppSettings.shared
+        guard settings.notchVolumeControl else { return }
+        volume.allowChangeWhileMuted = settings.volumeControlWhileMuted
+        up ? volume.volumeUp() : volume.volumeDown()
+    }
+
     func testSystemVolumeUp() {
-        volume.volumeUp()
+        changeVolume(up: true)
     }
 
     func testDevReadyPing() {

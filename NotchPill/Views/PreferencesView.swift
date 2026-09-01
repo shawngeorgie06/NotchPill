@@ -17,6 +17,7 @@ struct PreferencesView: View {
                     shelfSection
                     tokenSection
                     cardShareSection
+                    audioSection
                     systemHUDSection
                     timerSection
                     devReadySection
@@ -354,6 +355,19 @@ struct PreferencesView: View {
                         .buttonStyle(TimerPillButtonStyle())
                 }
             }
+        }
+    }
+
+    private var audioSection: some View {
+        SettingsPanel(title: "Audio", subtitle: "Volume control from the notch") {
+            Toggle("Change volume with the arrow keys", isOn: $settings.notchVolumeControl)
+            Toggle("Allow changes while muted", isOn: $settings.volumeControlWhileMuted)
+                .disabled(!settings.notchVolumeControl)
+            Text(settings.volumeControlWhileMuted
+                 ? "Pressing up while muted unmutes at the level you muted at; the arrows step normally after that."
+                 : "While muted, the arrows leave the volume alone. Unmute from the menu bar or the mute key first.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
