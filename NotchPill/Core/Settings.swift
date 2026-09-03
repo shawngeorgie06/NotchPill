@@ -167,6 +167,52 @@ final class AppSettings: ObservableObject {
         return kept + known.filter { !kept.contains($0) }
     }
 
+    /// Whether a card kind can appear at all, given the switches.
+    ///
+    /// The order is a priority list, and a priority list that ranks cards you
+    /// have turned off is lying about the positions: "volume is 14th" reads as
+    /// hopeless when nine of the thirteen above it are switched off and could
+    /// never take a place.
+    func isCardEnabled(_ kind: String) -> Bool {
+        switch kind {
+        // The usage cards ride on the agents switch, as the deck builder does.
+        case "agents", "openCodeUsage", "codexQuota": return showExpandedAgents
+        // These two have no switch of their own: they appear when there is a
+        // quota to show, so the honest answer is that they can.
+        case "claudeQuota", "cursorQuota": return true
+        case "ci": return showExpandedCI
+        case "recentAlerts": return showExpandedRecentActivity
+        case "media": return showExpandedMedia
+        case "shelf": return showExpandedShelf
+        case "clipboard": return showClipboard
+        case "activeApp": return showExpandedActiveApp
+        case "calendar": return showExpandedCalendar
+        case "timer": return showExpandedTimer
+        case "volume": return showExpandedVolume
+        case "systemStats": return showExpandedSystemStats
+        case "battery": return showExpandedBattery
+        case "clock": return showExpandedClock
+        default: return true
+        }
+    }
+
+    /// The order with the switched-off cards taken out — what the settings
+    /// list shows, and the only numbering that means anything.
+    var enabledCardOrder: [String] { resolvedCardOrder.filter(isCardEnabled) }
+
+    /// The order the deck would actually draw at the current pill size.
+    var drawableCardOrder: ArraySlice<String> {
+        enabledCardOrder.prefix(
+            NotchContentLayout.visibleCardLimit(forUserScale: CGFloat(notchScale)))
+    }
+
+    /// Reorders within the enabled subset.
+    func moveEnabledCards(from source: IndexSet, to destination: Int) {
+        cardOrder = CardOrdering.moving(source, to: destination,
+                                        in: resolvedCardOrder,
+                                        isEnabled: isCardEnabled)
+    }
+
     func moveCards(from source: IndexSet, to destination: Int) {
         var order = resolvedCardOrder
         order.move(fromOffsets: source, toOffset: destination)
@@ -687,5 +733,26 @@ final class AppSettings: ObservableObject {
         followUpReminders = false
         quietWhenLocked = true
         agentApprovalsEnabled = false
+    }
+}
+
+
+/// The card-order arithmetic, kept out of `AppSettings` so it can be tested
+/// without a singleton that writes to the real preferences.
+enum CardOrdering {
+    /// Applies a drag made in the *enabled* subset to the full stored order.
+    ///
+    /// The rows a person drags are not the whole order, so the move is applied
+    /// to the subset and then written back. Disabled kinds keep their absolute
+    /// slots, which is what makes switching one back on return it to where it
+    /// was rather than to the end of the list.
+    static func moving(_ source: IndexSet, to destination: Int,
+                       in order: [String],
+                       isEnabled: (String) -> Bool) -> [String] {
+        var visible = order.filter(isEnabled)
+        guard !visible.isEmpty else { return order }
+        visible.move(fromOffsets: source, toOffset: destination)
+        var next = visible.makeIterator()
+        return order.map { isEnabled($0) ? (next.next() ?? $0) : $0 }
     }
 }

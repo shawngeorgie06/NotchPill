@@ -8673,3 +8673,34 @@ struct AudioOutputTests {
         #expect(off.id == on.id)
     }
 }
+
+@Suite("Card order lists only what is switched on")
+struct EnabledCardOrderTests {
+    private let order = ["agents", "shelf", "volume", "battery", "clock"]
+    private func enabled(_ kind: String) -> Bool { kind != "battery" }
+
+    /// A dragged row is a position in the *visible* list, not in the full
+    /// order, so the move has to be mapped back before it is stored.
+    @Test func movingAVisibleRowReordersTheFullOrder() {
+        let visible = order.filter(enabled)
+        guard let volume = visible.firstIndex(of: "volume") else { return #expect(Bool(false)) }
+        let moved = CardOrdering.moving(IndexSet(integer: volume), to: 0,
+                                        in: order, isEnabled: enabled)
+        #expect(moved.filter(enabled).first == "volume")
+    }
+
+    /// Switching a card off must not lose its place: the slot is held, so
+    /// turning it back on returns it where it was rather than to the end.
+    @Test func disabledKindsKeepTheirSlot() {
+        let moved = CardOrdering.moving(IndexSet(integer: 2), to: 0,
+                                        in: order, isEnabled: enabled)
+        #expect(moved.count == order.count)
+        #expect(Set(moved) == Set(order))
+        #expect(moved.firstIndex(of: "battery") == order.firstIndex(of: "battery"))
+    }
+
+    @Test func anEmptyVisibleSubsetIsLeftAlone() {
+        #expect(CardOrdering.moving(IndexSet(integer: 0), to: 0,
+                                    in: order, isEnabled: { _ in false }) == order)
+    }
+}

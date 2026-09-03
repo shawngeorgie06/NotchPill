@@ -374,26 +374,40 @@ struct PreferencesView: View {
     }
 
     private var cardOrderSection: some View {
-        SettingsPanel(title: "Card Order",
-                      subtitle: "Drag to choose which cards you see first") {
-            Text("The pill shows only the first few cards that have something in them, so this is really a priority list. Cards with nothing to say are skipped rather than taking a place.")
+        let order = settings.enabledCardOrder
+        let limit = NotchContentLayout.visibleCardLimit(
+            forUserScale: CGFloat(settings.notchScale))
+        return SettingsPanel(title: "Card Order",
+                             subtitle: "Drag to choose which cards you see first") {
+            Text("Only the cards you have switched on are listed. At your pill size the "
+                 + "expanded notch draws at most \(limit) of them, so anything below the "
+                 + "line is only reached when the cards above it have nothing to say.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             List {
-                ForEach(Array(settings.resolvedCardOrder.enumerated()), id: \.element) { index, kind in
-                    HStack(spacing: 8) {
-                        Text("\(index + 1)")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 18, alignment: .trailing)
-                        Text(ExpandedActivity.allKinds.first { $0.kind == kind }?.label ?? kind)
-                        Spacer()
-                        Image(systemName: "line.3.horizontal")
-                            .foregroundStyle(.tertiary)
+                ForEach(Array(order.enumerated()), id: \.element) { index, kind in
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 8) {
+                            Text("\(index + 1)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(width: 18, alignment: .trailing)
+                            Text(ExpandedActivity.allKinds.first { $0.kind == kind }?.label ?? kind)
+                                .foregroundStyle(index < limit ? .primary : .secondary)
+                            Spacer()
+                            Image(systemName: "line.3.horizontal")
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 1)
+                        // The cut is the whole reason a card goes missing, so
+                        // it is drawn rather than left to be worked out from a
+                        // number in a paragraph.
+                        if index == limit - 1, order.count > limit {
+                            Divider().padding(.top, 4)
+                        }
                     }
-                    .padding(.vertical, 1)
                 }
-                .onMove { settings.moveCards(from: $0, to: $1) }
+                .onMove { settings.moveEnabledCards(from: $0, to: $1) }
             }
             .frame(height: 260)
             .listStyle(.plain)
