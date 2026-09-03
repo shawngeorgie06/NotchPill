@@ -8704,3 +8704,234 @@ struct EnabledCardOrderTests {
                                     in: order, isEnabled: { _ in false }) == order)
     }
 }
+
+@Suite("Terminal emulator")
+struct TerminalEmulatorTests {
+    private func emulator(columns: Int = 20, rows: Int = 4,
+                          _ text: String) -> TerminalEmulator {
+        var term = TerminalEmulator(columns: columns, rows: rows)
+        term.feed(Array(text.utf8))
+        return term
+    }
+
+    @Test func plainTextLandsOnTheFirstRow() {
+        #expect(emulator("hello").visibleLines.first == "hello")
+    }
+
+    @Test func newlineMovesDownAndCarriageReturnGoesHome() {
+        let term = emulator("one\r\ntwo")
+        #expect(term.visibleLines[0] == "one")
+        #expect(term.visibleLines[1] == "two")
+    }
+
+    /// A bare `\n` from a PTY is a line feed, not a new line: the shell sends
+    /// `\r\n`. Moving to column 0 on `\n` alone would hide a missing `\r`.
+    @Test func lineFeedKeepsTheColumn() {
+        let term = emulator("abc\nd")
+        #expect(term.visibleLines[1] == "   d")
+    }
+
+    /// A line that exactly fills the width must not leave a blank row behind
+    /// it — the wrap is deferred until there is another character to place.
+    @Test func wrapIsDeferredUntilTheNextCharacter() {
+        var term = TerminalEmulator(columns: 4, rows: 3)
+        term.feed(Array("abcd".utf8))
+        #expect(term.cursorRow == 0)
+        term.feed(Array("e".utf8))
+        #expect(term.cursorRow == 1)
+        #expect(term.visibleLines[0] == "abcd")
+        #expect(term.visibleLines[1] == "e")
+    }
+
+    @Test func backspaceOverwritesRatherThanDeletes() {
+        let term = emulator("ab\u{08}c")
+        #expect(term.visibleLines[0] == "ac")
+    }
+
+    @Test func tabsAdvanceToTheNextStop() {
+        let term = emulator("a\tb")
+        #expect(term.visibleLines[0] == "a       b")
+    }
+
+    // MARK: - Colour
+
+    @Test func sgrSetsAndResetsForeground() {
+        var term = TerminalEmulator(columns: 10, rows: 2)
+        term.feed(Array("\u{1B}[31mR\u{1B}[0mP".utf8))
+        #expect(term.screen[0][0].attributes.foreground == .indexed(1))
+        #expect(term.screen[0][1].attributes.foreground == .default)
+    }
+
+    @Test func brightForegroundsMapIntoTheUpperHalfOfThePalette() {
+        var term = TerminalEmulator(columns: 4, rows: 2)
+        term.feed(Array("\u{1B}[92mg".utf8))
+        #expect(term.screen[0][0].attributes.foreground == .indexed(10))
+    }
+
+    @Test func twoFiftySixColourAndTrueColourAreBothRead() {
+        #expect(TerminalEmulator.extendedColor([38, 5, 214], from: 0).0 == .indexed(214))
+        #expect(TerminalEmulator.extendedColor([38, 2, 10, 20, 30], from: 0).0 == .rgb(10, 20, 30))
+        // A truncated sequence must not read past the end of the list.
+        #expect(TerminalEmulator.extendedColor([38, 2, 10], from: 0).0 == nil)
+    }
+
+    @Test func boldAndInverseSurviveOnTheCell() {
+        var term = TerminalEmulator(columns: 4, rows: 2)
+        term.feed(Array("\u{1B}[1;7mx".utf8))
+        #expect(term.screen[0][0].attributes.bold)
+        #expect(term.screen[0][0].attributes.inverse)
+    }
+
+    // MARK: - Cursor and erase
+
+    @Test func absolutePositioningIsOneBased() {
+        var term = TerminalEmulator(columns: 10, rows: 4)
+        term.feed(Array("\u{1B}[3;5mX".utf8))   // an SGR, not a move
+        term.feed(Array("\u{1B}[3;5HX".utf8))
+        #expect(term.cursorRow == 2)
+        #expect(term.visibleLines[2] == "    X")
+    }
+
+    @Test func eraseToEndOfLineClearsOnlyWhatFollows() {
+        var term = TerminalEmulator(columns: 10, rows: 2)
+        term.feed(Array("abcdef\u{1B}[1;4H\u{1B}[K".utf8))
+        #expect(term.visibleLines[0] == "abc")
+    }
+
+    @Test func eraseDisplayClearsEverythingAndKeepsHistoryUnlessAsked() {
+        var term = TerminalEmulator(columns: 6, rows: 2)
+        term.feed(Array("one\r\ntwo\r\nthree".utf8))     // pushes "one" into scrollback
+        #expect(!term.scrollback.isEmpty)
+        term.feed(Array("\u{1B}[2J".utf8))
+        #expect(term.visibleLines.filter { !$0.isEmpty }.isEmpty)
+        #expect(!term.scrollback.isEmpty, "2J clears the screen, not the history")
+        term.feed(Array("\u{1B}[3J".utf8))
+        #expect(term.scrollback.isEmpty, "3J is the one that drops history")
+    }
+
+    @Test func deleteAndInsertCharactersShiftTheRestOfTheLine() {
+        var term = TerminalEmulator(columns: 8, rows: 2)
+        term.feed(Array("abcdef\u{1B}[1;2H\u{1B}[2P".utf8))
+        #expect(term.visibleLines[0] == "adef")
+        term.feed(Array("\u{1B}[1;2H\u{1B}[1@".utf8))
+        #expect(term.visibleLines[0] == "a def")
+    }
+
+    // MARK: - Scrolling
+
+    @Test func outputPastTheBottomScrollsIntoHistory() {
+        var term = TerminalEmulator(columns: 6, rows: 2)
+        term.feed(Array("1\r\n2\r\n3".utf8))
+        #expect(term.visibleLines == ["2", "3"])
+        #expect(term.scrollback.count == 1)
+        #expect(String(term.scrollback[0].map(\.character)).hasPrefix("1"))
+    }
+
+    /// Output is card-only and truncated by design; the cap is what keeps a
+    /// runaway command from growing memory without bound.
+    @Test func historyIsCappedAtTheDocumentedLimit() {
+        var term = TerminalEmulator(columns: 4, rows: 2)
+        for index in 0..<(TerminalEmulator.scrollbackLimit + 50) {
+            term.feed(Array("\(index % 10)\r\n".utf8))
+        }
+        #expect(term.scrollback.count == TerminalEmulator.scrollbackLimit)
+    }
+
+    /// A progress bar redraws inside a scroll region every frame. Those lines
+    /// are not history, and keeping them would bury the real output.
+    @Test func aScrollRegionDoesNotFillHistory() {
+        var term = TerminalEmulator(columns: 6, rows: 4)
+        term.feed(Array("\u{1B}[2;4r".utf8))
+        for _ in 0..<20 { term.feed(Array("x\r\n".utf8)) }
+        #expect(term.scrollback.isEmpty)
+    }
+
+    @Test func reverseIndexAtTheTopScrollsDown() {
+        var term = TerminalEmulator(columns: 6, rows: 3)
+        term.feed(Array("a\r\nb".utf8))
+        term.feed(Array("\u{1B}[1;1H\u{1B}M".utf8))
+        #expect(term.visibleLines[1] == "a")
+    }
+
+    // MARK: - Alternate screen
+
+    @Test func theAlternateScreenHandsTheShellBackUntouched() {
+        var term = TerminalEmulator(columns: 8, rows: 3)
+        term.feed(Array("shell".utf8))
+        term.feed(Array("\u{1B}[?1049h".utf8))
+        #expect(term.isAlternateScreen)
+        term.feed(Array("fullscreen".utf8))
+        #expect(term.visibleLines[0] != "shell")
+        term.feed(Array("\u{1B}[?1049l".utf8))
+        #expect(!term.isAlternateScreen)
+        #expect(term.visibleLines[0] == "shell")
+    }
+
+    @Test func cursorVisibilityFollowsDECTCEM() {
+        var term = TerminalEmulator(columns: 4, rows: 2)
+        term.feed(Array("\u{1B}[?25l".utf8))
+        #expect(!term.cursorVisible)
+        term.feed(Array("\u{1B}[?25h".utf8))
+        #expect(term.cursorVisible)
+    }
+
+    // MARK: - Sequences we only need to swallow
+
+    /// An unrecognised sequence has to vanish, not print. A stray `[?2004h`
+    /// across a six-line card is worse than a feature quietly unsupported.
+    @Test func unknownSequencesLeaveNothingOnScreen() {
+        #expect(emulator("\u{1B}[?2004ha\u{1B}[>4;2mb").visibleLines[0] == "ab")
+    }
+
+    @Test func operatingSystemCommandsAreConsumedWhicheverTerminatorIsUsed() {
+        #expect(emulator("\u{1B}]0;a title\u{07}ok").visibleLines[0] == "ok")
+        #expect(emulator("\u{1B}]0;a title\u{1B}\\ok").visibleLines[0] == "ok")
+    }
+
+    // MARK: - Chunk boundaries
+
+    /// A PTY read lands mid-character often enough that decoding each chunk on
+    /// its own visibly corrupts any non-ASCII output.
+    @Test func aCharacterSplitAcrossTwoReadsIsNotCorrupted() {
+        var term = TerminalEmulator(columns: 8, rows: 2)
+        let bytes = Array("é".utf8)
+        term.feed([bytes[0]])
+        term.feed([bytes[1]])
+        #expect(term.visibleLines[0] == "é")
+    }
+
+    @Test func anEscapeSequenceSplitAcrossReadsStillApplies() {
+        var term = TerminalEmulator(columns: 8, rows: 2)
+        term.feed(Array("\u{1B}[3".utf8))
+        term.feed(Array("1mR".utf8))
+        #expect(term.screen[0][0].attributes.foreground == .indexed(1))
+    }
+
+    @Test func decodeReportsThePartialTailSeparately() {
+        let bytes = Array("aé".utf8)
+        let (text, tail) = TerminalEmulator.decode(Array(bytes.dropLast()))
+        #expect(text == "a")
+        #expect(tail.count == 1)
+    }
+
+    // MARK: - Resize
+
+    /// Growing the card should reveal what just happened, not what happened
+    /// first, so the bottom of the output is what stays put.
+    @Test func resizingKeepsTheBottomOfTheOutput() {
+        var term = TerminalEmulator(columns: 6, rows: 2)
+        term.feed(Array("1\r\n2\r\n3\r\n4".utf8))
+        #expect(term.visibleLines == ["3", "4"])
+        term.resize(columns: 6, rows: 4)
+        #expect(term.visibleLines.suffix(2) == ["3", "4"])
+        term.resize(columns: 6, rows: 2)
+        #expect(term.visibleLines == ["3", "4"])
+    }
+
+    @Test func resizingNarrowerDoesNotLeaveRaggedRows() {
+        var term = TerminalEmulator(columns: 10, rows: 2)
+        term.feed(Array("abcdefghij".utf8))
+        term.resize(columns: 4, rows: 2)
+        #expect(term.screen.filter { $0.count != 4 }.isEmpty)
+    }
+}
