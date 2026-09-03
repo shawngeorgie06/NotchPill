@@ -849,6 +849,7 @@ enum ExpandedActivityBuilder {
         shelfError: String? = nil,
         shelfDropTargeted: Bool = false,
         clipboard: [ClipboardEntry] = [],
+        clipboardSearching: Bool = false,
         cardOrder: [String] = ExpandedActivity.allKinds.map(\.kind)
     ) -> [ExpandedActivity] {
         var items: [ExpandedActivity] = []
@@ -905,10 +906,14 @@ enum ExpandedActivityBuilder {
         // an opt-in card at the tail is trimmed away on any deck carrying
         // agents and a usage card, so turning the setting on appeared to do
         // nothing at all.
-        if !clipboard.isEmpty {
+        // An open search field keeps the card even when nothing matches: a
+        // card that vanishes mid-word takes the keyboard focus with it, and
+        // there is then no way to correct the typo that emptied it.
+        if !clipboard.isEmpty || clipboardSearching {
             let after = items.lastIndex { $0.kind == "shelf" }.map { $0 + 1 }
                 ?? (items.first?.kind == "agents" ? 1 : 0)
-            items.insert(.clipboard(clipboard), at: min(after, items.count))
+            items.insert(.clipboard(clipboard, searching: clipboardSearching),
+                         at: min(after, items.count))
         }
         if showActiveApp {
             if let hint = appSwitchHint {
@@ -973,6 +978,9 @@ struct ExpandedActivityCard: View {
     var expandToFill: Bool = false
     @State private var hoveredShelfItem: UUID?
     @State private var hoveredClipboardClear = false
+    @State private var hoveredClipboardSearch = false
+    @State private var hoveredClipboardPin: UUID?
+    @FocusState private var clipboardSearchFocused: Bool
     /// Nil when the setting is off, which is also how the token lines are
     /// suppressed — the card asks for nothing it was not given.
     var tokenUsage: TokenUsageSummary?
@@ -1069,8 +1077,8 @@ struct ExpandedActivityCard: View {
                 cursorQuotaCard(quota)
             case .ci(let runs):
                 ciCard(runs)
-            case .clipboard(let items):
-                clipboardCard(items)
+            case .clipboard(let items, let searching):
+                clipboardCard(items, searching: searching)
             case .recentAlerts(let alerts):
                 recentAlertsCard(alerts)
             }
@@ -1371,17 +1379,42 @@ struct ExpandedActivityCard: View {
     }
 
     /// GitHub Actions for the repos you have agents working in.
-    private func clipboardCard(_ items: [ClipboardEntry]) -> some View {
+    private func clipboardCard(_ items: [ClipboardEntry], searching: Bool) -> some View {
         VStack(alignment: .leading, spacing: s(3)) {
             cardHeader(icon: {
                 Image(systemName: "doc.on.clipboard").font(.system(size: s(9)))
             }, title: "Clipboard", trailing: {
+                Spacer(minLength: s(6))
+                Button {
+                    if searching {
+                        ClipboardStore.shared.endSearch()
+                        actions.captureKeyboard(false)
+                    } else {
+                        ClipboardStore.shared.beginSearch()
+                        actions.captureKeyboard(true)
+                        clipboardSearchFocused = true
+                    }
+                } label: {
+                    Image(systemName: searching ? "xmark" : "magnifyingglass")
+                        .font(.system(size: s(8)))
+                        .foregroundStyle(.white.opacity(
+                            searching || hoveredClipboardSearch ? 0.95 : 0.5))
+                        .padding(s(3))
+                        .background(
+                            Circle().fill(Color.white.opacity(
+                                searching || hoveredClipboardSearch ? 0.16 : 0.07))
+                        )
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .onHover { hoveredClipboardSearch = $0 }
+                .help(searching ? "Close search" : "Search remembered copies")
+
                 if !items.isEmpty {
                     // Pushed to the far edge so it is never next to the first
                     // entry -- this button throws away everything, and a
                     // destructive control should not sit under a wandering
                     // pointer on its way to the list.
-                    Spacer(minLength: s(6))
                     Button { ClipboardStore.shared.clear() } label: {
                         HStack(spacing: s(3)) {
                             Image(systemName: "trash")
@@ -1399,12 +1432,16 @@ struct ExpandedActivityCard: View {
                     }
                     .buttonStyle(.plain)
                     .onHover { hoveredClipboardClear = $0 }
-                    .help("Forget every remembered copy")
+                    .help("Forget every unpinned copy")
                 }
             })
 
+            if searching {
+                clipboardSearchField
+            }
+
             if items.isEmpty {
-                Text("Nothing copied yet.")
+                Text(searching ? "No copy matches that." : "Nothing copied yet.")
                     .font(font(size: 10))
                     .foregroundStyle(.white.opacity(0.45))
             }
@@ -1412,6 +1449,11 @@ struct ExpandedActivityCard: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: s(2)) {
                     ForEach(items) { entry in
+                      // The pin is a sibling of the copy button, not a control
+                      // inside its label: a button nested in another button's
+                      // label swallows its own taps.
+                      HStack(alignment: .top, spacing: s(3)) {
+                        clipboardPinButton(entry)
                         Button { ClipboardStore.shared.copyBack(entry) } label: {
                             HStack(alignment: .top, spacing: s(5)) {
                                 Text(entry.preview)
@@ -1431,16 +1473,77 @@ struct ExpandedActivityCard: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(
                                 RoundedRectangle(cornerRadius: s(4), style: .continuous)
-                                    .fill(Color.white.opacity(0.06))
+                                    .fill(Color.white.opacity(entry.isPinned ? 0.12 : 0.06))
                             )
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .help("Copy again")
+                      }
+                      .onHover { hoveredClipboardPin = $0 ? entry.id : nil }
                     }
                 }
             }
         }
+    }
+
+    /// The search field, shown only while the search is open.
+    ///
+    /// Escape closes it rather than clearing it, because a field you have to
+    /// empty by hand before you can get out of it is a trap in a pill this
+    /// small; Return does the same, since there is nothing to submit.
+    private var clipboardSearchField: some View {
+        HStack(spacing: s(4)) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: s(8)))
+                .foregroundStyle(.white.opacity(0.4))
+            TextField("Search copies", text: Binding(
+                get: { ClipboardStore.shared.query },
+                set: { ClipboardStore.shared.query = $0 }
+            ))
+            .textFieldStyle(.plain)
+            .font(font(size: 10))
+            .foregroundStyle(.white.opacity(0.9))
+            .focused($clipboardSearchFocused)
+            .onSubmit { closeClipboardSearch() }
+            .onExitCommand { closeClipboardSearch() }
+        }
+        .padding(.horizontal, s(5))
+        .padding(.vertical, s(3))
+        .background(
+            RoundedRectangle(cornerRadius: s(5), style: .continuous)
+                .fill(Color.white.opacity(0.08))
+        )
+        .onAppear { clipboardSearchFocused = true }
+    }
+
+    private func closeClipboardSearch() {
+        ClipboardStore.shared.endSearch()
+        actions.captureKeyboard(false)
+    }
+
+    /// Shown filled on a pinned entry, and only on hover otherwise, so an
+    /// unpinned list is not a column of grey pins competing with the text.
+    private func clipboardPinButton(_ entry: ClipboardEntry) -> some View {
+        let atLimit = !entry.isPinned
+            && ClipboardStore.shared.pinnedCount >= ClipboardStore.pinCapacity
+        return Button { ClipboardStore.shared.togglePin(entry) } label: {
+            Image(systemName: entry.isPinned ? "pin.fill" : "pin")
+                .font(.system(size: s(8)))
+                .rotationEffect(.degrees(45))
+                .foregroundStyle(.white.opacity(
+                    entry.isPinned ? 0.85 : (hoveredClipboardPin == entry.id ? 0.5 : 0)
+                ))
+                .frame(width: s(12), height: s(12))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(atLimit)
+        .help(entry.isPinned
+              ? "Unpin — it goes back to being forgotten in turn"
+              : (atLimit
+                 ? "\(ClipboardStore.pinCapacity) pins is the limit; unpin one first"
+                 : "Pin — kept until you unpin it"))
     }
 
     private func ciCard(_ runs: [CIRun]) -> some View {

@@ -173,6 +173,10 @@ final class NotchController {
         relayoutTriggers.append(state.$claudeQuota.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(state.$cursorQuota.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(ClipboardStore.shared.$entries.map { _ in () }.eraseToAnyPublisher())
+        // The query narrows the list and the flag reserves the field's row, so
+        // both change the card's height and both have to relayout.
+        relayoutTriggers.append(ClipboardStore.shared.$query.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(ClipboardStore.shared.$isSearching.map { _ in () }.eraseToAnyPublisher())
 
         Publishers.MergeMany(relayoutTriggers)
         .receive(on: RunLoop.main)
@@ -301,7 +305,8 @@ final class NotchController {
                 self.shelf.remove(item)
             },
             undoShelfFiling: { [weak self] in self?.shelf.undoLastFiling() },
-            holdNotchOpen: { [weak self] hold in self?.setInteractionHold(hold) }
+            holdNotchOpen: { [weak self] hold in self?.setInteractionHold(hold) },
+            captureKeyboard: { [weak self] on in self?.setKeyboardCapture(on) }
         )
         return NotchRootView(state: state, shelf: shelf, timer: TimerStore.shared, metrics: metrics, actions: actions)
     }
@@ -1080,6 +1085,36 @@ final class NotchController {
         applyWindowFrame(animated: true)
         window?.orderFrontRegardless()
     }
+
+    /// Hands the keyboard to a field drawn inside the pill.
+    ///
+    /// The panel is nonactivating, so taking key focus does not switch apps.
+    /// Losing key focus ends the capture: without that, clicking away leaves
+    /// the interaction hold set and the pill propped open with nothing in it.
+    func setKeyboardCapture(_ on: Bool) {
+        // The reply composer suspends these too. Honour whichever still wants
+        // them suspended rather than clobbering the other's state.
+        hotZoneKeys.suspended = on || state.replyCompose != nil
+        setInteractionHold(on)
+        if on {
+            window?.makeKeyAndOrderFront(nil)
+            if keyboardCaptureObserver == nil, let window {
+                keyboardCaptureObserver = NotificationCenter.default.addObserver(
+                    forName: NSWindow.didResignKeyNotification, object: window, queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor in
+                        ClipboardStore.shared.endSearch()
+                        self?.setKeyboardCapture(false)
+                    }
+                }
+            }
+        } else if let observer = keyboardCaptureObserver {
+            NotificationCenter.default.removeObserver(observer)
+            keyboardCaptureObserver = nil
+        }
+    }
+
+    private var keyboardCaptureObserver: NSObjectProtocol?
 
     /// Set while a popover (the shelf's destination menu) owns the pointer.
     /// Collapsing underneath one destroys its anchor view and dismisses it.

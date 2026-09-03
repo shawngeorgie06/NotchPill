@@ -776,7 +776,7 @@ enum ExpandedActivity: Equatable, Identifiable {
     case cursorQuota(CursorQuota)
     case ci([CIRun])
     case recentAlerts([DevReadyAlert])
-    case clipboard([ClipboardEntry])
+    case clipboard([ClipboardEntry], searching: Bool)
 
     /// Stable identity for the *kind* of card, unlike `id`, which changes with
     /// the content. Weights are stored against this.
@@ -834,7 +834,12 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .cursorQuota(let quota): return "cursor-quota-\(quota.used)-\(quota.limit)"
         case .ci(let runs): return "ci-" + runs.map { $0.id + $0.statusLabel }.joined(separator: ",")
         case .recentAlerts(let alerts): return "recent-" + alerts.map(\.id).joined(separator: ",")
-        case .clipboard(let items): return "clip-" + items.map { $0.id.uuidString }.joined(separator: ",")
+        case .clipboard(let items, let searching):
+            // The pin marker and the search flag both belong here: each one
+            // redraws the card without changing which card it is.
+            return "clip-\(searching)-" + items.map {
+                $0.id.uuidString + ($0.isPinned ? "P" : "")
+            }.joined(separator: ",")
         }
     }
 

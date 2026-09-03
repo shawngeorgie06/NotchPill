@@ -789,15 +789,21 @@ enum NotchContentLayout {
     /// so a one-line snippet does not reserve the room a paragraph would.
     /// Capped the same way `rowsHeight` caps, so a long history scrolls rather
     /// than growing the pill without limit.
-    static func clipboardHeight(_ items: [ClipboardEntry]) -> CGFloat {
+    static func clipboardHeight(_ items: [ClipboardEntry], searching: Bool) -> CGFloat {
         let lineHeight: CGFloat = 12
         let rowPadding: CGFloat = 8
         let shown = items.prefix(expandedMaxCardRows)
         let rows = shown.reduce(CGFloat(0)) { total, entry in
             total + rowPadding + lineHeight * CGFloat(entry.displayLines)
         }
-        return 18 + max(lineHeight + rowPadding, rows)
+        // The search field is drawn from view state the deck cannot see, so
+        // its row has to be reserved here or the card overruns its budget and
+        // pushes the page dots off the bottom of the pill.
+        return 18 + (searching ? searchRow : 0) + max(lineHeight + rowPadding, rows)
     }
+
+    /// The clipboard search field plus the gap above it.
+    static let searchRow: CGFloat = 22
 
     private static func rowsHeight(header: CGFloat, row: CGFloat, count: Int) -> CGFloat {
         header + row * CGFloat(min(expandedMaxCardRows, max(1, count)))
@@ -840,7 +846,7 @@ enum NotchContentLayout {
         case .cursorQuota: return 70
         case .shelf: return 66
         case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)
-        case .clipboard(let items): return clipboardHeight(items)
+        case .clipboard(let items, let searching): return clipboardHeight(items, searching: searching)
         case .recentAlerts(let alerts): return rowsHeight(header: 18, row: 22, count: alerts.count)
         // Everything else is a label over a value.
         default: return 56

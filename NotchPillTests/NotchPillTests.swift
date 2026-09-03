@@ -8530,9 +8530,12 @@ struct ClipboardPrivacyTests {
             ClipboardEntry(id: UUID(), text: String(repeating: "y", count: 400),
                            copiedAt: Date()),
         ]
-        let tall = NotchContentLayout.clipboardHeight(items)
-        let short = NotchContentLayout.clipboardHeight([items[0]])
+        let tall = NotchContentLayout.clipboardHeight(items, searching: false)
+        let short = NotchContentLayout.clipboardHeight([items[0]], searching: false)
         #expect(tall > short)
+        // An open search field has to be paid for, or the card overruns the
+        // height the deck reserved for it.
+        #expect(NotchContentLayout.clipboardHeight([items[0]], searching: true) > short)
     }
 
     // MARK: - Card order
@@ -8580,5 +8583,65 @@ struct ClipboardPrivacyTests {
 
         settings.cardOrder = ["nonsenseCard", "clock"]
         #expect(!settings.resolvedCardOrder.contains("nonsenseCard"))
+    }
+}
+
+@MainActor
+@Suite("Clipboard pins and search")
+struct ClipboardPinTests {
+    /// `ClipboardStore` is a singleton, so every test starts from a known
+    /// state rather than inheriting whatever the previous one left behind.
+    private func store() -> ClipboardStore {
+        let store = ClipboardStore.shared
+        store.stop()
+        return store
+    }
+
+    @Test func pinnedEntriesSurviveTheCapacityTrim() {
+        let store = self.store()
+        store.recordForTesting("keep me")
+        guard let pinned = store.entries.first else { return #expect(Bool(false)) }
+        store.togglePin(pinned)
+        // Well past the 12-entry capacity, so an unpinned entry would be gone.
+        for i in 0..<30 { store.recordForTesting("filler \(i)") }
+        #expect(store.entries.contains { $0.text == "keep me" && $0.isPinned })
+        #expect(store.entries.first?.text == "keep me")
+    }
+
+    @Test func clearKeepsPinsAndDropsTheRest() {
+        let store = self.store()
+        store.recordForTesting("pinned")
+        if let entry = store.entries.first { store.togglePin(entry) }
+        store.recordForTesting("transient")
+        store.clear()
+        #expect(store.entries.map(\.text) == ["pinned"])
+    }
+
+    @Test func recopyingAPinnedEntryKeepsItPinned() {
+        let store = self.store()
+        store.recordForTesting("snippet")
+        if let entry = store.entries.first { store.togglePin(entry) }
+        store.recordForTesting("snippet")
+        #expect(store.entries.filter { $0.text == "snippet" }.count == 1)
+        #expect(store.entries.first?.isPinned == true)
+    }
+
+    @Test func searchMatchesTextPastThePreviewCutoff() {
+        let store = self.store()
+        let long = String(repeating: "a ", count: 200) + "needle"
+        store.recordForTesting(long)
+        store.recordForTesting("something else")
+        store.query = "NEEDLE"
+        #expect(store.visibleEntries.count == 1)
+        #expect(store.visibleEntries.first?.text == long)
+        store.endSearch()
+        #expect(store.visibleEntries.count == 2)
+    }
+
+    @Test func pinningStopsAtTheCeiling() {
+        let store = self.store()
+        for i in 0..<(ClipboardStore.pinCapacity + 3) { store.recordForTesting("item \(i)") }
+        for entry in store.entries { store.togglePin(entry) }
+        #expect(store.pinnedCount == ClipboardStore.pinCapacity)
     }
 }

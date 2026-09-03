@@ -38,6 +38,11 @@ struct NotchActions {
     /// hover region, collapses the pill, and takes the popover's anchor view
     /// with it — the menu vanishes before it can be clicked.
     var holdNotchOpen: (Bool) -> Void = { _ in }
+    /// Let a field in the pill accept typing: takes key focus without
+    /// activating the app, holds the pill open, and suspends the hot-zone
+    /// shortcuts so space and the arrows reach the field instead of skipping
+    /// tracks and changing the volume.
+    var captureKeyboard: (Bool) -> Void = { _ in }
 
     static let noop = NotchActions(
         togglePlayPause: {}, next: {}, previous: {},

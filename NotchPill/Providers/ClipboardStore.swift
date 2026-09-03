@@ -7,6 +7,8 @@ struct ClipboardEntry: Identifiable, Equatable {
     /// Trimmed for display; the full text is what gets copied back.
     let text: String
     let copiedAt: Date
+    /// Kept regardless of how much has been copied since.
+    var isPinned: Bool = false
 
     /// Enough to recognise the copy, not just its first few words.
     ///
@@ -23,8 +25,9 @@ struct ClipboardEntry: Identifiable, Equatable {
     /// Roughly how many characters fit on one line of the card at 10pt in its
     /// 340pt width. Approximate by nature — proportional text has no exact
     /// answer — and deliberately a little conservative, so the estimate errs
-    /// towards reserving a line rather than clipping one.
-    static let charsPerLine = 52
+    /// towards reserving a line rather than clipping one -- more so since the
+    /// pin column took a little width off the front of every row.
+    static let charsPerLine = 50
     /// Past four lines a single copy owns the whole card.
     static let maxLines = 4
 
@@ -62,6 +65,38 @@ final class ClipboardStore: ObservableObject {
     /// enough that it is never a trove.
     private static let capacity = 12
 
+    /// Pins are exempt from `capacity`, so they need a ceiling of their own --
+    /// otherwise pinning is a way to grow the history without limit, which is
+    /// the thing `capacity` exists to prevent.
+    static let pinCapacity = 8
+
+    /// The current search text. Empty means "show everything".
+    @Published var query: String = ""
+
+    /// True while the search field is open, which is not the same as having
+    /// typed something: an open field with no query still owns the keyboard
+    /// and still reserves a row in the card's height budget.
+    @Published private(set) var isSearching = false
+
+    /// What the card should draw: the history narrowed to the search.
+    ///
+    /// Matching runs over the full text rather than the preview, so a phrase
+    /// past the truncation point still finds its entry.
+    var visibleEntries: [ClipboardEntry] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return entries }
+        return entries.filter { $0.text.localizedCaseInsensitiveContains(needle) }
+    }
+
+    var pinnedCount: Int { entries.lazy.filter(\.isPinned).count }
+
+    func beginSearch() { isSearching = true }
+
+    func endSearch() {
+        isSearching = false
+        query = ""
+    }
+
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var timer: Timer?
     /// Set while writing our own value back, so re-copying does not read as a
@@ -86,6 +121,7 @@ final class ClipboardStore: ObservableObject {
         timer?.invalidate()
         timer = nil
         entries = []
+        endSearch()
     }
 
     /// Puts an entry back on the pasteboard.
@@ -98,7 +134,27 @@ final class ClipboardStore: ObservableObject {
         isEchoing = false
     }
 
-    func clear() { entries = [] }
+    /// Forgets the unpinned history.
+    ///
+    /// Pins are the one part of this the person asked to keep, so the sweep
+    /// leaves them; unpinning is how a pin goes away.
+    func clear() { entries = entries.filter(\.isPinned) }
+
+    /// Pins an entry, or unpins one already pinned.
+    ///
+    /// Silently does nothing when the pin ceiling is reached rather than
+    /// evicting an older pin: dropping something the person deliberately kept
+    /// in order to keep something else is the worse surprise of the two.
+    func togglePin(_ entry: ClipboardEntry) {
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        if entries[index].isPinned {
+            entries[index].isPinned = false
+        } else {
+            guard pinnedCount < Self.pinCapacity else { return }
+            entries[index].isPinned = true
+        }
+        entries = ordered(entries)
+    }
 
     private func poll() {
         let board = NSPasteboard.general
@@ -123,11 +179,28 @@ final class ClipboardStore: ObservableObject {
         record(trimmed)
     }
 
+    /// Feeds an entry in without going through the pasteboard, so the store's
+    /// ordering rules can be tested without touching the real clipboard.
+    func recordForTesting(_ text: String) { record(text) }
+
     private func record(_ text: String) {
         // Re-copying something already held moves it to the front rather than
-        // storing it twice.
+        // storing it twice, and keeps its pin: copying a pinned snippet again
+        // is the most ordinary thing to do with one.
+        let existing = entries.first { $0.text == text }
         var next = entries.filter { $0.text != text }
-        next.insert(ClipboardEntry(id: UUID(), text: text, copiedAt: Date()), at: 0)
-        entries = Array(next.prefix(Self.capacity))
+        next.insert(ClipboardEntry(id: existing?.id ?? UUID(), text: text,
+                                   copiedAt: Date(),
+                                   isPinned: existing?.isPinned ?? false), at: 0)
+        entries = ordered(next)
+    }
+
+    /// Pins first, then the recent history trimmed to `capacity`.
+    ///
+    /// Only the unpinned tail is trimmed, which is what makes a pin a pin.
+    private func ordered(_ list: [ClipboardEntry]) -> [ClipboardEntry] {
+        let pinned = list.filter(\.isPinned)
+        let rest = list.filter { !$0.isPinned }
+        return pinned + rest.prefix(Self.capacity)
     }
 }
