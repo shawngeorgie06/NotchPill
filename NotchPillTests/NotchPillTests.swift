@@ -9143,3 +9143,60 @@ struct TerminalPaletteTests {
         #expect(resolved.foreground == Color.black)
     }
 }
+
+@MainActor
+@Suite("Terminal store", .serialized)
+struct TerminalStoreTests {
+    /// The whole chain the card depends on: a real shell starts, its output
+    /// reaches the emulator, and a snapshot carries it out as drawable lines.
+    @Test func aCommandTypedIntoTheStoreShowsUpInTheSnapshot() async {
+        let store = TerminalStore.shared
+        store.stop()
+        defer { store.stop() }
+
+        store.start()
+        #expect(store.isLive)
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        store.send("echo notchpill-store-ok\n")
+
+        var text = ""
+        for _ in 0..<40 {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            text = (store.emulator.scrollback.map { String($0.map(\.character)) }
+                    + store.emulator.visibleLines).joined(separator: "\n")
+            if text.contains("notchpill-store-ok") { break }
+        }
+        #expect(text.contains("notchpill-store-ok"), "got: \(text)")
+        #expect(store.snapshot.lines.count == TerminalStore.rows)
+        #expect(store.snapshot.revision > 0, "output has to bump the revision or nothing redraws")
+    }
+
+    /// The card is a value the deck compares. Without a revision bump the
+    /// content key never changes and the shell's output never reaches screen.
+    @Test func theContentKeyMovesWhenTheGridDoes() {
+        var snapshot = TerminalSnapshot(revision: 1)
+        let before = ExpandedActivity.terminal(snapshot).contentKey
+        snapshot.revision = 2
+        #expect(ExpandedActivity.terminal(snapshot).contentKey != before)
+    }
+
+    /// ...but the *identity* must not move, or every line of output would
+    /// destroy the card and slide the deck sideways as if a new card arrived.
+    @Test func theCardIdentityStaysPutWhileOutputScrolls() {
+        #expect(ExpandedActivity.terminal(TerminalSnapshot(revision: 1)).id
+                == ExpandedActivity.terminal(TerminalSnapshot(revision: 99)).id)
+    }
+
+    /// A card holding keyboard focus must never be trimmed out from under the
+    /// person typing into it.
+    @Test func aFocusedTerminalLeadsTheDeck() {
+        let deck = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            showMedia: false, showActiveApp: false, showVolume: false, showClock: true,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false,
+            terminal: TerminalSnapshot(isFocused: true, revision: 1))
+        #expect(deck.first?.kind == "terminal")
+    }
+}
