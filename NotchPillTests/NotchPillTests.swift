@@ -8935,3 +8935,102 @@ struct TerminalEmulatorTests {
         #expect(term.screen.filter { $0.count != 4 }.isEmpty)
     }
 }
+
+@Suite("PTY session")
+struct PTYSessionTests {
+    /// `TERM` has to claim colour or the shell emits none, and a shell launched
+    /// from an app bundle inherits no locale — without one, anything
+    /// non-ASCII arrives as `?`.
+    @Test func theEnvironmentAdvertisesAColourTerminalAndALocale() {
+        let env = PTYSession.environment(from: [:])
+        #expect(env["TERM"] == "xterm-256color")
+        #expect(env["LANG"] == "en_US.UTF-8")
+        // The pill is not a pager and cannot answer one's keypresses.
+        #expect(env["PAGER"] == "cat")
+    }
+
+    @Test func anExistingLocaleIsLeftAlone() {
+        #expect(PTYSession.environment(from: ["LANG": "de_DE.UTF-8"])["LANG"] == "de_DE.UTF-8")
+    }
+
+    @Test func theShellFollowsTheEnvironmentWithAMacOSDefault() {
+        #expect(PTYSession.loginShell().hasPrefix("/"))
+    }
+
+    /// The point of `forkpty` over `Process` with pipes: the child gets a real
+    /// controlling terminal, so it behaves like one. `tty` printing a device
+    /// rather than "not a tty" is that claim, checked.
+    @Test func theChildGetsARealControllingTerminal() async {
+        let output = await runShell("tty\n")
+        #expect(output.contains("/dev/ttys"), "got: \(output)")
+    }
+
+    @Test func aCommandRunsAndItsOutputComesBack() async {
+        #expect(await runShell("echo notchpill-ok\n").contains("notchpill-ok"))
+    }
+
+    /// The card is only ~60 columns, so the shell has to be told that or it
+    /// wraps against a phantom 80-column window.
+    @Test func theShellIsToldHowWideTheCardIs() async {
+        let output = await runShell("tput cols\n", columns: 37)
+        #expect(output.contains("37"), "got: \(output)")
+    }
+
+    @Test func exitingTheShellReportsTheExit() async {
+        let session = PTYSession()
+        let exited = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            var resumed = false
+            session.onExit = { _ in
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: true)
+            }
+            _ = session.start(columns: 40, rows: 6)
+            session.write("exit\n")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: false)
+            }
+        }
+        session.stop()
+        #expect(exited)
+    }
+
+    /// Runs `command` in a real shell and returns everything printed within a
+    /// short settling window, as the emulator would see it.
+    private func runShell(_ command: String, columns: Int = 60,
+                          timeout: TimeInterval = 6) async -> String {
+        let session = PTYSession()
+        let collected = Collected()
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            var resumed = false
+            func finish() {
+                guard !resumed else { return }
+                resumed = true
+                session.stop()
+                continuation.resume(returning: collected.text(columns: columns))
+            }
+            session.onOutput = { bytes in collected.append(bytes) }
+            guard session.start(columns: columns, rows: 12) else { return finish() }
+            // Give the login shell a moment to print its prompt before typing.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { session.write(command) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { finish() }
+        }
+    }
+
+    /// Collects PTY bytes and replays them through the emulator, which is
+    /// exactly what the card does with them.
+    private final class Collected: @unchecked Sendable {
+        private var bytes: [UInt8] = []
+        private let lock = NSLock()
+        func append(_ chunk: [UInt8]) { lock.lock(); bytes += chunk; lock.unlock() }
+        func text(columns: Int) -> String {
+            lock.lock(); let all = bytes; lock.unlock()
+            var term = TerminalEmulator(columns: columns, rows: 40)
+            term.feed(all)
+            return (term.scrollback.map { String($0.map(\.character)) } + term.visibleLines)
+                .joined(separator: "\n")
+        }
+    }
+}
