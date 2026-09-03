@@ -981,6 +981,9 @@ struct ExpandedActivityCard: View {
     @State private var hoveredClipboardSearch = false
     @State private var hoveredClipboardPin: UUID?
     @FocusState private var clipboardSearchFocused: Bool
+    @ObservedObject private var audioOutput = AudioOutputStore.shared
+    @State private var hoveredOutputPicker = false
+    @State private var hoveredLowPower = false
     /// Nil when the setting is off, which is also how the token lines are
     /// suppressed — the card asks for nothing it was not given.
     var tokenUsage: TokenUsageSummary?
@@ -1962,8 +1965,52 @@ struct ExpandedActivityCard: View {
                 }
             }
             .frame(height: s(4))
+            outputPickerRow
         }
         .frame(minWidth: s(72), alignment: .leading)
+    }
+
+    /// Where the sound is going, and a way to send it somewhere else.
+    ///
+    /// The devices open in an `NSMenu` rather than growing the card: a list
+    /// long enough to hold a Mac's real device count would be taller than the
+    /// pill, and the menu is the one thing here that survives the pill
+    /// collapsing underneath the pointer.
+    @ViewBuilder
+    private var outputPickerRow: some View {
+        if let current = audioOutput.current {
+            Button {
+                AudioOutputMenu.shared.present(
+                    devices: audioOutput.devices,
+                    current: audioOutput.currentID
+                ) { AudioOutputStore.shared.select($0) }
+            } label: {
+                HStack(spacing: s(4)) {
+                    Image(systemName: current.symbolName)
+                        .font(.system(size: s(9)))
+                    Text(current.name)
+                        .font(font(size: 10))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: s(7)))
+                        .opacity(audioOutput.devices.count > 1 ? 1 : 0)
+                }
+                .foregroundStyle(.white.opacity(hoveredOutputPicker ? 0.9 : 0.5))
+                .padding(.horizontal, s(5))
+                .padding(.vertical, s(2))
+                .background(
+                    Capsule().fill(Color.white.opacity(hoveredOutputPicker ? 0.14 : 0.06))
+                )
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(audioOutput.devices.count < 2)
+            .onHover { hoveredOutputPicker = $0 }
+            .help(audioOutput.devices.count > 1
+                  ? "Choose where sound goes"
+                  : "The only output this Mac has right now")
+        }
     }
 
     private func calendarCard(_ event: CalendarEvent) -> some View {
@@ -2032,8 +2079,46 @@ struct ExpandedActivityCard: View {
             Text("\(status.level)%")
                 .font(font(size: 22, weight: .semibold).monospacedDigit())
                 .foregroundStyle(.white)
+            lowPowerRow(status)
         }
         .frame(minWidth: s(72), alignment: .leading)
+    }
+
+    /// Low Power Mode, shown and reachable but not switched from here.
+    ///
+    /// Only root can change it -- `pmset -a lowpowermode` refuses outright --
+    /// and the alternatives are an admin password prompt on every toggle or a
+    /// privileged helper this app cannot sign for. Opening the pane it lives
+    /// in is the honest version: one click instead of five, and no lie about
+    /// what the button does.
+    private func lowPowerRow(_ status: BatteryStatus) -> some View {
+        Button {
+            guard let url = URL(string:
+                "x-apple.systempreferences:com.apple.Battery-Settings.extension")
+            else { return }
+            NSWorkspace.shared.open(url)
+        } label: {
+            HStack(spacing: s(4)) {
+                Image(systemName: status.isLowPower
+                      ? "battery.25percent.bolt.slash" : "leaf")
+                    .font(.system(size: s(9)))
+                Text(status.isLowPower ? "Low Power on" : "Low Power off")
+                    .font(font(size: 10))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(status.isLowPower
+                             ? Color.yellow.opacity(hoveredLowPower ? 1 : 0.85)
+                             : .white.opacity(hoveredLowPower ? 0.9 : 0.45))
+            .padding(.horizontal, s(5))
+            .padding(.vertical, s(2))
+            .background(
+                Capsule().fill(Color.white.opacity(hoveredLowPower ? 0.14 : 0.06))
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hoveredLowPower = $0 }
+        .help("Open Battery settings — only macOS itself can switch this")
     }
 
     @ViewBuilder

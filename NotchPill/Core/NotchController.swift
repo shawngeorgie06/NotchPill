@@ -323,6 +323,7 @@ final class NotchController {
         hotZoneKeys.stop()
         nowPlaying.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
         systemStats.stop(); battery.stop(); devReady.stop(); brightness.stop(); microphone.stop()
+        AudioOutputStore.shared.stop()
         replyHotKey.unregister()
         peekEscapeMonitors.forEach(NSEvent.removeMonitor)
         peekEscapeMonitors = []
@@ -354,6 +355,7 @@ final class NotchController {
 
         nowPlaying.start(); appSwitch.start()
         volume.start()
+        AudioOutputStore.shared.start()
         if let level = volume.currentVolume() { state.refreshSystemVolume(level) }
         volume.onVolumeChanged = { [weak self] level in self?.state.showVolume(level) }
         brightness.onBrightnessChanged = { [weak self] level in self?.state.showBrightness(level) }

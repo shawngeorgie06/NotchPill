@@ -8,6 +8,12 @@ final class BatteryProvider {
     private var timer: Timer?
 
     func start() {
+        // Low Power Mode flips the instant someone toggles it, and a card that
+        // takes up to thirty seconds to notice reads as broken. The battery
+        // *level* is what the timer is for.
+        NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
+        ) { [weak self] _ in self?.publish() }
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.publish()
         }
@@ -18,6 +24,9 @@ final class BatteryProvider {
     }
 
     func stop() {
+        NotificationCenter.default.removeObserver(
+            self, name: .NSProcessInfoPowerStateDidChange, object: nil
+        )
         timer?.invalidate()
         timer = nil
     }
@@ -42,7 +51,9 @@ final class BatteryProvider {
 
             let isCharging = description[kIOPSIsChargingKey] as? Bool ?? false
             let level = Int((Double(currentCapacity) / Double(maxCapacity) * 100).rounded())
-            return BatteryStatus(level: min(max(level, 0), 100), isCharging: isCharging)
+            return BatteryStatus(level: min(max(level, 0), 100),
+                                 isCharging: isCharging,
+                                 isLowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
         }
         return nil
     }

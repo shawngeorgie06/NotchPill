@@ -8,6 +8,10 @@ struct SystemStats: Equatable {
 struct BatteryStatus: Equatable {
     var level: Int
     var isCharging: Bool
+    /// Whether macOS is in Low Power Mode. Readable from any process; only
+    /// root can change it, which is why the card offers a shortcut to the
+    /// Battery settings pane rather than a switch of its own.
+    var isLowPower: Bool = false
 }
 
 struct ActiveTimer: Equatable {

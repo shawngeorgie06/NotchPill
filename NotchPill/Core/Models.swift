@@ -743,7 +743,7 @@ enum CollapsedChip: Equatable, Identifiable {
         case .appSwitch(let name): return "app-\(name)"
         case .timer(let t): return "timer-\(t.endDate.timeIntervalSince1970)"
         case .systemStats(let s): return "stats-\(s.cpuPercent)-\(s.memoryPercent)"
-        case .battery(let b): return "battery-\(b.level)-\(b.isCharging)"
+        case .battery(let b): return "battery-\(b.level)-\(b.isCharging)-\(b.isLowPower)"
         case .agent(let name, let state, let count): return "agent-\(name)-\(state)-\(count)"
         case .clock: return "clock"
         }
@@ -823,7 +823,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .calendar(let e): return "cal-\(e.title)-\(e.start.timeIntervalSince1970)"
         case .timer(let t): return "timer-\(t.endDate.timeIntervalSince1970)"
         case .systemStats(let s): return "stats-\(s.cpuPercent)-\(s.memoryPercent)"
-        case .battery(let b): return "battery-\(b.level)-\(b.isCharging)"
+        case .battery(let b): return "battery-\(b.level)-\(b.isCharging)-\(b.isLowPower)"
         case .shelf(let items, let receipt, let error, let targeted):
             return "shelf-\(items.map(\.name).joined(separator: "|"))-\(receipt?.itemName ?? "")-\(error ?? "")-\(targeted)"
         case .agents(let list): return "agents-" + list.map(\.id).joined(separator: ",")

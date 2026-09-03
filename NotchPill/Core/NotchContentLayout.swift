@@ -873,9 +873,11 @@ enum NotchContentLayout {
         case .ci: return 150
         case .recentAlerts: return 170
         case .activeApp, .appSwitch: return 92
-        case .volume: return 76
+        // The extra room is the output picker row under the level bar.
+        case .volume: return 100
         case .clock: return 76
-        case .battery: return 76
+        // The extra room is the Low Power Mode row under the percentage.
+        case .battery: return 100
         }
     }
 }

@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import Combine
+import CoreAudio
 @testable import NotchPill
 
 // MARK: - Process capture (artwork deadlock regression)
@@ -8643,5 +8644,32 @@ struct ClipboardPinTests {
         for i in 0..<(ClipboardStore.pinCapacity + 3) { store.recordForTesting("item \(i)") }
         for entry in store.entries { store.togglePin(entry) }
         #expect(store.pinnedCount == ClipboardStore.pinCapacity)
+    }
+}
+
+@Suite("Audio output and low power")
+struct AudioOutputTests {
+    private func device(_ transport: UInt32) -> AudioOutputDevice {
+        AudioOutputDevice(id: 1, name: "Thing", transport: transport)
+    }
+
+    /// The icon comes from the transport, not the name, because names lie:
+    /// headphones called "MacBook" are not the built-in speakers.
+    @Test func symbolFollowsTheTransportNotTheName() {
+        #expect(device(kAudioDeviceTransportTypeBluetooth).symbolName == "airpods")
+        #expect(device(kAudioDeviceTransportTypeAirPlay).symbolName == "airplayaudio")
+        #expect(device(kAudioDeviceTransportTypeBuiltIn).symbolName == "speaker.wave.2")
+        #expect(device(0).symbolName == "speaker.wave.2")
+    }
+
+    /// Toggling Low Power Mode has to redraw the card. It changes nothing else
+    /// about the battery, so without this the card would keep the stale label.
+    @Test func lowPowerChangesTheBatteryContentKey() {
+        let off = ExpandedActivity.battery(BatteryStatus(level: 50, isCharging: false))
+        let on = ExpandedActivity.battery(
+            BatteryStatus(level: 50, isCharging: false, isLowPower: true))
+        #expect(off.contentKey != on.contentKey)
+        // ...but it is still the same card, so the deck must not page-turn.
+        #expect(off.id == on.id)
     }
 }
