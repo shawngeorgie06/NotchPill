@@ -177,6 +177,8 @@ final class NotchController {
         // both change the card's height and both have to relayout.
         relayoutTriggers.append(ClipboardStore.shared.$query.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(ClipboardStore.shared.$isSearching.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(TerminalStore.shared.$revision.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(TerminalStore.shared.$isFocused.map { _ in () }.eraseToAnyPublisher())
 
         Publishers.MergeMany(relayoutTriggers)
         .receive(on: RunLoop.main)
@@ -410,6 +412,16 @@ final class NotchController {
             .sink { on in
                 if on { ClipboardStore.shared.start() } else { ClipboardStore.shared.stop() }
             }
+            .store(in: &cancellables)
+
+        // The shell is not started here even when the card is on: it costs a
+        // process and a profile read, and the card is one of seventeen that
+        // may never come up. `TerminalStore` starts it the first time someone
+        // clicks into it. Turning the setting off does kill it, so switching
+        // the card away never leaves a shell running invisibly.
+        AppSettings.shared.$showTerminal
+            .removeDuplicates()
+            .sink { on in if !on { TerminalStore.shared.stop() } }
             .store(in: &cancellables)
 
         // Secondary providers can warm up after the notch is on screen.

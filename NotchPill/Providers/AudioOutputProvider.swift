@@ -95,6 +95,9 @@ final class AudioOutputStore: ObservableObject {
     func refresh() {
         devices = Self.outputDevices()
         currentID = Self.defaultOutputDeviceID()
+        LogStore.log("audio", "refresh: \(devices.count) outputs "
+            + "[\(devices.map(\.name).joined(separator: ", "))] current="
+            + "\(currentID.map(String.init) ?? "none")")
     }
 
     private func listen(_ selector: AudioObjectPropertySelector) {

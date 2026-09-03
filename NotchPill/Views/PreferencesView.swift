@@ -169,6 +169,7 @@ struct PreferencesView: View {
         if settings.showExpandedBattery { out.append(("battery", "Battery")) }
         if settings.showExpandedShelf { out.append(("shelf", "File shelf")) }
         if settings.showClipboard { out.append(("clipboard", "Clipboard")) }
+        if settings.showTerminal { out.append(("terminal", "Terminal")) }
         if settings.showExpandedClock { out.append(("clock", "Clock")) }
         return out
     }
@@ -318,7 +319,35 @@ struct PreferencesView: View {
                 .foregroundStyle(.secondary)
                 .help("The card that holds dropped files and files them into folders. "
                       + "Turn this on to use drag and drop.")
+
+            Toggle("Terminal — a live shell in the notch", isOn: $settings.showTerminal)
+            Text("Runs your login shell on a real pseudo-terminal, so the prompt, "
+                 + "colours and tab completion all work. It only takes the keyboard "
+                 + "while you click into it, and Escape hands it back. Output is kept "
+                 + "in memory, never written to disk.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if settings.showTerminal {
+                HStack(spacing: 6) {
+                    Text("Opens in").font(.caption)
+                    TextField("Home folder", text: $settings.terminalDirectory)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                    Button("Choose\u{2026}") { chooseTerminalDirectory() }
+                        .controlSize(.small)
+                }
+            }
         }
+    }
+
+    private func chooseTerminalDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use Folder"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        settings.terminalDirectory = url.path
     }
 
     private var timerSection: some View {

@@ -850,6 +850,7 @@ enum ExpandedActivityBuilder {
         shelfDropTargeted: Bool = false,
         clipboard: [ClipboardEntry] = [],
         clipboardSearching: Bool = false,
+        terminal: TerminalSnapshot? = nil,
         cardOrder: [String] = ExpandedActivity.allKinds.map(\.kind)
     ) -> [ExpandedActivity] {
         var items: [ExpandedActivity] = []
@@ -914,6 +915,12 @@ enum ExpandedActivityBuilder {
                 ?? (items.first?.kind == "agents" ? 1 : 0)
             items.insert(.clipboard(clipboard, searching: clipboardSearching),
                          at: min(after, items.count))
+        }
+        // Same reasoning as the shelf and the clipboard, only more so: a card
+        // holding keyboard focus must never be trimmed out from under the
+        // person typing into it, so a focused terminal goes to the very front.
+        if let terminal {
+            items.insert(.terminal(terminal), at: terminal.isFocused ? 0 : min(1, items.count))
         }
         if showActiveApp {
             if let hint = appSwitchHint {
@@ -1082,6 +1089,8 @@ struct ExpandedActivityCard: View {
                 ciCard(runs)
             case .clipboard(let items, let searching):
                 clipboardCard(items, searching: searching)
+            case .terminal(let snapshot):
+                terminalCard(snapshot)
             case .recentAlerts(let alerts):
                 recentAlertsCard(alerts)
             }
@@ -1382,6 +1391,77 @@ struct ExpandedActivityCard: View {
     }
 
     /// GitHub Actions for the repos you have agents working in.
+    /// A live shell.
+    ///
+    /// The card takes the keyboard only when clicked, and gives it back on
+    /// Escape or when the pill loses key. Anything else and the pill would
+    /// swallow every keystroke on the machine the moment it opened.
+    private func terminalCard(_ snapshot: TerminalSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: s(3)) {
+            cardHeader(icon: {
+                Image(systemName: "apple.terminal").font(.system(size: s(9)))
+            }, title: snapshot.isFocused ? "Terminal — typing" : "Terminal", trailing: {
+                Spacer(minLength: s(6))
+                if snapshot.exitStatus != nil {
+                    Button { TerminalStore.shared.restart() } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: s(8), weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Start a new shell")
+                }
+            })
+
+            ZStack(alignment: .topLeading) {
+                TerminalGridView(snapshot: snapshot, fontSize: s(9), lineHeight: s(11))
+                    .opacity(snapshot.exitStatus == nil ? 1 : 0.45)
+                if let status = snapshot.exitStatus {
+                    Text("shell exited (\(status))")
+                        .font(.system(size: s(9), design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                TerminalKeyCatcher(
+                    isFocused: snapshot.isFocused,
+                    onKey: { event in
+                        // Escape hands the keyboard back rather than reaching
+                        // the shell: without a way out that does not need the
+                        // mouse, focus is a trap.
+                        if event.keyCode == 53 {
+                            closeTerminalFocus()
+                            return true
+                        }
+                        return TerminalStore.shared.handle(event: event)
+                    },
+                    onFocusChange: { _ in }
+                )
+                .frame(width: 0, height: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if snapshot.isFocused {
+                    closeTerminalFocus()
+                } else {
+                    TerminalStore.shared.setFocused(true)
+                    actions.captureKeyboard(true)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if !snapshot.isFocused {
+                    Text("click to type")
+                        .font(.system(size: s(7)))
+                        .foregroundStyle(.white.opacity(0.35))
+                }
+            }
+        }
+    }
+
+    private func closeTerminalFocus() {
+        TerminalStore.shared.setFocused(false)
+        actions.captureKeyboard(false)
+    }
+
     private func clipboardCard(_ items: [ClipboardEntry], searching: Bool) -> some View {
         VStack(alignment: .leading, spacing: s(3)) {
             cardHeader(icon: {

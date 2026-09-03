@@ -777,6 +777,9 @@ enum ExpandedActivity: Equatable, Identifiable {
     case ci([CIRun])
     case recentAlerts([DevReadyAlert])
     case clipboard([ClipboardEntry], searching: Bool)
+    /// A live shell. The grid is carried as rendered lines rather than the
+    /// emulator itself so the card stays a value, like every other one.
+    case terminal(TerminalSnapshot)
 
     /// Stable identity for the *kind* of card, unlike `id`, which changes with
     /// the content. Weights are stored against this.
@@ -799,6 +802,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .ci: return "ci"
         case .recentAlerts: return "recentAlerts"
         case .clipboard: return "clipboard"
+        case .terminal: return "terminal"
         }
     }
 
@@ -840,6 +844,9 @@ enum ExpandedActivity: Equatable, Identifiable {
             return "clip-\(searching)-" + items.map {
                 $0.id.uuidString + ($0.isPinned ? "P" : "")
             }.joined(separator: ",")
+        // The whole grid is the content: any character or colour that changed
+        // has to redraw the card, and nothing here changes which card it is.
+        case .terminal(let snapshot): return "term-\(snapshot.revision)"
         }
     }
 
@@ -850,6 +857,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         ("agents", "Live agents"),
         ("shelf", "File shelf"),
         ("clipboard", "Clipboard"),
+        ("terminal", "Terminal"),
         ("openCodeUsage", "OpenCode usage"),
         ("codexQuota", "Codex quota"),
         ("claudeQuota", "Claude quota"),
@@ -877,6 +885,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .timer: return "Timer"
         case .systemStats: return "CPU & memory"
         case .battery: return "Battery"
+        case .terminal: return "Terminal"
         case .shelf: return "File shelf"
         case .agents: return "Live agents"
         case .openCodeUsage: return "OpenCode usage"
@@ -913,6 +922,9 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .appSwitch(let name): return "switch-\(name)"
         case .activeApp(let name): return "app-\(name)"
         case .volume: return "volume"
+        // Always one card: the shell persists, so its output must never slide
+        // the deck sideways as if a different card had arrived.
+        case .terminal: return "terminal"
         case .clock: return "clock"
         case .calendar(let e): return "cal-\(e.title)-\(e.start.timeIntervalSince1970)"
         case .timer(let t): return "timer-\(t.endDate.timeIntervalSince1970)"
@@ -955,5 +967,27 @@ enum NotchActivity: Equatable {
         case .media: return "media"
         case .appSwitch: return "appSwitch"
         }
+    }
+}
+
+/// One frame of the terminal card.
+///
+/// The emulator is a mutable struct the store owns; the deck wants a value it
+/// can compare. `revision` is what makes that cheap — comparing two grids cell
+/// by cell on every layout pass would cost more than drawing them.
+struct TerminalSnapshot: Equatable {
+    var lines: [[TerminalEmulator.Cell]] = []
+    var cursor: (row: Int, column: Int) = (0, 0)
+    var cursorVisible = true
+    var isFocused = false
+    var isLive = false
+    /// Set once the shell has exited, so the card can offer a fresh one.
+    var exitStatus: Int32?
+    /// Bumped by the store on every change. Identity for the content key.
+    var revision: Int = 0
+
+    static func == (lhs: TerminalSnapshot, rhs: TerminalSnapshot) -> Bool {
+        lhs.revision == rhs.revision && lhs.isFocused == rhs.isFocused
+            && lhs.isLive == rhs.isLive && lhs.exitStatus == rhs.exitStatus
     }
 }

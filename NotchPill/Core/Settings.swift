@@ -95,6 +95,17 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(showClipboard, forKey: Keys.showClipboard) }
     }
 
+    /// Off by default, and deliberately so: this is a live login shell inside
+    /// an overlay that sits above every app. Nothing about it should start
+    /// running because someone installed the app.
+    @Published var showTerminal: Bool {
+        didSet { defaults.set(showTerminal, forKey: Keys.showTerminal) }
+    }
+    /// Where the shell opens. Empty means the home directory.
+    @Published var terminalDirectory: String {
+        didSet { defaults.set(terminalDirectory, forKey: Keys.terminalDirectory) }
+    }
+
     @Published var showExpandedShelf: Bool {
         didSet { defaults.set(showExpandedShelf, forKey: Keys.showExpandedShelf) }
     }
@@ -185,6 +196,7 @@ final class AppSettings: ObservableObject {
         case "media": return showExpandedMedia
         case "shelf": return showExpandedShelf
         case "clipboard": return showClipboard
+        case "terminal": return showTerminal
         case "activeApp": return showExpandedActiveApp
         case "calendar": return showExpandedCalendar
         case "timer": return showExpandedTimer
@@ -476,6 +488,8 @@ final class AppSettings: ObservableObject {
         static let showExpandedBattery = "showExpandedBattery"
         static let showExpandedShelf = "showExpandedShelf"
         static let showClipboard = "showClipboard"
+        static let showTerminal = "showTerminal"
+        static let terminalDirectory = "terminalDirectory"
         static let showExpandedAgents = "showExpandedAgents"
         static let showExpandedCI = "showExpandedCI"
         static let showClaudeUsage = "showClaudeUsage"
@@ -581,6 +595,8 @@ final class AppSettings: ObservableObject {
         showExpandedBattery = defaults.bool(forKey: Keys.showExpandedBattery)
         showExpandedShelf = defaults.bool(forKey: Keys.showExpandedShelf)
         showClipboard = defaults.bool(forKey: Keys.showClipboard)
+        showTerminal = defaults.bool(forKey: Keys.showTerminal)
+        terminalDirectory = defaults.string(forKey: Keys.terminalDirectory) ?? ""
         showExpandedAgents = defaults.bool(forKey: Keys.showExpandedAgents)
         showExpandedCI = defaults.bool(forKey: Keys.showExpandedCI)
         showClaudeUsage = defaults.bool(forKey: Keys.showClaudeUsage)

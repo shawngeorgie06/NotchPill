@@ -79,6 +79,7 @@ enum NotchContentSnapshot {
             shelfDropTargeted: shelf.isDropTargeted,
             clipboard: settings.showClipboard ? ClipboardStore.shared.visibleEntries : [],
             clipboardSearching: settings.showClipboard && ClipboardStore.shared.isSearching,
+            terminal: settings.showTerminal ? TerminalStore.shared.snapshot : nil,
             cardOrder: settings.resolvedCardOrder
         ), pinnedKind: settings.pinnedActivityKind)
         // Smaller pill, fewer cards. The builder already returns them in

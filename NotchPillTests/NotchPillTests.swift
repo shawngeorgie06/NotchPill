@@ -2,6 +2,8 @@ import Testing
 import Foundation
 import Combine
 import CoreAudio
+import AppKit
+import SwiftUI
 @testable import NotchPill
 
 // MARK: - Process capture (artwork deadlock regression)
@@ -9032,5 +9034,112 @@ struct PTYSessionTests {
             return (term.scrollback.map { String($0.map(\.character)) } + term.visibleLines)
                 .joined(separator: "\n")
         }
+    }
+}
+
+@MainActor
+@Suite("Terminal key encoding")
+struct TerminalKeyEncodingTests {
+    private func encode(_ keyCode: UInt16, _ characters: String = "",
+                        _ modifiers: NSEvent.ModifierFlags = []) -> [UInt8]? {
+        TerminalStore.encode(keyCode: keyCode, characters: characters, modifiers: modifiers)
+    }
+
+    @Test func plainCharactersGoThroughAsThemselves() {
+        #expect(encode(0, "a") == Array("a".utf8))
+    }
+
+    @Test func returnIsCarriageReturnNotNewline() {
+        // A PTY line discipline turns CR into NL; sending NL directly is what
+        // makes a shell see a blank line instead of running the command.
+        #expect(encode(36) == [0x0D])
+    }
+
+    /// Tab has to reach the shell for completion. A text field would have
+    /// consumed it to move focus, which is why the card uses a raw responder.
+    @Test func tabReachesTheShellForCompletion() {
+        #expect(encode(48) == [0x09])
+    }
+
+    @Test func arrowsSendCursorSequencesForHistory() {
+        #expect(encode(126) == Array("\u{1B}[A".utf8))
+        #expect(encode(125) == Array("\u{1B}[B".utf8))
+        #expect(encode(124) == Array("\u{1B}[C".utf8))
+        #expect(encode(123) == Array("\u{1B}[D".utf8))
+    }
+
+    @Test func deleteSendsBackspaceNotForwardDelete() {
+        #expect(encode(51) == [0x7F])
+        #expect(encode(117) == Array("\u{1B}[3~".utf8))
+    }
+
+    @Test func controlLettersBecomeTheirControlCodes() {
+        #expect(encode(0, "c", .control) == [0x03])   // interrupt
+        #expect(encode(0, "d", .control) == [0x04])   // end of file
+        #expect(encode(0, "l", .control) == [0x0C])   // clear
+        // Case must not change the code: ⌃⇧C is still ⌃C.
+        #expect(encode(0, "C", .control) == [0x03])
+    }
+
+    /// Word motion in a shell is meta-prefixed, and macOS gives that to ⌥.
+    @Test func optionIsMetaPrefixed() {
+        #expect(encode(0, "b", .option) == [0x1B] + Array("b".utf8))
+    }
+
+    /// ⌘ belongs to the app — copy, paste, quit — and must never reach the
+    /// shell, or ⌘Q would type "q" instead of quitting.
+    @Test func commandIsLeftToTheApp() {
+        #expect(encode(0, "q", .command) == nil)
+        #expect(encode(36, "", .command) == nil)
+    }
+}
+
+@Suite("Terminal palette")
+struct TerminalPaletteTests {
+    /// The xterm cube and grey ramp are computed rather than tabulated —
+    /// 240 hand-written constants is 240 chances to be wrong — so the corners
+    /// are what prove the arithmetic.
+    @Test func theColourCubeLandsOnItsKnownCorners() {
+        // 16 is the cube's black corner, 231 its white one.
+        let black = TerminalPalette.components(forIndex: 16)
+        #expect(black.r == 0 && black.g == 0 && black.b == 0)
+        let white = TerminalPalette.components(forIndex: 231)
+        #expect(white.r == 1 && white.g == 1 && white.b == 1)
+        // 196 is pure red in the cube.
+        let red = TerminalPalette.components(forIndex: 196)
+        #expect(red.r == 1 && red.g == 0 && red.b == 0)
+    }
+
+    @Test func theGreyRampIsMonotonic() {
+        let ramp = (232...255).map { TerminalPalette.components(forIndex: UInt8($0)).r }
+        #expect(zip(ramp, ramp.dropFirst()).filter { $0 >= $1 }.isEmpty)
+        #expect(ramp.first! > 0)
+        #expect(ramp.last! < 1)
+    }
+
+    @Test func theFirstSixteenAreTheNamedColours() {
+        #expect(TerminalPalette.base.count == 16)
+        // Black is lifted deliberately: on the pill's dark surface a true
+        // black cell is an invisible one.
+        #expect(TerminalPalette.components(forIndex: 0).r > 0.15)
+    }
+
+    @MainActor
+    @Test func inverseSwapsForegroundAndBackground() {
+        var attributes = TerminalEmulator.Attributes()
+        attributes.foreground = .indexed(1)
+        attributes.inverse = true
+        let resolved = TerminalPalette.resolve(attributes, defaultForeground: .white,
+                                               defaultBackground: .black)
+        #expect(resolved.background != nil, "inverse has to paint a background")
+    }
+
+    @MainActor
+    @Test func concealedTextIsDrawnInvisibly() {
+        var attributes = TerminalEmulator.Attributes()
+        attributes.hidden = true
+        let resolved = TerminalPalette.resolve(attributes, defaultForeground: .white,
+                                               defaultBackground: .black)
+        #expect(resolved.foreground == Color.black)
     }
 }

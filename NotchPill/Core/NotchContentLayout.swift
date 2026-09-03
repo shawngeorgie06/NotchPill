@@ -847,6 +847,11 @@ enum NotchContentLayout {
         case .shelf: return 66
         case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)
         case .clipboard(let items, let searching): return clipboardHeight(items, searching: searching)
+        // A header line (13) over `TerminalStore.rows` lines of 9pt monospace
+        // at 11pt leading, plus 3 of pad. The row count is the budget, so a
+        // shell that prints more scrolls inside the card rather than pushing
+        // the deck's page dots off the bottom of the pill.
+        case .terminal: return 13 + 3 + 11 * CGFloat(TerminalStore.rows)
         case .recentAlerts(let alerts): return rowsHeight(header: 18, row: 22, count: alerts.count)
         // Everything else is a label over a value.
         default: return 56
@@ -863,6 +868,9 @@ enum NotchContentLayout {
         // A clipboard line is text and wants the room; anything narrower
         // truncates every entry into uselessness.
         case .clipboard: return 340
+        // `TerminalStore.columns` of 9pt SF Mono. Narrower and the shell wraps
+        // every real command line; wider and the card no longer fits the pill.
+        case .terminal: return 340
         // Widest card by design: three rows of "project … status" need the room,
         // and a truncated project name defeats the point of the card.
         case .agents: return 210
