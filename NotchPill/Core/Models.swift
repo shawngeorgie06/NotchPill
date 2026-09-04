@@ -844,9 +844,12 @@ enum ExpandedActivity: Equatable, Identifiable {
             return "clip-\(searching)-" + items.map {
                 $0.id.uuidString + ($0.isPinned ? "P" : "")
             }.joined(separator: ",")
-        // The whole grid is the content: any character or colour that changed
-        // has to redraw the card, and nothing here changes which card it is.
-        case .terminal(let snapshot): return "term-\(snapshot.revision)"
+        // Deliberately excludes the grid. `TerminalGridView` observes the
+        // store and redraws itself, so output must not move this key: doing so
+        // asked the deck to animate a card transition for every frame the
+        // shell printed.
+        case .terminal(let snapshot):
+            return "term-\(snapshot.isFocused)-\(snapshot.exitStatus.map(String.init) ?? "live")"
         }
     }
 

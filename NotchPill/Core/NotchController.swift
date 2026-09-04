@@ -177,7 +177,15 @@ final class NotchController {
         // both change the card's height and both have to relayout.
         relayoutTriggers.append(ClipboardStore.shared.$query.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(ClipboardStore.shared.$isSearching.map { _ in () }.eraseToAnyPublisher())
-        relayoutTriggers.append(TerminalStore.shared.$revision.map { _ in () }.eraseToAnyPublisher())
+        // Deliberately *not* `$revision`. The terminal card's height is a
+        // constant — six rows of monospace — so shell output never changes the
+        // pill's layout, and routing it through here meant every frame of
+        // output ran a full animated relayout of the whole overlay. At 30fps
+        // that is 30 relayouts a second, which is what made the terminal
+        // stutter and, far worse, made every button and the mouse itself feel
+        // slow while a shell was merely sitting there. The grid observes the
+        // store directly instead and redraws only itself.
+        // Focus does belong here: it moves the card to the front of the deck.
         relayoutTriggers.append(TerminalStore.shared.$isFocused.map { _ in () }.eraseToAnyPublisher())
 
         Publishers.MergeMany(relayoutTriggers)

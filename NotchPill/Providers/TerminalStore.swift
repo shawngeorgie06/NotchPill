@@ -32,10 +32,13 @@ final class TerminalStore: ObservableObject {
     static let rows = 6
 
     private var session: PTYSession?
-    /// Output arrives in bursts; redrawing per chunk would republish the whole
-    /// grid dozens of times for one `ls`. Coalescing to a frame is invisible to
-    /// a reader and turns that into one redraw.
+    /// Output arrives in bursts; redrawing per chunk would republish the grid
+    /// dozens of times for one `ls`. Coalescing to a frame turns that into one
+    /// redraw, and a redraw is now confined to the grid view rather than
+    /// relaying out the whole overlay, so this can afford to run at display
+    /// rate instead of half of it.
     private var pendingRedraw = false
+    static let redrawInterval: TimeInterval = 1.0 / 60.0
 
     private init() {}
 
@@ -107,7 +110,7 @@ final class TerminalStore: ObservableObject {
     private func scheduleRedraw() {
         guard !pendingRedraw else { return }
         pendingRedraw = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.redrawInterval) { [weak self] in
             guard let self else { return }
             self.pendingRedraw = false
             self.revision += 1

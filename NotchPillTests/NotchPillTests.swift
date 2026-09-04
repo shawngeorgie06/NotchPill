@@ -9203,11 +9203,24 @@ struct TerminalStoreTests {
 
     /// The card is a value the deck compares. Without a revision bump the
     /// content key never changes and the shell's output never reaches screen.
-    @Test func theContentKeyMovesWhenTheGridDoes() {
+    /// Output must *not* move the content key. The grid view observes the store
+    /// and redraws itself; moving the key made the deck run an animated card
+    /// transition for every frame the shell printed, which is what made the
+    /// whole overlay — buttons and cursor included — feel slow.
+    @Test func outputAloneDoesNotMoveTheContentKey() {
         var snapshot = TerminalSnapshot(revision: 1)
         let before = ExpandedActivity.terminal(snapshot).contentKey
         snapshot.revision = 2
-        #expect(ExpandedActivity.terminal(snapshot).contentKey != before)
+        #expect(ExpandedActivity.terminal(snapshot).contentKey == before)
+    }
+
+    /// Focus and exit do change how the card is drawn, so they must move it.
+    @Test func focusAndExitMoveTheContentKey() {
+        let live = ExpandedActivity.terminal(TerminalSnapshot()).contentKey
+        var focused = TerminalSnapshot(); focused.isFocused = true
+        var exited = TerminalSnapshot(); exited.exitStatus = 0
+        #expect(ExpandedActivity.terminal(focused).contentKey != live)
+        #expect(ExpandedActivity.terminal(exited).contentKey != live)
     }
 
     /// ...but the *identity* must not move, or every line of output would

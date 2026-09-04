@@ -1414,7 +1414,8 @@ struct ExpandedActivityCard: View {
             })
 
             ZStack(alignment: .topLeading) {
-                TerminalGridView(snapshot: snapshot, fontSize: s(9), lineHeight: s(11))
+                TerminalGridView(isFocused: snapshot.isFocused,
+                                 fontSize: s(9), lineHeight: s(11))
                     .opacity(snapshot.exitStatus == nil ? 1 : 0.45)
                 if let status = snapshot.exitStatus {
                     Text("shell exited (\(status))")

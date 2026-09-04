@@ -68,11 +68,18 @@ struct TerminalKeyCatcher: NSViewRepresentable {
 
 /// The grid, drawn.
 ///
+/// This observes `TerminalStore` itself rather than being handed lines through
+/// the notch's content snapshot, and that is the whole performance story. Shell
+/// output used to travel through `relayoutTriggers`, so every frame ran an
+/// animated relayout of the entire overlay — 30 a second, while the card's
+/// height is a constant that could not possibly have changed. Owning the
+/// observation here confines a redraw to this subtree.
+///
 /// One `Text` per run of cells sharing an attribute rather than one per cell:
-/// a 58-column card is 348 views a frame otherwise, and at 30fps that is enough
-/// to be felt.
+/// a 58-column card is 348 views a frame otherwise, and at 60fps that is felt.
 struct TerminalGridView: View {
-    let snapshot: TerminalSnapshot
+    @ObservedObject private var store = TerminalStore.shared
+    var isFocused: Bool
     var fontSize: CGFloat = 9
     var lineHeight: CGFloat = 11
 
@@ -80,16 +87,24 @@ struct TerminalGridView: View {
     private let background = Color.black.opacity(0.35)
 
     var body: some View {
+        let grid = store.emulator
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(snapshot.lines.enumerated()), id: \.offset) { index, row in
-                line(row, isCursorRow: index == snapshot.cursor.row)
+            ForEach(Array(grid.screen.enumerated()), id: \.offset) { index, row in
+                line(row, isCursorRow: index == grid.cursorRow, cursorVisible: grid.cursorVisible)
                     .frame(height: lineHeight, alignment: .leading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Text arriving is not a state change worth interpolating. Without
+        // this the card inherits whatever animation the surrounding relayout
+        // is running and every character cross-fades into place, which reads
+        // as lag rather than as motion.
+        .animation(nil, value: store.revision)
+        .transaction { $0.animation = nil }
     }
 
-    private func line(_ row: [TerminalEmulator.Cell], isCursorRow: Bool) -> some View {
+    private func line(_ row: [TerminalEmulator.Cell], isCursorRow: Bool,
+                      cursorVisible: Bool) -> some View {
         HStack(spacing: 0) {
             ForEach(Array(runs(in: row).enumerated()), id: \.offset) { _, run in
                 Text(run.text)
@@ -100,7 +115,7 @@ struct TerminalGridView: View {
                     .foregroundStyle(colors(run.attributes).foreground)
                     .background(colors(run.attributes).background ?? .clear)
             }
-            if isCursorRow, snapshot.cursorVisible, snapshot.isFocused {
+            if isCursorRow, cursorVisible, isFocused {
                 cursor
             }
             Spacer(minLength: 0)
