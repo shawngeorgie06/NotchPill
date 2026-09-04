@@ -644,21 +644,30 @@ enum NotchContentLayout {
         return 1 / pow(userScale, 0.55)
     }
 
-    /// How many cards a pill this size can show without becoming unreadable.
+    /// How many cards a pill this size can show.
     ///
-    /// Shrinking has to *remove* things, not squeeze them — five cards crammed
-    /// into a 70% pill is worse than two you can actually read. Cards are
-    /// already in priority order (live agents first), so trimming the tail
-    /// keeps what matters.
+    /// Raised to eight. The old ceiling of five was inherited from the row
+    /// layout, where every card was drawn side by side and each extra one
+    /// shrank the type for all of them — there, trimming the tail was the only
+    /// way to keep anything readable. `expandedDeckLayout` does not work that
+    /// way: it gives each card a full-width page at a fixed
+    /// `360 * userScale`, with readability pinned at 1. Card count costs
+    /// nothing in width and nothing in text size.
+    ///
+    /// What it does cost is page dots, and those live in a strip as wide as
+    /// the pill. Eight dots need 156pt of the ~414pt a default pill has, which
+    /// is comfortable; at 70% the pill is 252pt and the strip also carries the
+    /// card's label, so the ladder still gives ground at the small end.
+    ///
+    /// Cards are in priority order (live agents first), so what a limit trims
+    /// is always the tail.
+    static let maximumVisibleCards = 8
+
     static func visibleCardLimit(forUserScale userScale: CGFloat) -> Int {
-        // Retuned after using it. The old cutoffs dropped the default size to
-        // two cards, which read as content going missing rather than as a
-        // deliberately compact pill — and the type compensation means three
-        // still fit legibly at 70%.
         switch userScale {
-        case ..<0.85: return 3
-        case ..<1.0: return 4
-        default: return 5
+        case ..<0.85: return 6
+        case ..<1.0: return 7
+        default: return maximumVisibleCards
         }
     }
 

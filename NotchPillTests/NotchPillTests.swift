@@ -665,9 +665,10 @@ struct ExpandedActivityShelfTests {
             shelfItems: [], shelfReceipt: nil, shelfError: nil,
             shelfDropTargeted: true)
 
-        // 0.75 is the reported pill size, which allows three cards.
+        // 0.75 is the reported pill size — the smallest rung of the ladder,
+        // and so the one a drop is likeliest to be trimmed out of.
         let limit = NotchContentLayout.visibleCardLimit(forUserScale: 0.75)
-        #expect(limit == 3)
+        #expect(limit == 6)
         #expect(items.prefix(limit).contains { $0.kind == "shelf" })
     }
 
@@ -2637,20 +2638,46 @@ struct NotchScaleAdaptationTests {
 
     @Test("the smaller it gets, the fewer cards it shows")
     func fewerCardsWhenSmall() {
-        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 0.7) == 3)
-        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 0.85) == 4)
-        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 1.0) == 5)
-        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 1.3) == 5)
+        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 0.7) == 6)
+        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 0.85) == 7)
+        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 1.0) == 8)
+        #expect(NotchContentLayout.visibleCardLimit(forUserScale: 1.3) == 8)
         // The default size must never be one of the stingy ones.
         #expect(NotchContentLayout.visibleCardLimit(
-            forUserScale: CGFloat(AppSettings.defaultNotchScale)) >= 3)
+            forUserScale: CGFloat(AppSettings.defaultNotchScale)) >= 6)
     }
 
     @Test("the limit never drops below something worth showing")
     func limitStaysUseful() {
         for scale in stride(from: 0.7, through: 1.3, by: 0.05) {
-            #expect(NotchContentLayout.visibleCardLimit(forUserScale: CGFloat(scale)) >= 3)
+            #expect(NotchContentLayout.visibleCardLimit(forUserScale: CGFloat(scale)) >= 6)
         }
+    }
+
+    /// The ceiling is eight, and nothing may quietly exceed it — the page-dot
+    /// strip is sized on that assumption.
+    @Test("eight is the ceiling at every size")
+    func eightIsTheCeiling() {
+        for scale in stride(from: 0.5, through: 2.0, by: 0.05) {
+            #expect(NotchContentLayout.visibleCardLimit(forUserScale: CGFloat(scale))
+                    <= NotchContentLayout.maximumVisibleCards)
+        }
+    }
+
+    /// The reason the ceiling could be raised at all: the deck gives every
+    /// card a full-width page, so an eighth card costs no width and shrinks
+    /// no text. If this ever stops being true, the limit has to come back down.
+    @Test("extra cards do not shrink the pill or its type")
+    func deckWidthIsIndependentOfCardCount() {
+        let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                                   designExpandedWidth: 640, designExpandedHeight: 190,
+                                   scale: 1.0)
+        let one = NotchContentLayout.expandedDeckLayout(metrics: metrics, activities: [.clock])
+        let eight = NotchContentLayout.expandedDeckLayout(
+            metrics: metrics, activities: Array(repeating: .clock, count: 8))
+        #expect(one.size.width == eight.size.width)
+        #expect(one.readability == eight.readability)
+        #expect(one.textScale == eight.textScale)
     }
 }
 
@@ -8938,7 +8965,10 @@ struct TerminalEmulatorTests {
     }
 }
 
-@Suite("PTY session")
+/// Serialized: each test forks a real login shell and waits on its output.
+/// Run in parallel they compete for the machine and time out on a slow one,
+/// which reads as a broken PTY rather than as a busy test run.
+@Suite("PTY session", .serialized)
 struct PTYSessionTests {
     /// `TERM` has to claim colour or the shell emits none, and a shell launched
     /// from an app bundle inherits no locale — without one, anything
