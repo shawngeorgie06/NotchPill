@@ -107,12 +107,37 @@ final class TerminalStore: ObservableObject {
             ? home : (AppSettings.shared.terminalDirectory as NSString).expandingTildeInPath
     }
 
+    // MARK: - Scrollback
+
+    /// How many lines back the card is looking. Zero is live.
+    @Published private(set) var scrollOffset = 0
+
+    var scrollbackDepth: Int { emulator.scrollbackDepth }
+
+    /// Positive scrolls into history, negative back towards the prompt.
+    func scroll(by lines: Int) {
+        let next = min(max(scrollOffset + lines, 0), emulator.scrollbackDepth)
+        guard next != scrollOffset else { return }
+        scrollOffset = next
+    }
+
+    /// Typing means you want to see what you are typing.
+    func scrollToBottom() {
+        guard scrollOffset != 0 else { return }
+        scrollOffset = 0
+    }
+
     private func scheduleRedraw() {
         guard !pendingRedraw else { return }
         pendingRedraw = true
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.redrawInterval) { [weak self] in
             guard let self else { return }
             self.pendingRedraw = false
+            // Scrollback is capped, so lines fall off the top while the card
+            // is looking at them; without this the viewport would drift.
+            if self.scrollOffset > self.emulator.scrollbackDepth {
+                self.scrollOffset = self.emulator.scrollbackDepth
+            }
             self.revision += 1
         }
     }
@@ -127,6 +152,7 @@ final class TerminalStore: ObservableObject {
 
     func send(_ text: String) {
         start()
+        scrollToBottom()
         session?.write(text)
     }
 

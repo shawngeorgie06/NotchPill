@@ -590,4 +590,23 @@ struct TerminalEmulator {
 
     /// Scrollback plus screen, for a card that scrolls through history.
     var allLines: [[Cell]] { scrollback + screen }
+
+    /// How far back the card could be scrolled right now.
+    ///
+    /// Zero on the alternate screen: a full-screen program owns the whole
+    /// viewport and the history behind it belongs to the shell, not to it, so
+    /// scrolling there would show lines that have nothing to do with what is
+    /// on screen.
+    var scrollbackDepth: Int { alternate == nil ? scrollback.count : 0 }
+
+    /// The window the card draws, `offset` lines back from the live bottom.
+    /// A scrolled-back viewport reports no cursor, because the cursor is at
+    /// the bottom and drawing it anywhere else would be a lie.
+    func viewport(scrolledBack offset: Int) -> (lines: [[Cell]], cursorRow: Int?) {
+        let clamped = min(max(offset, 0), scrollbackDepth)
+        guard clamped > 0 else { return (screen, cursorRow) }
+        let all = scrollback + screen
+        let end = max(screen.count, all.count - clamped)
+        return (Array(all[(end - screen.count)..<end]), nil)
+    }
 }

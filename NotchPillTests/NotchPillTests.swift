@@ -9214,6 +9214,46 @@ struct TerminalStoreTests {
         #expect(ExpandedActivity.terminal(snapshot).contentKey == before)
     }
 
+    /// Six rows are visible and 200 are kept, so the card has to be able to
+    /// look back at the ones that scrolled off.
+    @Test func theViewportWalksBackThroughScrollback() {
+        var term = TerminalEmulator(columns: 10, rows: 3)
+        for n in 1...8 { term.feed(Array("line\(n)\r\n".utf8)) }
+        #expect(term.scrollbackDepth > 0)
+        let live = term.viewport(scrolledBack: 0)
+        #expect(String(live.lines[0].map(\.character)).hasPrefix("line7"))
+        #expect(live.cursorRow != nil)
+
+        let back = term.viewport(scrolledBack: 2)
+        #expect(String(back.lines[0].map(\.character)).hasPrefix("line5"))
+        #expect(back.lines.count == live.lines.count)
+        // The cursor is at the bottom; drawing it in history would be a lie.
+        #expect(back.cursorRow == nil)
+    }
+
+    /// Past the end of what is kept, and before the live bottom, the viewport
+    /// has to stop rather than index off either edge.
+    @Test func theViewportClampsAtBothEnds() {
+        var term = TerminalEmulator(columns: 10, rows: 3)
+        for n in 1...8 { term.feed(Array("line\(n)\r\n".utf8)) }
+        let deepest = term.viewport(scrolledBack: term.scrollbackDepth)
+        #expect(term.viewport(scrolledBack: 9999).lines.map { $0.map(\.character) }
+                == deepest.lines.map { $0.map(\.character) })
+        #expect(term.viewport(scrolledBack: -5).cursorRow != nil)
+    }
+
+    /// A full-screen program owns the whole viewport; the shell's history
+    /// behind it is not its to show.
+    @Test func thereIsNoScrollbackOnTheAlternateScreen() {
+        var term = TerminalEmulator(columns: 10, rows: 3)
+        for n in 1...8 { term.feed(Array("line\(n)\r\n".utf8)) }
+        #expect(term.scrollbackDepth > 0)
+        term.feed(Array("\u{1B}[?1049h".utf8))
+        #expect(term.scrollbackDepth == 0)
+        term.feed(Array("\u{1B}[?1049l".utf8))
+        #expect(term.scrollbackDepth > 0)
+    }
+
     /// Focus and exit do change how the card is drawn, so they must move it.
     @Test func focusAndExitMoveTheContentKey() {
         let live = ExpandedActivity.terminal(TerminalSnapshot()).contentKey
