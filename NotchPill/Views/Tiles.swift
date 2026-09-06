@@ -1001,6 +1001,7 @@ struct ExpandedActivityCard: View {
     private func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size * textScale, weight: weight)
     }
+    private func textSize(_ base: CGFloat) -> CGFloat { base * textScale }
 
     /// The width every card's header icon is laid out in.
     ///
@@ -1744,20 +1745,24 @@ struct ExpandedActivityCard: View {
         Button {
             actions.focusAgentSession(session)
         } label: {
-            VStack(alignment: .leading, spacing: s(3)) {
-                HStack(spacing: s(5)) {
+            VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+                HStack(spacing: 0) {
+                    // The dot lives in the gutter every line below shares, so the
+                    // row has one left edge instead of three.
                     Circle()
                         .fill(color(for: session.state))
                         .frame(width: s(5), height: s(5))
+                        .frame(width: s(NotchSpace.gutter), alignment: .leading)
                     if let symbol = session.vendorSymbol {
                         Image(systemName: symbol)
-                            .font(font(size: 9, weight: .semibold))
+                            .font(font(size: NotchType.caption, weight: .semibold))
                             // Dimmer than the name: it answers "which tool",
                             // which you only ask once per row, and it must not
                             // compete with the task line for attention.
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(.white.opacity(NotchOpacity.secondary))
                             .frame(width: s(9))
                             .accessibilityLabel(session.agentName)
+                            .padding(.trailing, s(NotchSpace.snug))
                     }
                     Text(session.displayName)
                         .font(font(size: 10, weight: .semibold))
@@ -1765,67 +1770,41 @@ struct ExpandedActivityCard: View {
                         .fixedSize(horizontal: true, vertical: false)
                     if let context = session.displayContext, !context.isEmpty {
                         Text(context)
-                            .font(.system(size: 9 * textScale, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.43))
+                            .font(.system(size: textSize(NotchType.caption), weight: .medium,
+                                          design: .monospaced))
+                            .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
                             .lineLimit(1)
+                            .padding(.leading, s(NotchSpace.snug))
                     }
-                    Spacer(minLength: s(4))
-                    Text(session.statusLabel)
-                        .font(font(size: 8, weight: .bold))
-                        .foregroundStyle(color(for: session.state).opacity(0.95))
-                        .padding(.horizontal, s(5))
-                        .padding(.vertical, s(2))
-                        .background(color(for: session.state).opacity(0.14), in: Capsule())
-                        .fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: s(NotchSpace.snug))
+                    agentStatusBadge(session)
                 }
                 agentActivityLine(session)
                 agentMetricsLine(session)
             }
-            .padding(.horizontal, s(7))
-            .padding(.vertical, s(5))
-            .background(color(for: session.state).opacity(session.isWaiting ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: s(7), style: .continuous))
+            .padding(.horizontal, s(NotchSpace.base))
+            .padding(.vertical, s(NotchSpace.base))
+            .background(color(for: session.state).opacity(session.isWaiting ? 0.12 : 0.06),
+                        in: RoundedRectangle(cornerRadius: s(7), style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: s(7), style: .continuous)
-                    .stroke(color(for: session.state).opacity(session.isWaiting ? 0.48 : 0.16), lineWidth: 0.75)
+                    .stroke(color(for: session.state).opacity(session.isWaiting ? 0.48 : 0.16),
+                            lineWidth: 0.75)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    /// The model, trailing the activity line.
-    ///
-    /// It started on the title line and was invisible there. That line already
-    /// carries the name, the project and the status pill inside a 210pt card,
-    /// so the model — added last and deliberately lowest priority — was
-    /// squeezed to nothing before it ever drew. Down here it trails a line
-    /// whose content is usually short, and it is pushed to the edge so it
-    /// never competes with the tool detail for the middle of the row.
-    /// Effort is drawn brighter than the model beside it. It is the part that
-    /// changes between two otherwise identical sessions, and the part you can
-    /// act on — an agent grinding on `high` is the one worth interrupting.
-    @ViewBuilder
-    private func agentModelTag(_ session: AgentSession) -> some View {
-        if session.modelBaseLabel != nil || session.effortLabel != nil {
-            HStack(spacing: s(3)) {
-                if let base = session.modelBaseLabel {
-                    Text(base)
-                        .font(.system(size: 8 * textScale, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.42))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-                if let effort = session.effortLabel {
-                    Text(effort)
-                        .font(.system(size: 8 * textScale, weight: .semibold))
-                        .foregroundStyle(color(for: session.state).opacity(0.85))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(session.modelLabel.map { "Model \($0)" } ?? "")
-        }
+    /// The status pill at the row's trailing edge.
+    private func agentStatusBadge(_ session: AgentSession) -> some View {
+        Text(session.statusLabel)
+            .font(font(size: 8, weight: .bold))
+            .foregroundStyle(color(for: session.state).opacity(0.95))
+            .padding(.horizontal, s(5))
+            .padding(.vertical, s(NotchSpace.tight))
+            .background(color(for: session.state).opacity(0.14), in: Capsule())
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     /// The row says what the session is *for*, never what it is typing.
@@ -1838,59 +1817,57 @@ struct ExpandedActivityCard: View {
     /// the screen — an API key passed inline, a token in a curl, a private
     /// path. The task line answers the question the card is actually for
     /// ("what is this session doing?") and stays still while it does.
+    ///
+    /// The leading gutter is the indent. It used to be a `›` glyph on one branch
+    /// and a `.padding(.leading, s(12))` on the other, so the two states of the
+    /// same row started at two different x positions.
     @ViewBuilder
     private func agentActivityLine(_ session: AgentSession) -> some View {
-        if let task = session.task {
-            HStack(spacing: s(5)) {
-                Text("›")
-                    .font(font(size: 12, weight: .bold))
-                    .foregroundStyle(color(for: session.state).opacity(0.9))
+        HStack(spacing: 0) {
+            Color.clear.frame(width: s(NotchSpace.gutter))
+            if let task = session.task {
                 Text("\(session.taskLeadIn) · \(task)")
-                    .font(font(size: 9, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .font(font(size: NotchType.caption, weight: .medium))
+                    .foregroundStyle(.white.opacity(NotchOpacity.secondary))
                     .lineLimit(1)
-                Spacer(minLength: s(4))
-                agentModelTag(session)
-            }
-        } else {
-            HStack(spacing: s(5)) {
+            } else {
                 Text(session.isWaiting ? "Needs your attention" : "Monitoring this session")
-                    .font(font(size: 9, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.42))
+                    .font(font(size: NotchType.caption, weight: .medium))
+                    .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
                     .lineLimit(1)
-                    .padding(.leading, s(12))
-                Spacer(minLength: s(4))
-                agentModelTag(session)
             }
+            Spacer(minLength: s(NotchSpace.snug))
         }
     }
 
-    /// Runtime and context size, under the activity line.
+    /// Everything you consult rather than read: runtime, context, model, effort,
+    /// and the permission mode when it is surprising.
     ///
-    /// Context is the number that decides a session's fate — a run near the
-    /// window is about to compact and lose the thread — and neither figure was
-    /// anywhere on the card before. Rendered only when there is something to
-    /// say, so short-lived rows do not grow an empty line.
+    /// One line at tertiary weight, starting at the same left edge as every other
+    /// line in the row. This was three lines at two indents with three different
+    /// trailing edges, and the ragged right margin re-ragged per session because
+    /// the model tag and the permission capsule were both `fixedSize`.
     @ViewBuilder
     private func agentMetricsLine(_ session: AgentSession) -> some View {
-        let parts = [session.runtimeLabel, session.contextLabel].compactMap { $0 }
-        if !parts.isEmpty || session.permissionLabel != nil {
-            HStack(spacing: s(4)) {
-                if !parts.isEmpty {
-                    Text(parts.joined(separator: " · "))
-                        .font(.system(size: 8.5 * textScale, weight: .medium,
+        let meta = AgentRowMetadata(session)
+        if meta.text != nil || meta.badge != nil {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: s(NotchSpace.gutter))
+                if let text = meta.text {
+                    Text(text)
+                        .font(.system(size: textSize(NotchType.mono), weight: .medium,
                                       design: .monospaced))
-                        // A session near its window is the one about to compact
-                        // and lose the thread, so at that point the figure stops
-                        // being trivia and is drawn like it matters.
-                        .foregroundStyle(session.isContextTight
+                        .foregroundStyle(meta.isContextTight
                             ? Color.orange.opacity(0.9)
-                            : .white.opacity(0.38))
+                            : .white.opacity(NotchOpacity.tertiary))
                         .lineLimit(1)
+                        .truncationMode(.tail)
                 }
-                agentPermissionBadge(session)
+                Spacer(minLength: s(NotchSpace.snug))
+                if let badge = meta.badge {
+                    agentPermissionBadge(label: badge, isWarning: meta.badgeIsWarning)
+                }
             }
-            .padding(.leading, s(12))
         }
     }
 
@@ -1902,24 +1879,20 @@ struct ExpandedActivityCard: View {
     /// would be noise on every row and teach the eye to skip the badge
     /// entirely. `bypass` and `auto-edit` are warned about; `plan` is the
     /// cautious end of the scale and is drawn calmly.
-    @ViewBuilder
-    private func agentPermissionBadge(_ session: AgentSession) -> some View {
-        if let label = session.permissionLabel {
-            let tint = session.isUnsupervised ? Color.orange : Color.cyan
-            Text(label)
-                .font(.system(size: 8 * textScale, weight: .semibold))
-                .foregroundStyle(tint.opacity(0.95))
-                .padding(.horizontal, s(4))
-                .padding(.vertical, s(1))
-                .background(tint.opacity(0.16),
-                            in: Capsule())
-                .overlay(Capsule().stroke(tint.opacity(0.35), lineWidth: 0.5))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .accessibilityLabel(session.isUnsupervised
-                    ? "Runs without asking: \(label)"
-                    : "Permission mode \(label)")
-        }
+    private func agentPermissionBadge(label: String, isWarning: Bool) -> some View {
+        let tint = isWarning ? Color.orange : Color.cyan
+        return Text(label)
+            .font(.system(size: textSize(8), weight: .semibold))
+            .foregroundStyle(tint.opacity(0.95))
+            .padding(.horizontal, s(NotchSpace.snug))
+            .padding(.vertical, 1)
+            .background(tint.opacity(0.16), in: Capsule())
+            .overlay(Capsule().stroke(tint.opacity(0.35), lineWidth: 0.5))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .accessibilityLabel(isWarning
+                ? "Runs without asking: \(label)"
+                : "Permission mode \(label)")
     }
 
     /// Waiting is the only state worth interrupting for, so it is the only one
