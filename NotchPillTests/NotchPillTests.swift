@@ -9316,3 +9316,42 @@ struct NotchMotionTests {
         #expect(NotchMotion.settle(reduceMotion: false) != NotchMotion.exit(reduceMotion: false))
     }
 }
+
+@Suite("Notch token scales")
+struct NotchTokenScaleTests {
+    @Test("no scale contains a duplicate value")
+    func noDuplicates() {
+        // Two names for one number is how a scale rots: the next person picks
+        // whichever reads better and the two drift apart at the first edit.
+        #expect(Set(NotchSpace.all).count == NotchSpace.all.count)
+        #expect(Set(NotchType.all).count == NotchType.all.count)
+        #expect(Set(NotchOpacity.all).count == NotchOpacity.all.count)
+    }
+
+    @Test("spacing steps ascend")
+    func spacingAscends() {
+        let steps: [CGFloat] = [NotchSpace.tight, NotchSpace.snug,
+                                NotchSpace.base, NotchSpace.roomy, NotchSpace.section]
+        #expect(steps == steps.sorted())
+    }
+
+    @Test("type roles descend from title to caption")
+    func typeDescends() {
+        #expect(NotchType.title > NotchType.body)
+        #expect(NotchType.body > NotchType.caption)
+    }
+
+    @Test("opacity roles descend from primary to hairline")
+    func opacityDescends() {
+        #expect(NotchOpacity.primary > NotchOpacity.secondary)
+        #expect(NotchOpacity.secondary > NotchOpacity.tertiary)
+        #expect(NotchOpacity.tertiary > NotchOpacity.hairline)
+    }
+
+    @Test("the gutter clears the status dot")
+    func gutterClearsDot() {
+        // The dot is 5pt. A gutter narrower than the thing it holds would put
+        // the text lines' shared left edge inside the dot.
+        #expect(NotchSpace.gutter > 5)
+    }
+}

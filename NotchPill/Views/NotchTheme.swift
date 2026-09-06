@@ -35,3 +35,58 @@ enum NotchMotion {
     /// change, and matching the existing constant keeps every surface in step.
     private static let floor = Animation.linear(duration: 0.01)
 }
+
+/// Spacing steps for the notch overlay, in unscaled points.
+///
+/// Always pass these through the view's `s()`, which applies the user's pill
+/// size setting: `s(NotchSpace.base)`, never `NotchSpace.base` on its own.
+///
+/// `Tiles.swift` had ten distinct spacing values (2, 3, 4, 5, 6, 8, 9, 10, 14,
+/// 18) chosen one call site at a time, which is what "cramped and improperly
+/// laid out" describes — no two cards agreed on what a gap meant.
+enum NotchSpace {
+    static let tight: CGFloat = 2
+    static let snug: CGFloat = 4
+    static let base: CGFloat = 8
+    static let roomy: CGFloat = 12
+    static let section: CGFloat = 20
+
+    /// The leading column a row's status dot sits in, so every text line below
+    /// the title shares one left edge instead of each inventing its own indent.
+    static let gutter: CGFloat = 11
+
+    /// Every step, for tests that assert the scale has no duplicates.
+    static let all: [CGFloat] = [tight, snug, base, roomy, section, gutter]
+}
+
+/// Type roles, in unscaled points. Pass through `textSize()`, which applies the
+/// user's readability setting.
+enum NotchType {
+    static let title: CGFloat = 13
+    static let body: CGFloat = 11
+    static let caption: CGFloat = 9
+    /// Same size as `caption` by design — it is a different *face*, not a
+    /// different size, and a monospaced digit at a different size next to a
+    /// proportional one is what makes a metadata row look accidental.
+    static let mono: CGFloat = 9
+
+    /// The distinct sizes, for the duplicate assertion. `mono` is deliberately
+    /// absent: it shares `caption`'s size and that is the point.
+    static let all: [CGFloat] = [title, body, caption]
+}
+
+/// The four jobs opacity does on this surface. `Tiles.swift` had 157 opacity
+/// call sites; almost all of them were one of these four intentions written out
+/// as a fresh number.
+enum NotchOpacity {
+    /// The thing the row is about.
+    static let primary: Double = 1.0
+    /// Supporting text you read second.
+    static let secondary: Double = 0.60
+    /// Facts you consult rather than read — runtime, context, model.
+    static let tertiary: Double = 0.38
+    /// Separators and card strokes.
+    static let hairline: Double = 0.08
+
+    static let all: [Double] = [primary, secondary, tertiary, hairline]
+}
