@@ -1157,11 +1157,14 @@ struct ExpandedActivityCard: View {
             // so silently showing three of four made the card contradict
             // itself — and there was no way to reach the rest.
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: s(4)) {
+                // Whitespace is what separates rows now that most of them have
+                // no border. It has to be wide enough to do that job alone.
+                VStack(alignment: .leading, spacing: s(NotchSpace.roomy)) {
                     ForEach(sessions) { session in
                         agentRow(session)
                     }
                 }
+                .padding(.horizontal, s(NotchSpace.base))
             }
             .scrollBounceBehavior(.basedOnSize)
         }
@@ -1787,14 +1790,22 @@ struct ExpandedActivityCard: View {
                 agentActivityLine(session)
                 agentMetricsLine(session)
             }
-            .padding(.horizontal, s(NotchSpace.base))
-            .padding(.vertical, s(NotchSpace.base))
-            .background(color(for: session.state).opacity(session.isWaiting ? 0.12 : 0.06),
-                        in: RoundedRectangle(cornerRadius: s(7), style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: s(7), style: .continuous)
-                    .stroke(color(for: session.state).opacity(session.isWaiting ? 0.48 : 0.16),
-                            lineWidth: 0.75)
+            .padding(.vertical, s(NotchSpace.snug))
+            // Only a row that wants you gets a box. Every row having one made
+            // eleven competing rectangles in a 210pt card and left the state
+            // colour with nothing to say — the dot and the status pill already
+            // carry it. The highlight bleeds past the text so the surviving
+            // box reads as an emphasis on the row, not as a new left edge.
+            .background {
+                if session.isWaiting {
+                    RoundedRectangle(cornerRadius: s(7), style: .continuous)
+                        .fill(color(for: session.state).opacity(0.12))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: s(7), style: .continuous)
+                                .stroke(color(for: session.state).opacity(0.48), lineWidth: 0.75)
+                        }
+                        .padding(.horizontal, -s(NotchSpace.base))
+                }
             }
             .contentShape(Rectangle())
         }
