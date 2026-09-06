@@ -133,15 +133,19 @@ final class TerminalStore: ObservableObject {
     private func startScrollMonitor() {
         guard scrollMonitor == nil else { return }
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            guard let self, self.isFocused else { return event }
+            guard let self else { return event }
+            LogStore.scroll("monitor saw dy=\(event.scrollingDeltaY) focused=\(self.isFocused) window=\(event.window.map { "\(type(of: $0))" } ?? "nil")")
+            guard self.isFocused else { return event }
             self.scrollAccumulator += event.scrollingDeltaY
             let lines = Int((self.scrollAccumulator / Self.pointsPerLine).rounded(.towardZero))
+            LogStore.scroll("accumulator=\(self.scrollAccumulator) lines=\(lines) depth=\(self.emulator.scrollbackDepth) alt=\(self.emulator.isAlternateScreen)")
             if lines != 0 {
                 self.scrollAccumulator -= CGFloat(lines) * Self.pointsPerLine
                 self.scroll(by: lines)
             }
             return nil
         }
+        LogStore.scroll("monitor installed")
     }
 
     private func stopScrollMonitor() {
@@ -153,6 +157,7 @@ final class TerminalStore: ObservableObject {
     /// Positive scrolls into history, negative back towards the prompt.
     func scroll(by lines: Int) {
         let next = min(max(scrollOffset + lines, 0), emulator.scrollbackDepth)
+        LogStore.scroll("scroll(by: \(lines)) offset \(scrollOffset) -> \(next) (depth \(emulator.scrollbackDepth))")
         guard next != scrollOffset else { return }
         scrollOffset = next
     }
@@ -183,6 +188,7 @@ final class TerminalStore: ObservableObject {
     func setFocused(_ focused: Bool) {
         guard isFocused != focused else { return }
         isFocused = focused
+        LogStore.scroll("setFocused(\(focused))")
         if focused {
             start()
             startScrollMonitor()

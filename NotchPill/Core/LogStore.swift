@@ -121,6 +121,20 @@ final class LogStore: ObservableObject {
         log("shelf", message)
     }
 
+    /// Terminal scroll tracing, off unless `NOTCHPILL_LOG_SCROLL=1`.
+    ///
+    /// A wheel event crosses four boundaries before the card moves — AppKit
+    /// delivering it to this app at all, the focus guard, the accumulator, and
+    /// the clamp against scrollback depth — and every failure among them looks
+    /// the same from outside: the card does not move. These lines say which.
+    nonisolated static let tracesScroll =
+        ProcessInfo.processInfo.environment["NOTCHPILL_LOG_SCROLL"] == "1"
+
+    nonisolated static func scroll(_ message: String) {
+        guard tracesScroll else { return }
+        log("scroll", message)
+    }
+
     nonisolated static let lineFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
