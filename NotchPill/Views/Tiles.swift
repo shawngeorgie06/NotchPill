@@ -996,6 +996,11 @@ struct ExpandedActivityCard: View {
     var tokenUsage: TokenUsageSummary?
     var tokenPeriod: TokenUsagePeriod = .today
     @ObservedObject private var destinations = DestinationStore.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Lets the status pill travel between states instead of cross-fading. This
+    /// is the state the user actually watches change, so it is the one worth
+    /// spending a transition on.
+    @Namespace private var agentBadgeNamespace
 
     private func s(_ value: CGFloat) -> CGFloat { value * readability }
     private func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
@@ -1797,14 +1802,23 @@ struct ExpandedActivityCard: View {
     }
 
     /// The status pill at the row's trailing edge.
+    ///
+    /// Keyed on the session rather than on the label, so SwiftUI treats
+    /// `working` becoming `idle 18m` as one view changing rather than two views
+    /// swapping. `.contentTransition(.numericText())` covers the digits inside
+    /// an aging label — `idle 18m` to `idle 19m` should not blink.
     private func agentStatusBadge(_ session: AgentSession) -> some View {
         Text(session.statusLabel)
             .font(font(size: 8, weight: .bold))
             .foregroundStyle(color(for: session.state).opacity(0.95))
+            .contentTransition(.numericText())
             .padding(.horizontal, s(5))
             .padding(.vertical, s(NotchSpace.tight))
             .background(color(for: session.state).opacity(0.14), in: Capsule())
             .fixedSize(horizontal: true, vertical: false)
+            .matchedGeometryEffect(id: session.id, in: agentBadgeNamespace)
+            .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.statusLabel)
+            .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.state)
     }
 
     /// The row says what the session is *for*, never what it is typing.
@@ -1885,7 +1899,7 @@ struct ExpandedActivityCard: View {
             .font(.system(size: textSize(8), weight: .semibold))
             .foregroundStyle(tint.opacity(0.95))
             .padding(.horizontal, s(NotchSpace.snug))
-            .padding(.vertical, 1)
+            .padding(.vertical, s(1))
             .background(tint.opacity(0.16), in: Capsule())
             .overlay(Capsule().stroke(tint.opacity(0.35), lineWidth: 0.5))
             .lineLimit(1)
