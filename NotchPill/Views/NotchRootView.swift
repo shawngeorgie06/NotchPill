@@ -73,8 +73,14 @@ struct NotchRootView: View {
         // notch without fighting an AppKit frame animation.
         reduceMotion ? .linear(duration: 0.01) : .timingCurve(0.22, 0.8, 0.2, 1, duration: NotchState.hoverAnimationDuration)
     }
+    /// In-place value changes: activity, volume, brightness, mic mute.
+    ///
+    /// This was a flat `.easeOut(duration: 0.1)`. At that length with no spring
+    /// a value does not appear to move, it appears to be swapped, and every
+    /// state change in the panel read the same dead way. `settle` gives the
+    /// change somewhere to arrive.
     private var contentAnimation: Animation {
-        reduceMotion ? .linear(duration: 0.01) : .easeOut(duration: 0.1)
+        NotchMotion.settle(reduceMotion: reduceMotion)
     }
 
     /// How the expanded card's copy fades against the surface growing behind
