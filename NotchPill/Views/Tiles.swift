@@ -1437,23 +1437,17 @@ struct ExpandedActivityCard: View {
                     onFocusChange: { _ in }
                 )
                 .frame(width: 0, height: 0)
-                // Over everything, so the wheel reaches it wherever the
-                // pointer is on the grid. It takes the click too — an NSView
-                // this size would otherwise swallow a SwiftUI tap gesture.
-                TerminalScrollCatcher(
-                    onScroll: { TerminalStore.shared.scroll(by: $0) },
-                    onClick: {
-                        if snapshot.isFocused {
-                            closeTerminalFocus()
-                        } else {
-                            TerminalStore.shared.setFocused(true)
-                            actions.captureKeyboard(true)
-                        }
-                    }
-                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            .onTapGesture {
+                if snapshot.isFocused {
+                    closeTerminalFocus()
+                } else {
+                    TerminalStore.shared.setFocused(true)
+                    actions.captureKeyboard(true)
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if !snapshot.isFocused {
                     Text("click to type")

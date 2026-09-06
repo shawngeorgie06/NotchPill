@@ -66,54 +66,6 @@ struct TerminalKeyCatcher: NSViewRepresentable {
     }
 }
 
-/// Catches the scroll wheel — and the click — over the grid.
-///
-/// SwiftUI has no scroll-wheel gesture on macOS, so this has to be an
-/// `NSView`. Since one is here anyway it also takes the click, because an
-/// `NSView` sitting over the card would otherwise swallow the tap gesture that
-/// used to focus the terminal.
-struct TerminalScrollCatcher: NSViewRepresentable {
-    var onScroll: (Int) -> Void
-    var onClick: () -> Void
-
-    final class CatcherView: NSView {
-        var onScroll: ((Int) -> Void)?
-        var onClick: (() -> Void)?
-
-        /// The key catcher owns the keyboard; this view must never take it
-        /// away by becoming first responder on a click.
-        override var acceptsFirstResponder: Bool { false }
-
-        /// Wheel notches and trackpad swipes arrive in wildly different
-        /// magnitudes, so deltas accumulate and a line is emitted per step
-        /// rather than mapping one event to one line.
-        private var accumulated: CGFloat = 0
-        private static let pointsPerLine: CGFloat = 11
-
-        override func scrollWheel(with event: NSEvent) {
-            accumulated += event.scrollingDeltaY
-            let lines = Int((accumulated / Self.pointsPerLine).rounded(.towardZero))
-            guard lines != 0 else { return }
-            accumulated -= CGFloat(lines) * Self.pointsPerLine
-            onScroll?(lines)
-        }
-
-        override func mouseDown(with event: NSEvent) { onClick?() }
-    }
-
-    func makeNSView(context: Context) -> CatcherView {
-        let view = CatcherView()
-        view.onScroll = onScroll
-        view.onClick = onClick
-        return view
-    }
-
-    func updateNSView(_ view: CatcherView, context: Context) {
-        view.onScroll = onScroll
-        view.onClick = onClick
-    }
-}
-
 /// The grid, drawn.
 ///
 /// This observes `TerminalStore` itself rather than being handed lines through

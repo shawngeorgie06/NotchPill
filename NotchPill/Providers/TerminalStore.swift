@@ -114,6 +114,42 @@ final class TerminalStore: ObservableObject {
 
     var scrollbackDepth: Int { emulator.scrollbackDepth }
 
+    /// Wheel notches and trackpad swipes arrive in wildly different
+    /// magnitudes, so deltas accumulate and a line is emitted per step.
+    private var scrollAccumulator: CGFloat = 0
+    private var scrollMonitor: Any?
+    private static let pointsPerLine: CGFloat = 11
+
+    /// A local monitor rather than a view.
+    ///
+    /// The obvious thing — an `NSView` over the grid overriding `scrollWheel` —
+    /// does not work here: the pill's hosting view never hit-tests down to it,
+    /// so the event reaches `NotchWindow` and stops. A local monitor sees it
+    /// there and can consume it by returning nil, which also keeps the scroll
+    /// from leaking through to whatever is behind the overlay.
+    ///
+    /// Only while the card has focus. Unfocused, the wheel over the pill is
+    /// not ours to take.
+    private func startScrollMonitor() {
+        guard scrollMonitor == nil else { return }
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self, self.isFocused else { return event }
+            self.scrollAccumulator += event.scrollingDeltaY
+            let lines = Int((self.scrollAccumulator / Self.pointsPerLine).rounded(.towardZero))
+            if lines != 0 {
+                self.scrollAccumulator -= CGFloat(lines) * Self.pointsPerLine
+                self.scroll(by: lines)
+            }
+            return nil
+        }
+    }
+
+    private func stopScrollMonitor() {
+        if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
+        scrollMonitor = nil
+        scrollAccumulator = 0
+    }
+
     /// Positive scrolls into history, negative back towards the prompt.
     func scroll(by lines: Int) {
         let next = min(max(scrollOffset + lines, 0), emulator.scrollbackDepth)
@@ -147,7 +183,13 @@ final class TerminalStore: ObservableObject {
     func setFocused(_ focused: Bool) {
         guard isFocused != focused else { return }
         isFocused = focused
-        if focused { start() }
+        if focused {
+            start()
+            startScrollMonitor()
+        } else {
+            stopScrollMonitor()
+            scrollToBottom()
+        }
     }
 
     func send(_ text: String) {
