@@ -9355,3 +9355,80 @@ struct NotchTokenScaleTests {
         #expect(NotchSpace.gutter > 5)
     }
 }
+
+@Suite("AgentRowMetadata")
+struct AgentRowMetadataTests {
+    private func session(startedAt: Date? = nil,
+                         contextTokens: Int? = nil,
+                         model: String? = nil,
+                         effort: String? = nil,
+                         permissionMode: String? = nil) -> AgentSession {
+        var s = AgentSession(id: "s", agent: "claude-code", project: "NotchPill",
+                             state: .working, lastActivity: Date())
+        s.startedAt = startedAt
+        s.contextTokens = contextTokens
+        s.model = model
+        s.effort = effort
+        s.permissionMode = permissionMode
+        return s
+    }
+
+    @Test("a bare session has no metadata line")
+    func empty() {
+        let meta = AgentRowMetadata(session())
+        #expect(meta.text == nil)
+        #expect(meta.badge == nil)
+        #expect(meta.isContextTight == false)
+    }
+
+    @Test("facts join in a fixed order")
+    func ordering() throws {
+        // Runtime first because it is true of every session; effort last
+        // because it modifies the model beside it. A stable order is what lets
+        // the eye skip the line entirely on rows it does not care about.
+        let meta = AgentRowMetadata(session(startedAt: Date().addingTimeInterval(-3600),
+                                            contextTokens: 20_000,
+                                            model: "claude-opus-5",
+                                            effort: "low"))
+        let text = try #require(meta.text)
+        let runtimeIndex = try #require(text.range(of: "running"))
+        let contextIndex = try #require(text.range(of: "ctx"))
+        let modelIndex = try #require(text.range(of: "Opus"))
+        let effortIndex = try #require(text.range(of: "low"))
+        #expect(runtimeIndex.lowerBound < contextIndex.lowerBound)
+        #expect(contextIndex.lowerBound < modelIndex.lowerBound)
+        #expect(modelIndex.lowerBound < effortIndex.lowerBound)
+    }
+
+    @Test("a tight context is flagged")
+    func tightContext() {
+        // 180k of a 200k window is 90%.
+        let meta = AgentRowMetadata(session(contextTokens: 180_000, model: "claude-opus-5"))
+        #expect(meta.isContextTight == true)
+    }
+
+    @Test("a roomy context is not flagged")
+    func roomyContext() {
+        let meta = AgentRowMetadata(session(contextTokens: 20_000, model: "claude-opus-5"))
+        #expect(meta.isContextTight == false)
+    }
+
+    @Test("default permission mode draws no badge")
+    func defaultPermission() {
+        // Everyone already assumes the agent asks. A badge on every row would
+        // teach the eye to skip the badge.
+        #expect(AgentRowMetadata(session(permissionMode: "default")).badge == nil)
+        #expect(AgentRowMetadata(session(permissionMode: nil)).badge == nil)
+    }
+
+    @Test("unsupervised modes badge as warnings, plan does not")
+    func permissionWarning() {
+        let bypass = AgentRowMetadata(session(permissionMode: "bypassPermissions"))
+        #expect(bypass.badge == "bypass")
+        #expect(bypass.badgeIsWarning == true)
+
+        let plan = AgentRowMetadata(session(permissionMode: "plan"))
+        #expect(plan.badge == "plan")
+        #expect(plan.badgeIsWarning == false)
+    }
+}
