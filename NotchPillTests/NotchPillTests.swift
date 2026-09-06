@@ -9283,3 +9283,36 @@ struct TerminalStoreTests {
         #expect(deck.first?.kind == "terminal")
     }
 }
+
+// MARK: - Notch theme
+
+@Suite("NotchMotion")
+struct NotchMotionTests {
+    @Test("every token collapses to the reduce-motion floor")
+    func reduceMotionFloor() {
+        // The floor is not "something short" — it is the exact value the rest
+        // of the overlay already uses, so a card animating at 10ms next to one
+        // animating at 12ms cannot happen.
+        let floor = Animation.linear(duration: 0.01)
+        #expect(NotchMotion.enter(reduceMotion: true) == floor)
+        #expect(NotchMotion.settle(reduceMotion: true) == floor)
+        #expect(NotchMotion.exit(reduceMotion: true) == floor)
+    }
+
+    @Test("tokens are distinct from the floor when motion is allowed")
+    func motionAllowed() {
+        let floor = Animation.linear(duration: 0.01)
+        #expect(NotchMotion.enter(reduceMotion: false) != floor)
+        #expect(NotchMotion.settle(reduceMotion: false) != floor)
+        #expect(NotchMotion.exit(reduceMotion: false) != floor)
+    }
+
+    @Test("the three tokens are distinct from each other")
+    func tokensDiffer() {
+        // Three names for one curve would be a lie in the source: a reader
+        // would think `exit` had been tuned when it had not.
+        #expect(NotchMotion.enter(reduceMotion: false) != NotchMotion.settle(reduceMotion: false))
+        #expect(NotchMotion.enter(reduceMotion: false) != NotchMotion.exit(reduceMotion: false))
+        #expect(NotchMotion.settle(reduceMotion: false) != NotchMotion.exit(reduceMotion: false))
+    }
+}
