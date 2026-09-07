@@ -997,10 +997,6 @@ struct ExpandedActivityCard: View {
     var tokenPeriod: TokenUsagePeriod = .today
     @ObservedObject private var destinations = DestinationStore.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Lets the status pill travel between states instead of cross-fading. This
-    /// is the state the user actually watches change, so it is the one worth
-    /// spending a transition on.
-    @Namespace private var agentBadgeNamespace
 
     private func s(_ value: CGFloat) -> CGFloat { value * readability }
     private func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
@@ -1109,64 +1105,40 @@ struct ExpandedActivityCard: View {
         .layoutPriority(expandToFill ? 1 : 0)
     }
 
-    /// The agent-sessions card joins live transcript state with recent terminal
-    /// events, so a finished or blocked conversation does not masquerade as a
-    /// running process or disappear the instant it goes quiet.
+    /// The agents page is a shelf, not a list: one row of session tiles that
+    /// scrolls sideways, and one well to jump to the session that wants you.
+    ///
+    /// The list it replaces was legible — one left edge, one metadata line —
+    /// and still read as a sheet of type, because nothing on it was an object.
+    /// Tiles are objects. The card joins live transcript state with recent
+    /// terminal events, so a finished or blocked conversation does not
+    /// masquerade as a running process or vanish the instant it goes quiet.
     private func agentsCard(_ sessions: [AgentSession]) -> some View {
-        let waiting = sessions.filter(\.isWaiting).count
-        let working = sessions.filter {
-            if case .working = $0.state { return true }
-            return false
-        }.count
-        let idle = sessions.filter {
-            if case .idle = $0.state { return true }
-            return false
-        }.count
-        let completed = sessions.filter(\.isCompleted).count
-        let summary = [
-            waiting == 0 ? nil : "\(waiting) needs you",
-            working == 0 ? nil : "\(working) working",
-            idle == 0 ? nil : "\(idle) idle",
-            completed == 0 ? nil : "\(completed) completed"
-        ].compactMap { $0 }.joined(separator: " · ")
-        let headerColor: Color = waiting > 0 ? .orange
-            : (working > 0 ? .green : .white.opacity(0.35))
-        return VStack(alignment: .leading, spacing: s(4)) {
-            cardHeader(icon: {
-                ZStack {
-                    Circle()
-                        .fill(headerColor.opacity(0.16))
-                        .frame(width: s(13), height: s(13))
-                    Circle()
-                        .fill(headerColor)
-                        .frame(width: s(5), height: s(5))
-                }
-            }, title: "AGENT SESSIONS",
-               titleFont: font(size: 9, weight: .bold),
-               tracking: 0.7 * textScale) {
-                Text(summary.isEmpty ? "\(sessions.count) recent" : summary)
-                    .font(font(size: 9, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.38))
-                Spacer(minLength: s(2))
-                Text("tap to jump")
-                    .font(font(size: 8, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.28))
-            }
-
-            // Scrolls rather than truncating. The header counts every session,
-            // so silently showing three of four made the card contradict
-            // itself — and there was no way to reach the rest.
-            ScrollView(.vertical, showsIndicators: true) {
-                // Whitespace is what separates rows now that most of them have
-                // no border. It has to be wide enough to do that job alone.
-                VStack(alignment: .leading, spacing: s(NotchSpace.roomy)) {
-                    ForEach(sessions) { session in
-                        agentRow(session)
+        let shelf = AgentShelf(sessions)
+        return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+            // The slot every other card's header occupies, so the tiles start
+            // where any other card's first line starts. There is no tracked
+            // "AGENT SESSIONS" here: the deck chrome already names the page.
+            Text(shelf.caption ?? "")
+                .font(font(size: NotchType.caption, weight: .medium))
+                .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
+                .lineLimit(1)
+                .frame(height: headerHeight, alignment: .leading)
+            HStack(spacing: s(NotchSpace.base)) {
+                // Sideways, not down. Two tiles fit the panel; the rest are one
+                // swipe away instead of stacking the notch taller.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: s(NotchSpace.snug)) {
+                        ForEach(sessions) { session in
+                            agentTile(session)
+                        }
                     }
                 }
-                .padding(.horizontal, s(NotchSpace.base))
+                .scrollBounceBehavior(.basedOnSize)
+                if let target = shelf.jumpTarget {
+                    agentJumpWell(target)
+                }
             }
-            .scrollBounceBehavior(.basedOnSize)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1749,175 +1721,102 @@ struct ExpandedActivityCard: View {
         }
     }
 
-    private func agentRow(_ session: AgentSession) -> some View {
-        Button {
+    /// One session as an object: a vendor mark in a well, the name, the state
+    /// as a dot and its age as a caption, on a quiet rounded surface.
+    ///
+    /// Runtime, context, model, effort and permission mode are not here. They
+    /// were a metadata line under a list row; a 72pt tile has no line to put
+    /// them on, and the tile is the tap target that opens the session where
+    /// all of that is visible anyway. `AgentRowMetadata` still computes them
+    /// and is still tested; this view just does not draw it.
+    private func agentTile(_ session: AgentSession) -> some View {
+        let tint = color(for: session.state)
+        let shape = RoundedRectangle(cornerRadius: s(NotchRadius.tile), style: .continuous)
+        return Button {
             actions.focusAgentSession(session)
         } label: {
             VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-                HStack(spacing: 0) {
-                    // The dot lives in the gutter every line below shares, so the
-                    // row has one left edge instead of three.
-                    Circle()
-                        .fill(color(for: session.state))
-                        .frame(width: s(5), height: s(5))
-                        .frame(width: s(NotchSpace.gutter), alignment: .leading)
-                    if let symbol = session.vendorSymbol {
-                        Image(systemName: symbol)
-                            .font(font(size: NotchType.caption, weight: .semibold))
-                            // Dimmer than the name: it answers "which tool",
-                            // which you only ask once per row, and it must not
-                            // compete with the task line for attention.
-                            .foregroundStyle(.white.opacity(NotchOpacity.secondary))
-                            .frame(width: s(9))
-                            .accessibilityLabel(session.agentName)
-                            .padding(.trailing, s(NotchSpace.snug))
-                    }
-                    Text(session.displayName)
-                        .font(font(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .fixedSize(horizontal: true, vertical: false)
-                    if let context = session.displayContext, !context.isEmpty {
-                        Text(context)
-                            .font(.system(size: textSize(NotchType.caption), weight: .medium,
-                                          design: .monospaced))
-                            .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
-                            .lineLimit(1)
-                            .padding(.leading, s(NotchSpace.snug))
-                    }
+                HStack(alignment: .top, spacing: 0) {
+                    agentVendorWell(session)
                     Spacer(minLength: s(NotchSpace.snug))
-                    agentStatusBadge(session)
+                    // The state colour lives here and nowhere else on the tile.
+                    Circle()
+                        .fill(tint)
+                        .frame(width: s(5), height: s(5))
                 }
-                agentActivityLine(session)
-                agentMetricsLine(session)
-            }
-            .padding(.vertical, s(NotchSpace.snug))
-            // Only a row that wants you gets a box. Every row having one made
-            // eleven competing rectangles in a 210pt card and left the state
-            // colour with nothing to say — the dot and the status pill already
-            // carry it. The highlight bleeds past the text so the surviving
-            // box reads as an emphasis on the row, not as a new left edge.
-            .background {
-                if session.isWaiting {
-                    RoundedRectangle(cornerRadius: s(7), style: .continuous)
-                        .fill(color(for: session.state).opacity(0.12))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: s(7), style: .continuous)
-                                .stroke(color(for: session.state).opacity(0.48), lineWidth: 0.75)
-                        }
-                        .padding(.horizontal, -s(NotchSpace.base))
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// The status pill at the row's trailing edge.
-    ///
-    /// Keyed on the session rather than on the label, so SwiftUI treats
-    /// `working` becoming `idle 18m` as one view changing rather than two views
-    /// swapping. `.contentTransition(.numericText())` covers the digits inside
-    /// an aging label — `idle 18m` to `idle 19m` should not blink.
-    private func agentStatusBadge(_ session: AgentSession) -> some View {
-        Text(session.statusLabel)
-            .font(font(size: 8, weight: .bold))
-            .foregroundStyle(color(for: session.state).opacity(0.95))
-            .contentTransition(.numericText())
-            .padding(.horizontal, s(5))
-            .padding(.vertical, s(NotchSpace.tight))
-            .background(color(for: session.state).opacity(0.14), in: Capsule())
-            .fixedSize(horizontal: true, vertical: false)
-            .matchedGeometryEffect(id: session.id, in: agentBadgeNamespace)
-            .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.statusLabel)
-            .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.state)
-    }
-
-    /// The row says what the session is *for*, never what it is typing.
-    ///
-    /// This line used to render the live tool call — "$ Bash xcodebuild test".
-    /// Two problems. It is the most volatile thing on the card, so the row
-    /// rewrote itself several times a second and the eye could not rest on it;
-    /// and a command line is not ours to publish. Whatever a user types after
-    /// `Bash` lands in the notch verbatim, in front of whoever is looking at
-    /// the screen — an API key passed inline, a token in a curl, a private
-    /// path. The task line answers the question the card is actually for
-    /// ("what is this session doing?") and stays still while it does.
-    ///
-    /// The leading gutter is the indent. It used to be a `›` glyph on one branch
-    /// and a `.padding(.leading, s(12))` on the other, so the two states of the
-    /// same row started at two different x positions.
-    @ViewBuilder
-    private func agentActivityLine(_ session: AgentSession) -> some View {
-        HStack(spacing: 0) {
-            Color.clear.frame(width: s(NotchSpace.gutter))
-            if let task = session.task {
-                Text("\(session.taskLeadIn) · \(task)")
-                    .font(font(size: NotchType.caption, weight: .medium))
-                    .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+                Text(session.displayName)
+                    .font(font(size: NotchType.body, weight: .semibold))
+                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
                     .lineLimit(1)
-            } else {
-                Text(session.isWaiting ? "Needs your attention" : "Monitoring this session")
+                    .truncationMode(.tail)
+                // The age the old status capsule carried — "idle 18m" — at the
+                // weight of a fact you consult, not one you read.
+                Text(session.statusLabel)
                     .font(font(size: NotchType.caption, weight: .medium))
                     .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
+                    .contentTransition(.numericText())
                     .lineLimit(1)
             }
-            Spacer(minLength: s(NotchSpace.snug))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(s(NotchSpace.base))
+            .frame(width: s(NotchSpace.tile))
+            // Only a session that wants you gets a coloured surface; every
+            // other tile is the same quiet lift off the black.
+            .background {
+                shape.fill(session.isWaiting ? tint.opacity(0.12) : .white.opacity(NotchOpacity.wellFill))
+                shape.stroke(session.isWaiting ? tint.opacity(0.48) : .white.opacity(NotchOpacity.hairline),
+                             lineWidth: 0.5)
+            }
+            .contentShape(shape)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(session.displayName), \(session.statusLabel)")
+        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.statusLabel)
     }
 
-    /// Everything you consult rather than read: runtime, context, model, effort,
-    /// and the permission mode when it is surprising.
+    /// Which tool this is, in a rounded square the size of the jump well so
+    /// the two read as the same kind of object.
     ///
-    /// One line at tertiary weight, starting at the same left edge as every other
-    /// line in the row. This was three lines at two indents with three different
-    /// trailing edges, and the ragged right margin re-ragged per session because
-    /// the model tag and the permission capsule were both `fixedSize`.
-    @ViewBuilder
-    private func agentMetricsLine(_ session: AgentSession) -> some View {
-        let meta = AgentRowMetadata(session)
-        if meta.text != nil || meta.badge != nil {
-            HStack(spacing: 0) {
-                Color.clear.frame(width: s(NotchSpace.gutter))
-                if let text = meta.text {
-                    Text(text)
-                        .font(.system(size: textSize(NotchType.mono), weight: .medium,
-                                      design: .monospaced))
-                        .foregroundStyle(meta.isContextTight
-                            ? Color.orange.opacity(0.9)
-                            : .white.opacity(NotchOpacity.tertiary))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                Spacer(minLength: s(NotchSpace.snug))
-                if let badge = meta.badge {
-                    agentPermissionBadge(label: badge, isWarning: meta.badgeIsWarning)
-                }
+    /// An unknown agent gets an empty well rather than a stand-in glyph — a
+    /// wrong-but-confident mark is worse than none, and the name still shows.
+    private func agentVendorWell(_ session: AgentSession) -> some View {
+        let shape = RoundedRectangle(cornerRadius: s(NotchRadius.well), style: .continuous)
+        return ZStack {
+            shape.fill(.white.opacity(NotchOpacity.wellFill))
+            shape.stroke(.white.opacity(NotchOpacity.hairline), lineWidth: 0.5)
+            if let symbol = session.vendorSymbol {
+                Image(systemName: symbol)
+                    .font(font(size: NotchType.body, weight: .semibold))
+                    .foregroundStyle(.white.opacity(NotchOpacity.secondary))
             }
         }
+        .frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
+        .accessibilityLabel(session.agentName)
     }
 
-    /// Whether the agent will stop and ask — the one thing on the row that
-    /// says if it is safe to walk away from.
+    /// The shelf's one action: jump to the session `AgentShelf` chose.
     ///
-    /// Only drawn when the answer is surprising. `default` is the mode where
-    /// the agent asks, which is what everyone already assumes, so a badge there
-    /// would be noise on every row and teach the eye to skip the badge
-    /// entirely. `bypass` and `auto-edit` are warned about; `plan` is the
-    /// cautious end of the scale and is drawn calmly.
-    private func agentPermissionBadge(label: String, isWarning: Bool) -> some View {
-        let tint = isWarning ? Color.orange : Color.cyan
-        return Text(label)
-            .font(.system(size: textSize(8), weight: .semibold))
-            .foregroundStyle(tint.opacity(0.95))
-            .padding(.horizontal, s(NotchSpace.snug))
-            .padding(.vertical, s(1))
-            .background(tint.opacity(0.16), in: Capsule())
-            .overlay(Capsule().stroke(tint.opacity(0.35), lineWidth: 0.5))
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .accessibilityLabel(isWarning
-                ? "Runs without asking: \(label)"
-                : "Permission mode \(label)")
+    /// One well, not two. Droppy's file shelf has a check and a trash because
+    /// files are confirmed or discarded; an agent session has one real action
+    /// from here, which is to go to it. The glyph borrows the state colour
+    /// only when the target is waiting, so the well itself says "someone
+    /// needs you" before you read anything.
+    private func agentJumpWell(_ target: AgentSession) -> some View {
+        Button {
+            actions.focusAgentSession(target)
+        } label: {
+            Image(systemName: "arrow.up.right")
+                .font(font(size: NotchType.caption, weight: .bold))
+                .foregroundStyle(target.isWaiting
+                    ? color(for: target.state)
+                    : .white.opacity(NotchOpacity.secondary))
+                .frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
+                .background(Circle().fill(.white.opacity(NotchOpacity.wellFill)))
+                .overlay(Circle().stroke(.white.opacity(NotchOpacity.rim), lineWidth: 0.5))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Jump to \(target.displayName)")
     }
 
     /// Waiting is the only state worth interrupting for, so it is the only one

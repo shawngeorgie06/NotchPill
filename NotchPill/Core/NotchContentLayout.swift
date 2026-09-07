@@ -790,10 +790,12 @@ enum NotchContentLayout {
     /// The agents page as a shelf: a caption over one row of tiles that scrolls
     /// sideways, so its height does not depend on how many sessions there are.
     ///
-    /// Caption slot 14 + 4 gap, then a tile of 8 pad, 22 well, 4, ~14 name, 4,
-    /// ~12 status, 8 pad = 72. Total 88, under the 144 ceiling with room for
-    /// the deck's page dots.
-    static let agentsShelf: CGFloat = 88
+    /// Caption slot 14 + 4 gap, then a tile of 8 pad, 22 well, 4, name, 4,
+    /// status, 8 pad. At default text that tile is ~70; at the smallest pill
+    /// size `textCompensation` is 1.22 and the two text lines push it to ~75
+    /// while `s()` stays at 1, so the budget is taken from that end. Anything
+    /// less and the small pill spends the page dots' slack on the tile.
+    static let agentsShelf: CGFloat = 93
 
     /// Clipboard rows are not uniform: each is as tall as its own copy needs,
     /// so a one-line snippet does not reserve the room a paragraph would.

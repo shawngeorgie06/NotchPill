@@ -115,8 +115,10 @@ fit a ~72pt object. `AgentRowMetadata` stays as a tested value type; the
 view stops drawing it.
 
 The layout budget (`NotchContentLayout`) sizes the page as one fixed
-`agentsShelf` height (88) instead of N list rows: a strip scrolls sideways,
-so a tenth session must not make the notch taller than a first. The 144pt
+`agentsShelf` height (93) instead of N list rows: a strip scrolls sideways,
+so a tenth session must not make the notch taller than a first. The number
+is taken from the smallest pill size, where text compensation is 1.22× and
+the tile is at its tallest. The 144pt
 `expandedContentCeiling` used to be derived from two agent rows; it stays
 at 144 as a literal because clipboard and terminal cards still cap there.
 
