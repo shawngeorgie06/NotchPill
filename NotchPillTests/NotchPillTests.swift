@@ -5204,6 +5204,26 @@ struct AgentModelLabelTests {
         #expect(AgentSession.modelLabel("") == nil)
         #expect(AgentSession.modelLabel("   ") == nil)
         #expect(AgentSession.modelLabel("<synthetic>") == nil)
+        #expect(AgentSession.modelShortLabel(nil) == nil)
+        #expect(AgentSession.modelShortLabel("<synthetic>") == nil)
+    }
+
+    /// The tile badge has room for about ten characters, so the variant goes
+    /// and the family and version stay — those are what you scan for.
+    @Test("The short label keeps family and version and drops the variant")
+    func shortLabel() {
+        #expect(AgentSession.modelShortLabel("claude-opus-5") == "Opus 5")
+        #expect(AgentSession.modelShortLabel("claude-haiku-4-5-20251001") == "Haiku 4.5")
+        #expect(AgentSession.modelShortLabel("gpt-5.6-terra") == "GPT 5.6")
+        #expect(AgentSession.modelShortLabel("gpt-5.6-soul-terra") == "GPT 5.6")
+        #expect(AgentSession.modelShortLabel("gemini-3-pro") == "Gemini 3")
+    }
+
+    /// An unknown model is the one worth naming, so it is not shortened to
+    /// nothing; the tile truncates it visually instead.
+    @Test("The short label passes an unfamiliar model through whole")
+    func shortLabelUnknown() {
+        #expect(AgentSession.modelShortLabel("some-new-thing-7") == "some-new-thing-7")
     }
 
     private func session(model: String?, effort: String?) -> AgentSession {
@@ -9361,6 +9381,9 @@ struct NotchTokenScaleTests {
         // not — but it still yields to the primary copy beside it.
         #expect(NotchOpacity.band > NotchOpacity.secondary)
         #expect(NotchOpacity.band < NotchOpacity.primary)
+        // The badge darkens the band without hiding it.
+        #expect(NotchOpacity.badge > NotchOpacity.rim)
+        #expect(NotchOpacity.badge < NotchOpacity.secondary)
     }
 
     @Test("a tile is wide enough for its well and padding")

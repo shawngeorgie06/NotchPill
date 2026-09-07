@@ -232,6 +232,25 @@ struct AgentSession: Equatable, Identifiable {
     /// never seen is exactly the one worth naming, and printing it verbatim is
     /// honest in a way that a guess or a blank would not be.
     static func modelLabel(_ raw: String?) -> String? {
+        guard let parsed = modelName(raw) else { return nil }
+        return [parsed.name, parsed.version, parsed.variant]
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// `Opus 5`, `GPT 5.6`, `Gemini 3`: the family and version only, for a
+    /// tile badge with room for about ten characters. The variant that
+    /// `modelLabel` keeps is dropped here on purpose — at badge width
+    /// "GPT 5.6 Terra" truncates to "GPT 5.6 T…", which is worse than the
+    /// honest shorter form. Unknown ids still pass through whole, because a
+    /// model we have never seen is the one worth naming.
+    static func modelShortLabel(_ raw: String?) -> String? {
+        guard let parsed = modelName(raw) else { return nil }
+        return [parsed.name, parsed.version].filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// The parts of a model id worth showing. `variant` is empty for an
+    /// unknown family, whose whole cleaned id is returned as `name`.
+    private static func modelName(_ raw: String?) -> (name: String, version: String, variant: String)? {
         guard var id = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               !id.isEmpty, id != "<synthetic>" else { return nil }
         for prefix in ["claude-", "openai-", "anthropic."] where id.hasPrefix(prefix) {
@@ -251,7 +270,7 @@ struct AgentSession: Equatable, Identifiable {
         let known = ["opus": "Opus", "sonnet": "Sonnet", "haiku": "Haiku",
                      "gpt": "GPT", "o1": "o1", "o3": "o3",
                      "gemini": "Gemini", "grok": "Grok", "llama": "Llama"]
-        guard let name = known[family] else { return id }
+        guard let name = known[family] else { return (id, "", "") }
 
         // A version segment starts with a digit, so "5", "4" and "5.6" all
         // count while codenames like "terra" do not. Numeric-only segments
@@ -263,7 +282,7 @@ struct AgentSession: Equatable, Identifiable {
         let variant = remaining.dropFirst(versionParts.count)
             .map { $0.prefix(1).uppercased() + $0.dropFirst() }
             .joined(separator: " ")
-        return [name, version, variant].filter { !$0.isEmpty }.joined(separator: " ")
+        return (name, version, variant)
     }
 
     /// `GPT 5.6 Terra · medium`. The reasoning effort is part of the active
@@ -278,6 +297,9 @@ struct AgentSession: Equatable, Identifiable {
     /// The two halves the row draws separately, so effort can be given weight
     /// the model name does not get.
     var modelBaseLabel: String? { Self.modelLabel(model) }
+
+    /// What the tile badge shows: `Opus 5`, `GPT 5.6`. See `modelShortLabel`.
+    var modelShortLabel: String? { Self.modelShortLabel(model) }
 
     /// How hard the agent is thinking: `low`, `medium`, `high`. Claude Code
     /// records it on every message and Codex in its thread settings, so this is

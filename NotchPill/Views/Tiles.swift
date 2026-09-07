@@ -1782,9 +1782,16 @@ struct ExpandedActivityCard: View {
 
     /// The tile's coloured header: the vendor mark in white on the state
     /// colour, in a well-sized slot so the mark sits at the same place on
-    /// every tile.
+    /// every tile, and the model as a badge at the other end.
     ///
-    /// An unknown agent gets an empty band rather than a stand-in glyph — a
+    /// The mark says which tool; the badge says which model, which for Cursor
+    /// or OpenCode is the thing that actually tells two sessions apart. It is
+    /// text, not a glyph: SF Symbols has no mark for Anthropic, OpenAI or
+    /// Google, and one invented here would have to be learned. The badge is a
+    /// darker patch on the band rather than a second colour, so state still
+    /// owns the hue.
+    ///
+    /// An unknown agent gets an empty slot rather than a stand-in glyph — a
     /// wrong-but-confident mark is worse than none, and the name still shows.
     private func agentTileBand(_ session: AgentSession, tint: Color) -> some View {
         HStack(spacing: 0) {
@@ -1797,7 +1804,18 @@ struct ExpandedActivityCard: View {
             } else {
                 Color.clear.frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: s(NotchSpace.snug))
+            if let model = session.modelShortLabel {
+                Text(model)
+                    .font(font(size: NotchType.caption, weight: .semibold))
+                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, s(NotchSpace.snug))
+                    .padding(.vertical, s(NotchSpace.tight))
+                    .background(Capsule().fill(.black.opacity(NotchOpacity.badge)))
+                    .accessibilityLabel(session.modelLabel ?? model)
+            }
         }
         .padding(.horizontal, s(NotchSpace.snug))
         .padding(.vertical, s(NotchSpace.snug))

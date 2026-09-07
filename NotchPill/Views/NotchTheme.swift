@@ -129,7 +129,10 @@ enum NotchOpacity {
     /// colour does its work now, instead of as a 5pt dot, and a washed-out
     /// band is worse than none.
     static let band: Double = 0.85
+    /// The model badge on a band: black at this opacity over the state colour,
+    /// so it reads as a darker patch of the same hue rather than a new one.
+    static let badge: Double = 0.30
 
     static let all: [Double] = [primary, secondary, tertiary, hairline,
-                                wellFill, highlight, rim, band]
+                                wellFill, highlight, rim, band, badge]
 }
