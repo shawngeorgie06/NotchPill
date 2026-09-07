@@ -506,9 +506,13 @@ struct ExpandedView: View {
                 activityDeck
             }
         }
-        .padding(.horizontal, 9)
-        .padding(.top, 6)
-        .padding(.bottom, 2)
+        // Content sits in the tray rather than flush to its silhouette. The
+        // top stays at `base`: the deck budget carries 10pt of slack for top
+        // and bottom together, and `roomy` there would push the page dots off
+        // the lower edge.
+        .padding(.horizontal, NotchSpace.roomy * readability)
+        .padding(.top, NotchSpace.base * readability)
+        .padding(.bottom, NotchSpace.tight * readability)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // Keyed on the track, not the whole value. `NowPlaying` carries
         // `isPlaying`, so animating on it made pause reflow the entire deck —
