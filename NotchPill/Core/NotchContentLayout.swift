@@ -774,14 +774,17 @@ enum NotchContentLayout {
         return min(expandedContentCeiling, max(48, measured))
     }
 
-    /// Height the deck's footer strip needs: the page dots' 22pt tap targets
-    /// plus the 5pt `VStack` gap above them.
+    /// Height the deck's footer strip needs: the page dots' 16pt tap targets
+    /// (`NotchSpace.mark`) plus the 4pt `VStack` gap above them.
     ///
-    /// Was 22 — the strip's own height with the gap forgotten. Five points is
+    /// Was 22 — the strip's own height with the gap forgotten. The gap is
     /// not much until a card is also over its own budget, and then the two
     /// shortfalls land on the same edge and clip the row that tells you which
-    /// page you are on and how many there are.
-    static let deckChromeHeight: CGFloat = 27
+    /// page you are on and how many there are. Then 27, with a 22pt row and
+    /// an always-on page label; the label went (the card header names the
+    /// page) and the row came down to a mark, so the strip stopped reading
+    /// as a tab bar and gave 7pt back to the card.
+    static let deckChromeHeight: CGFloat = 20
 
     /// Rows a card renders before it starts scrolling. Beyond this the card's
     /// own `ScrollView` takes over, so the pill must not keep growing.

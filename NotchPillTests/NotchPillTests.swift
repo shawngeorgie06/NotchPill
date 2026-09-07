@@ -8015,12 +8015,12 @@ struct DeckChromeTests {
                      scale: 0.54, screenWidth: 1512)
     }
 
-    /// The strip is a 22pt row of tap targets with a 5pt gap above it. Budget
-    /// only the row and the gap comes out of the card — which lands on the same
-    /// edge as the card's own overflow and clips the dots.
+    /// The strip is a `mark`-tall row of tap targets with a `snug` gap above
+    /// it. Budget only the row and the gap comes out of the card — which lands
+    /// on the same edge as the card's own overflow and clips the dots.
     @Test("Chrome covers the dot row and the gap above it")
     func chromeCoversTheStrip() {
-        #expect(NotchContentLayout.deckChromeHeight >= 27)
+        #expect(NotchContentLayout.deckChromeHeight >= NotchSpace.mark + NotchSpace.snug)
     }
 
     @Test("Every enabled deck page gets a footer, even when it is the only page")

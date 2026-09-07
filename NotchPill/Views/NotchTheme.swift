@@ -46,6 +46,10 @@ enum NotchMotion {
     /// mirror of `bump`: the same distance, the other way.
     static let press: CGFloat = 0.96
 
+    /// How long a transient label stays after the thing it names changes —
+    /// the page's name after a swipe. Long enough to read once.
+    static let linger: TimeInterval = 1.4
+
     /// The exact value the rest of the overlay already uses for Reduce Motion.
     /// Not zero: a true zero-duration animation still lets SwiftUI batch the
     /// change, and matching the existing constant keeps every surface in step.

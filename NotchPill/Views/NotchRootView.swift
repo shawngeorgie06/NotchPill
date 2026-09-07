@@ -489,6 +489,10 @@ struct ExpandedView: View {
     let activities: [ExpandedActivity]
     var readability: CGFloat = 1.0
     var textScale: CGFloat = 1.0
+    @State private var hoveringChrome = false
+    @State private var pageLabelFlashing = false
+    @State private var pageLabelTask: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
@@ -535,7 +539,7 @@ struct ExpandedView: View {
     /// new signals appeared; this deck makes new signals discoverable without
     /// changing the island's silhouette or shrinking their text.
     private var activityDeck: some View {
-        VStack(spacing: 5 * readability) {
+        VStack(spacing: NotchSpace.snug * readability) {
             ZStack {
                 if activities.indices.contains(clampedPage) {
                     ExpandedActivityCard(
@@ -565,37 +569,75 @@ struct ExpandedView: View {
             .animation(.easeOut(duration: 0.16), value: clampedPage)
 
             if NotchContentLayout.showsDeckChrome(for: activities) {
-                HStack(spacing: 7) {
-                    Label(activityLabel(activities[clampedPage]), systemImage: activityIcon(activities[clampedPage]))
-                        .font(.system(size: 9 * textScale, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.48))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-
-                    Spacer(minLength: 0)
-
-                    // No chevrons. They were the last of the arrows: two tap
-                    // targets restating what the dots already show and the
-                    // swipe already does, spending 52pt of a strip that is
-                    // narrow to begin with. The dots stay tappable, so nothing
-                    // that could be reached by an arrow became unreachable.
-                    HStack(spacing: 4) {
-                        ForEach(Array(activities.indices), id: \.self) { index in
-                            Button { state.selectExpandedDeckPage(index, kinds: activityKinds) } label: {
-                                Capsule()
-                                    .fill(index == clampedPage ? Color.white.opacity(0.9) : .white.opacity(0.22))
-                                    .frame(width: index == clampedPage ? 12 : 4, height: 4)
-                                    .frame(width: 16, height: 22)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Show \(activityLabel(activities[index]))")
-                        }
-                    }
-
-                }
-                .font(.system(size: 9 * textScale, weight: .semibold))
+                deckChrome
             }
+        }
+    }
+
+    /// The strip under the card: page dots, and the page's name only while
+    /// it is useful — for a beat after the page changes, and under the
+    /// pointer. Always-on, the label restated what the card's own header now
+    /// says ("Claude" over "claude") and made the strip read as a tab bar.
+    /// The dots stay: they are the one tap-to-page control, and the swipe
+    /// has no other affordance.
+    private var deckChrome: some View {
+        HStack(spacing: NotchSpace.base * readability) {
+            if showsPageLabel {
+                Label(activityLabel(activities[clampedPage]),
+                      systemImage: activityIcon(activities[clampedPage]))
+                    .font(.system(size: NotchType.caption * textScale, weight: .semibold))
+                    .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .transition(.opacity)
+            }
+
+            Spacer(minLength: 0)
+
+            // No chevrons. They were the last of the arrows: two tap
+            // targets restating what the dots already show and the
+            // swipe already does, spending 52pt of a strip that is
+            // narrow to begin with. The dots stay tappable, so nothing
+            // that could be reached by an arrow became unreachable.
+            HStack(spacing: NotchSpace.snug * readability) {
+                ForEach(Array(activities.indices), id: \.self) { index in
+                    Button { state.selectExpandedDeckPage(index, kinds: activityKinds) } label: {
+                        Capsule()
+                            .fill(index == clampedPage
+                                  ? Color.white.opacity(NotchOpacity.primary)
+                                  : .white.opacity(NotchOpacity.rim))
+                            .frame(width: (index == clampedPage ? NotchSpace.roomy : NotchSpace.snug) * readability,
+                                   height: NotchSpace.snug * readability)
+                            .frame(width: NotchSpace.mark * readability, height: NotchSpace.mark * readability)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Show \(activityLabel(activities[index]))")
+                }
+            }
+        }
+        .frame(height: NotchSpace.mark * readability)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            hoveringChrome = hovering
+        }
+        .onChange(of: clampedPage) { _, _ in
+            flashPageLabel()
+        }
+        .onAppear { flashPageLabel() }
+        .animation(NotchMotion.exit(reduceMotion: reduceMotion), value: showsPageLabel)
+    }
+
+    private var showsPageLabel: Bool { hoveringChrome || pageLabelFlashing }
+
+    /// Show the page's name for long enough to read once, then let it go.
+    private func flashPageLabel() {
+        pageLabelTask?.cancel()
+        pageLabelFlashing = true
+        pageLabelTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(NotchMotion.linger))
+            guard !Task.isCancelled else { return }
+            pageLabelFlashing = false
         }
     }
 
