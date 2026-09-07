@@ -790,12 +790,13 @@ enum NotchContentLayout {
     /// The agents page as a shelf: a caption over one row of tiles that scrolls
     /// sideways, so its height does not depend on how many sessions there are.
     ///
-    /// Caption slot 14 + 4 gap, then a tile of 8 pad, 22 well, 4, name, 4,
-    /// status, 8 pad. At default text that tile is ~70; at the smallest pill
-    /// size `textCompensation` is 1.22 and the two text lines push it to ~75
-    /// while `s()` stays at 1, so the budget is taken from that end. Anything
-    /// less and the small pill spends the page dots' slack on the tile.
-    static let agentsShelf: CGFloat = 93
+    /// Header row 22 (caption beside the jump well) + 4 gap, then a tile: a
+    /// 30pt band (22 mark, 4 pad each side), 4, name, 2, status, 8 pad. At
+    /// default text that tile is ~68; at the smallest pill size
+    /// `textCompensation` is 1.22 and the two text lines push it to ~73 while
+    /// `s()` stays at 1, so the budget is taken from that end. Anything less
+    /// and the small pill spends the page dots' slack on the tile.
+    static let agentsShelf: CGFloat = 100
 
     /// Clipboard rows are not uniform: each is as tall as its own copy needs,
     /// so a one-line snippet does not reserve the room a paragraph would.

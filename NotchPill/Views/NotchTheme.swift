@@ -62,8 +62,10 @@ enum NotchSpace {
 
     /// A session tile's width. A horizontal strip needs a fixed width; a
     /// flexible one has nothing to measure against inside a `ScrollView`.
-    /// Room for a well, a short name, and `base` padding on each side.
-    static let tile: CGFloat = 72
+    /// Two of these plus a `snug` gap fill the 180pt the panel has left after
+    /// its `roomy` insets, so the strip is tiles edge to edge, not tiles and
+    /// a gap.
+    static let tile: CGFloat = 88
 
     /// Every step, for tests that assert the scale has no duplicates.
     static let all: [CGFloat] = [tight, snug, base, roomy, section, gutter, well, tile]
@@ -121,8 +123,13 @@ enum NotchOpacity {
     static let highlight: Double = 0.14
     /// The island's rim at its brightest — the bottom curve, where the light
     /// from above lands. Brighter than a separator, dimmer than any text.
-    static let rim: Double = 0.18
+    /// 0.18 was invisible against a mid-tone wallpaper.
+    static let rim: Double = 0.28
+    /// A tile's coloured header band. Nearly opaque: this is where the state
+    /// colour does its work now, instead of as a 5pt dot, and a washed-out
+    /// band is worse than none.
+    static let band: Double = 0.85
 
     static let all: [Double] = [primary, secondary, tertiary, hairline,
-                                wellFill, highlight, rim]
+                                wellFill, highlight, rim, band]
 }

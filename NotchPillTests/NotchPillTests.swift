@@ -9357,6 +9357,10 @@ struct NotchTokenScaleTests {
         #expect(NotchOpacity.hairline < NotchOpacity.highlight)
         #expect(NotchOpacity.highlight < NotchOpacity.rim)
         #expect(NotchOpacity.rim < NotchOpacity.tertiary)
+        // The band is the one surface meant to be louder than text on it is
+        // not — but it still yields to the primary copy beside it.
+        #expect(NotchOpacity.band > NotchOpacity.secondary)
+        #expect(NotchOpacity.band < NotchOpacity.primary)
     }
 
     @Test("a tile is wide enough for its well and padding")

@@ -1116,29 +1116,30 @@ struct ExpandedActivityCard: View {
     private func agentsCard(_ sessions: [AgentSession]) -> some View {
         let shelf = AgentShelf(sessions)
         return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            // The slot every other card's header occupies, so the tiles start
-            // where any other card's first line starts. There is no tracked
-            // "AGENT SESSIONS" here: the deck chrome already names the page.
-            Text(shelf.caption ?? "")
-                .font(font(size: NotchType.caption, weight: .medium))
-                .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
-                .lineLimit(1)
-                .frame(height: headerHeight, alignment: .leading)
+            // Caption and the one action share the header row, so the strip
+            // below is tiles edge to edge. There is no tracked "AGENT SESSIONS"
+            // here: the deck chrome already names the page.
             HStack(spacing: s(NotchSpace.base)) {
-                // Sideways, not down. Two tiles fit the panel; the rest are one
-                // swipe away instead of stacking the notch taller.
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: s(NotchSpace.snug)) {
-                        ForEach(sessions) { session in
-                            agentTile(session)
-                        }
-                    }
-                }
-                .scrollBounceBehavior(.basedOnSize)
+                Text(shelf.caption ?? "")
+                    .font(font(size: NotchType.caption, weight: .semibold))
+                    .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+                    .lineLimit(1)
+                Spacer(minLength: s(NotchSpace.snug))
                 if let target = shelf.jumpTarget {
                     agentJumpWell(target)
                 }
             }
+            .frame(height: s(NotchSpace.well))
+            // Sideways, not down. Two tiles fill the panel; the rest are one
+            // swipe away instead of stacking the notch taller.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: s(NotchSpace.snug)) {
+                    ForEach(sessions) { session in
+                        agentTile(session)
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1721,77 +1722,87 @@ struct ExpandedActivityCard: View {
         }
     }
 
-    /// One session as an object: a vendor mark in a well, the name, the state
-    /// as a dot and its age as a caption, on a quiet rounded surface.
+    /// One session as an object: a coloured header band carrying the vendor
+    /// mark, over a dark body with the name and the state's age.
+    ///
+    /// The first cut of this tile was a grey well with a grey glyph and a 5pt
+    /// coloured dot, and read as generic dark UI. Droppy's tiles each wear a
+    /// saturated band with a white mark on it; that band is most of what makes
+    /// them look like objects rather than list rows. Here the band is the
+    /// state colour — `color(for:)` unchanged, used at full strength instead
+    /// of as a dot — so green is working, orange is blocked on you, and idle
+    /// recedes to grey. No vendor branding is invented.
     ///
     /// Runtime, context, model, effort and permission mode are not here. They
-    /// were a metadata line under a list row; a 72pt tile has no line to put
-    /// them on, and the tile is the tap target that opens the session where
-    /// all of that is visible anyway. `AgentRowMetadata` still computes them
-    /// and is still tested; this view just does not draw it.
+    /// were a metadata line under a list row; a tile has no line to put them
+    /// on, and the tile is the tap target that opens the session where all of
+    /// that is visible anyway. `AgentRowMetadata` still computes them and is
+    /// still tested; this view just does not draw it.
     private func agentTile(_ session: AgentSession) -> some View {
         let tint = color(for: session.state)
         let shape = RoundedRectangle(cornerRadius: s(NotchRadius.tile), style: .continuous)
         return Button {
             actions.focusAgentSession(session)
         } label: {
-            VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-                HStack(alignment: .top, spacing: 0) {
-                    agentVendorWell(session)
-                    Spacer(minLength: s(NotchSpace.snug))
-                    // The state colour lives here and nowhere else on the tile.
-                    Circle()
-                        .fill(tint)
-                        .frame(width: s(5), height: s(5))
+            VStack(alignment: .leading, spacing: 0) {
+                agentTileBand(session, tint: tint)
+                VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
+                    Text(session.displayName)
+                        .font(font(size: NotchType.body, weight: .semibold))
+                        .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    // The age the old status capsule carried — "idle 18m" — at
+                    // the weight of a fact you consult, not one you read.
+                    Text(session.statusLabel)
+                        .font(font(size: NotchType.caption, weight: .medium))
+                        .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
                 }
-                Text(session.displayName)
-                    .font(font(size: NotchType.body, weight: .semibold))
-                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                // The age the old status capsule carried — "idle 18m" — at the
-                // weight of a fact you consult, not one you read.
-                Text(session.statusLabel)
-                    .font(font(size: NotchType.caption, weight: .medium))
-                    .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
-                    .contentTransition(.numericText())
-                    .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, s(NotchSpace.base))
+                .padding(.top, s(NotchSpace.snug))
+                .padding(.bottom, s(NotchSpace.base))
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(s(NotchSpace.base))
             .frame(width: s(NotchSpace.tile))
-            // Only a session that wants you gets a coloured surface; every
-            // other tile is the same quiet lift off the black.
-            .background {
-                shape.fill(session.isWaiting ? tint.opacity(0.12) : .white.opacity(NotchOpacity.wellFill))
-                shape.stroke(session.isWaiting ? tint.opacity(0.48) : .white.opacity(NotchOpacity.hairline),
-                             lineWidth: 0.5)
-            }
+            .background(shape.fill(.white.opacity(NotchOpacity.wellFill)))
+            .clipShape(shape)
+            // A session that wants you gets its band colour on the edge too,
+            // so the tile reads as lit rather than merely labelled.
+            .overlay(shape.stroke(session.isWaiting ? tint.opacity(0.48) : .white.opacity(NotchOpacity.hairline),
+                                  lineWidth: 0.5))
             .contentShape(shape)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(session.displayName), \(session.statusLabel)")
         .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.statusLabel)
+        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.state)
     }
 
-    /// Which tool this is, in a rounded square the size of the jump well so
-    /// the two read as the same kind of object.
+    /// The tile's coloured header: the vendor mark in white on the state
+    /// colour, in a well-sized slot so the mark sits at the same place on
+    /// every tile.
     ///
-    /// An unknown agent gets an empty well rather than a stand-in glyph — a
+    /// An unknown agent gets an empty band rather than a stand-in glyph — a
     /// wrong-but-confident mark is worse than none, and the name still shows.
-    private func agentVendorWell(_ session: AgentSession) -> some View {
-        let shape = RoundedRectangle(cornerRadius: s(NotchRadius.well), style: .continuous)
-        return ZStack {
-            shape.fill(.white.opacity(NotchOpacity.wellFill))
-            shape.stroke(.white.opacity(NotchOpacity.hairline), lineWidth: 0.5)
+    private func agentTileBand(_ session: AgentSession, tint: Color) -> some View {
+        HStack(spacing: 0) {
             if let symbol = session.vendorSymbol {
                 Image(systemName: symbol)
-                    .font(font(size: NotchType.body, weight: .semibold))
-                    .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+                    .font(font(size: NotchType.body, weight: .bold))
+                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                    .frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
+                    .accessibilityLabel(session.agentName)
+            } else {
+                Color.clear.frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
             }
+            Spacer(minLength: 0)
         }
-        .frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
-        .accessibilityLabel(session.agentName)
+        .padding(.horizontal, s(NotchSpace.snug))
+        .padding(.vertical, s(NotchSpace.snug))
+        .frame(maxWidth: .infinity)
+        .background(tint.opacity(NotchOpacity.band))
     }
 
     /// The shelf's one action: jump to the session `AgentShelf` chose.
