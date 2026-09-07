@@ -3879,6 +3879,14 @@ struct ExpandedHeightTests {
 
     // Clipboard and terminal cards still cap at the ceiling; the shelf must
     // sit under it with room to spare, or the page dots lose their slack.
+    /// Token lines are drawn on the quota cards; the tallest allowed case
+    /// (two model rows) must still fit or the page dots leave the pill.
+    @Test("a quota card with two rows of token lines fits under the ceiling")
+    func quotaWithTokensFits() {
+        let h = NotchContentLayout.quotaCard + NotchContentLayout.tokenLinesHeight(modelRows: 2)
+        #expect(h <= NotchContentLayout.expandedContentCeiling)
+    }
+
     @Test("the shelf fits under the ceiling other cards still cap at")
     func shelfUnderCeiling() {
         #expect(NotchContentLayout.agentsShelf < NotchContentLayout.expandedContentCeiling)
@@ -9394,10 +9402,21 @@ struct NotchTokenScaleTests {
         #expect(steps == steps.sorted())
     }
 
-    @Test("type roles descend from title to caption")
+    @Test("type roles descend from display to caption")
     func typeDescends() {
+        #expect(NotchType.display > NotchType.title)
         #expect(NotchType.title > NotchType.body)
         #expect(NotchType.body > NotchType.caption)
+    }
+
+    /// The header mark is a glyph's backing, not a tap target: it must sit
+    /// inside a title line, and the bar must be visible on a tile.
+    @Test("the header mark fits a title line and the bar is no hairline")
+    func markAndBar() {
+        #expect(NotchSpace.mark < NotchSpace.well)
+        #expect(NotchSpace.mark > NotchType.title)
+        #expect(NotchSpace.bar > NotchSpace.snug)
+        #expect(NotchSpace.bar < NotchSpace.base)
     }
 
     @Test("opacity roles descend from primary to hairline")
@@ -9417,7 +9436,8 @@ struct NotchTokenScaleTests {
     @Test("radius roles are distinct and the tile is rounder than its well")
     func radii() {
         #expect(Set(NotchRadius.all).count == NotchRadius.all.count)
-        #expect(NotchRadius.tile > NotchRadius.well)
+        #expect(NotchRadius.tile > NotchRadius.card)
+        #expect(NotchRadius.card > NotchRadius.well)
     }
 
     @Test("chrome opacities sit between hairline and tertiary")

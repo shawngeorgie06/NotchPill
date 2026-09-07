@@ -67,8 +67,17 @@ enum NotchSpace {
     /// a gap.
     static let tile: CGFloat = 88
 
+    /// A card header's glyph well: the small tinted square every card opens
+    /// with, sized to sit on one 13pt title line. Smaller than `well`, which
+    /// is a tap target; this is a mark.
+    static let mark: CGFloat = 16
+
+    /// A meter bar's thickness. 4pt read as a hairline once the bars sat on a
+    /// tile rather than the bare island.
+    static let bar: CGFloat = 6
+
     /// Every step, for tests that assert the scale has no duplicates.
-    static let all: [CGFloat] = [tight, snug, base, roomy, section, gutter, well, tile]
+    static let all: [CGFloat] = [tight, snug, base, roomy, section, gutter, well, tile, mark, bar]
 }
 
 /// Corner radii for nested objects on the island, in unscaled points. Pass
@@ -82,8 +91,11 @@ enum NotchRadius {
     static let well: CGFloat = 6
     /// A session tile. Continuous, so it reads as an object, not a box.
     static let tile: CGFloat = 14
+    /// A card-sized object shorter than a tile — a meter, a shelf chip, a
+    /// list row's surface. `tile`'s 14 on a 40pt object reads as a pill.
+    static let card: CGFloat = 10
 
-    static let all: [CGFloat] = [well, tile]
+    static let all: [CGFloat] = [well, card, tile]
 }
 
 /// Type roles, in unscaled points. Pass through `textSize()`, which applies the
@@ -96,10 +108,13 @@ enum NotchType {
     /// different size, and a monospaced digit at a different size next to a
     /// proportional one is what makes a metadata row look accidental.
     static let mono: CGFloat = 9
+    /// The one number a metric card is about — a percentage, a level. Larger
+    /// than a title because it is read from across the desk, not up close.
+    static let display: CGFloat = 15
 
     /// The distinct sizes, for the duplicate assertion. `mono` is deliberately
     /// absent: it shares `caption`'s size and that is the point.
-    static let all: [CGFloat] = [title, body, caption]
+    static let all: [CGFloat] = [display, title, body, caption]
 }
 
 /// The four jobs opacity does on this surface. `Tiles.swift` had 157 opacity

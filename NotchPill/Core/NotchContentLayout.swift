@@ -837,36 +837,55 @@ enum NotchContentLayout {
     private static func expandedCardBaseHeight(_ activity: ExpandedActivity,
                                                tokenRows: Int = 0) -> CGFloat {
         switch activity {
-        case .claudeQuota: return 70 + tokenLinesHeight(modelRows: tokenRows)
-        case .codexQuota: return 56 + tokenLinesHeight(modelRows: tokenRows)
-        // Artwork and title over a transport row. Still the tallest card, and
-        // the reason the old rule keyed off it — but it wants ~78, not the 96
-        // the whole row was being sized to.
-        case .media: return 78
+        // Header well (16) + 4, then a meter tile: 4 pad, 18 figure, 4, 6 bar,
+        // 4, 11 caption, 4 pad = 51; + 4 + an 11pt trailing line ("extra $x",
+        // credits, "412 of 2000 · renews in 11d"). The three quota cards share
+        // one meter now, so they share one budget — and it leaves room under
+        // the ceiling for two rows of token lines when that setting is on.
+        case .claudeQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
+        case .codexQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
+        case .cursorQuota: return quotaCard
+        // Artwork row (a 15pt title over a 12pt artist, ~34) + 6, a 28pt
+        // transport row + 6, then progress: a 4pt bar, 4, and a 13pt time line.
+        // That is 95, and the card was budgeted at 78: on every song with a
+        // progress bar the page dots sat 17pt below the pill.
+        case .media: return 96
         // One strip of tiles; further sessions scroll sideways inside it
         // rather than turning the notch into a full-height panel.
         case .agents: return agentsShelf
         case .openCodeUsage: return 56
-        // Header (13) + 3 + meter (15pt value 18, 2, bar 4, 2, 9pt caption 11
-        // = 37) + 3 + a 10pt trailing line (13). The trailing line is the
-        // "extra $x" on Claude and the "38 of 2000 · renews in 27d" on Cursor;
-        // both were budgeted as if it were not there, so the card overflowed
-        // its allowance by exactly one line and pushed the deck's page dots off
-        // the bottom of the pill.
-        case .cursorQuota: return 70
-        case .shelf: return 66
-        case .ci(let runs): return rowsHeight(header: 18, row: 18, count: runs.count)
+        // Header (16) + 4, then a 52pt chip strip: 40pt chips plus the room
+        // the folder badge hangs into.
+        case .shelf: return 72
+        // Header (16) + 4, then 20pt single-line rows with a 2pt gap. The rows
+        // used to be two lines on an 18pt budget, so the third was always
+        // half-clipped.
+        case .ci(let runs): return rowsHeight(header: 20, row: 22, count: runs.count)
         case .clipboard(let items, let searching): return clipboardHeight(items, searching: searching)
-        // A header line (13) over `TerminalStore.rows` lines of 9pt monospace
-        // at 11pt leading, plus 3 of pad. The row count is the budget, so a
+        // A header well (16) over `TerminalStore.rows` lines of 9pt monospace
+        // at 11pt leading, plus 4 of pad. The row count is the budget, so a
         // shell that prints more scrolls inside the card rather than pushing
         // the deck's page dots off the bottom of the pill.
-        case .terminal: return 13 + 3 + 11 * CGFloat(TerminalStore.rows)
-        case .recentAlerts(let alerts): return rowsHeight(header: 18, row: 22, count: alerts.count)
+        case .terminal: return 16 + 4 + 11 * CGFloat(TerminalStore.rows)
+        case .recentAlerts(let alerts): return rowsHeight(header: 20, row: 22, count: alerts.count)
+        // Header (16) + 4 + a 22pt figure (26) + 4 + bar (6) + 4 + the 18pt
+        // Low Power row. Was budgeted at the 56 default, which is why the page
+        // dots sat under the row.
+        case .battery: return 78
+        // Header (16) + 4 + figure (18) + 4 + bar (6) + 4 + the 18pt output
+        // picker row.
+        case .volume: return 72
+        // Header (16) + 4 + a title that may wrap to two lines (32) + 4 + 13.
+        case .calendar: return 72
+        // Header (16) + 4 + a 22pt countdown (26) + 4 + the cancel button (14).
+        case .timer: return 66
         // Everything else is a label over a value.
         default: return 56
         }
     }
+
+    /// See `.claudeQuota` above.
+    static let quotaCard: CGFloat = 86
 
     private static func expandedCardBaseWidth(_ activity: ExpandedActivity) -> CGFloat {
         switch activity {
