@@ -342,11 +342,8 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     }
 
     var appIcon: NSImage? {
-        guard let bundleId,
-              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
-            return nil
-        }
-        return NSWorkspace.shared.icon(forFile: url.path)
+        guard let bundleId else { return nil }
+        return AppIconCache.shared.icon(bundleId: bundleId)
     }
 
     /// Ordered applications that can safely receive a tap-to-jump request.
@@ -627,12 +624,7 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         // OpenCode is a CLI with no app bundle to look up.
         case .cursor, .openCode, nil: return nil
         }
-        for id in candidates {
-            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
-                return NSWorkspace.shared.icon(forFile: url.path)
-            }
-        }
-        return nil
+        return AppIconCache.shared.icon(forAnyOf: candidates)
     }
 
     static func parse(from data: Data) -> DevReadyAlert? {

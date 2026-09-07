@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// One agent conversation that is alive right now.
@@ -366,6 +367,26 @@ struct AgentSession: Equatable, Identifiable {
 
     var knownAgent: DevReadyAlert.KnownAgent? {
         DevReadyAlert(title: "", agent: agent).knownAgent
+    }
+
+    /// Apps whose icon can stand for this agent on a tile, most specific
+    /// first. Distinct from `fallbackAppBundleIds`, which is where a tap
+    /// *goes*: Claude Code is a CLI and a tap has nowhere to send you, but the
+    /// Claude app's icon is still the honest mark for it if the app is here.
+    var iconBundleIds: [String] {
+        switch knownAgent {
+        case .claudeCode: return ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
+        case .codex: return ["com.openai.codex", "com.openai.chat"]
+        case .cursor: return ["com.todesktop.230313mzl4w4u92"]
+        case .openCode, nil: return []
+        }
+    }
+
+    /// The vendor's own icon, when the vendor's app is installed. The tile
+    /// wore an SF Symbol before — an asterisk for Claude, a cursor arrow for
+    /// Cursor — and those had to be learned. An app icon is recognised.
+    var appIcon: NSImage? {
+        AppIconCache.shared.icon(forAnyOf: iconBundleIds)
     }
 
     /// Where to jump when the session cannot be placed in the process tree.

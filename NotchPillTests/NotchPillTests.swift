@@ -9542,6 +9542,42 @@ struct AgentRowMetadataTests {
     }
 }
 
+@Suite("Agent tile marks")
+struct AgentTileMarkTests {
+    private func session(_ agent: String) -> AgentSession {
+        AgentSession(id: agent, agent: agent, project: "p", state: .working, lastActivity: Date())
+    }
+
+    @Test("each known agent names the app whose icon can stand for it")
+    func iconCandidates() {
+        #expect(session("cursor").iconBundleIds == ["com.todesktop.230313mzl4w4u92"])
+        #expect(session("claude-code").iconBundleIds.first == "com.anthropic.claudefordesktop")
+        #expect(session("codex").iconBundleIds.contains("com.openai.chat"))
+    }
+
+    @Test("an agent with no app, or no known agent, offers no icon")
+    func noApp() {
+        #expect(session("opencode").iconBundleIds.isEmpty)
+        #expect(session("opencode").appIcon == nil)
+        #expect(session("something-else").iconBundleIds.isEmpty)
+        #expect(session("something-else").appIcon == nil)
+    }
+
+    @Test("a missing app is a cached miss, not a repeated search")
+    func cachesMisses() {
+        let cache = AppIconCache()
+        #expect(cache.icon(bundleId: "com.example.not-installed-\(UUID().uuidString)") == nil)
+        #expect(cache.icon(forAnyOf: ["com.example.nope", "com.example.also-nope"]) == nil)
+    }
+
+    @Test("the first installed candidate wins")
+    func firstInstalledWins() {
+        // Finder is always present; a bogus id ahead of it must not hide it.
+        let cache = AppIconCache()
+        #expect(cache.icon(forAnyOf: ["com.example.nope", "com.apple.finder"]) != nil)
+    }
+}
+
 @Suite("AgentShelf")
 struct AgentShelfTests {
     private func session(_ id: String, _ state: AgentSession.State) -> AgentSession {

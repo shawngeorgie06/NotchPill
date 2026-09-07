@@ -1862,15 +1862,9 @@ struct ExpandedActivityCard: View {
     /// wrong-but-confident mark is worse than none, and the name still shows.
     private func agentTileBand(_ session: AgentSession, tint: Color) -> some View {
         HStack(spacing: 0) {
-            if let symbol = session.vendorSymbol {
-                Image(systemName: symbol)
-                    .font(font(size: NotchType.body, weight: .bold))
-                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
-                    .frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
-                    .accessibilityLabel(session.agentName)
-            } else {
-                Color.clear.frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
-            }
+            agentMark(session)
+                .frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
+                .accessibilityLabel(session.agentName)
             Spacer(minLength: s(NotchSpace.snug))
             if let model = session.modelShortLabel {
                 Text(model)
@@ -1888,6 +1882,32 @@ struct ExpandedActivityCard: View {
         .padding(.vertical, s(NotchSpace.snug))
         .frame(maxWidth: .infinity)
         .background(tint.opacity(NotchOpacity.band))
+    }
+
+    /// Which tool a session belongs to, as the thing you would recognise
+    /// fastest: the vendor's app icon when the app is installed, Anthropic's
+    /// own mark for Claude Code when it is not (it ships in the bundle), and
+    /// the SF Symbol only as a last resort. The one honest colour on the band
+    /// besides the state's is the vendor's own.
+    @ViewBuilder
+    private func agentMark(_ session: AgentSession) -> some View {
+        if let icon = session.appIcon {
+            Image(nsImage: icon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .padding(s(NotchSpace.tight))
+        } else if session.knownAgent == .claudeCode {
+            Image("ClaudeMark")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .padding(s(NotchSpace.snug))
+        } else if let symbol = session.vendorSymbol {
+            Image(systemName: symbol)
+                .font(font(size: NotchType.body, weight: .bold))
+                .foregroundStyle(.white.opacity(NotchOpacity.primary))
+        } else {
+            Color.clear
+        }
     }
 
     /// The shelf's one action: jump to the session `AgentShelf` chose.
