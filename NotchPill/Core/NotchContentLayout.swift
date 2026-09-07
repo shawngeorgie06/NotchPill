@@ -743,9 +743,11 @@ enum NotchContentLayout {
     /// sessions and three both clamped to the same height and you saw one row
     /// and a sliver of the next — the card scrolled with only two agents on it.
     ///
-    /// Derived from the row metrics rather than written as a number so the two
-    /// cannot drift apart again.
-    static let expandedContentCeiling: CGFloat = agentsHeader + agentsRow * 2
+    /// This was derived from two agent rows while the agents page was a list.
+    /// The page is a fixed-height shelf now and no longer reaches it, but the
+    /// clipboard and terminal cards still cap here, so the number stays where
+    /// it was rather than moving every other card.
+    static let expandedContentCeiling: CGFloat = 144
 
     /// Height for the card **on screen**, not the tallest card in the deck.
     ///
@@ -785,14 +787,13 @@ enum NotchContentLayout {
     /// own `ScrollView` takes over, so the pill must not keep growing.
     private static let expandedMaxCardRows = 3
 
-    /// An agent row's title/status line, its activity line, and the runtime and
-    /// context line under them — plus the card header. Named because the height
-    /// ceiling is derived from these; see `expandedContentCeiling`.
+    /// The agents page as a shelf: a caption over one row of tiles that scrolls
+    /// sideways, so its height does not depend on how many sessions there are.
     ///
-    /// 52 → 63 when the metrics line was added. The row grew and this did not,
-    /// which is the exact drift the ceiling comment above warns about.
-    static let agentsHeader: CGFloat = 18
-    static let agentsRow: CGFloat = 63
+    /// Caption slot 14 + 4 gap, then a tile of 8 pad, 22 well, 4, ~14 name, 4,
+    /// ~12 status, 8 pad = 72. Total 88, under the 144 ceiling with room for
+    /// the deck's page dots.
+    static let agentsShelf: CGFloat = 88
 
     /// Clipboard rows are not uniform: each is as tall as its own copy needs,
     /// so a one-line snippet does not reserve the room a paragraph would.
@@ -823,7 +824,7 @@ enum NotchContentLayout {
     /// A total line at 11pt plus one 9pt line per model shown, over the small
     /// pad above them. Declared here rather than left to the view, because a
     /// card that renders more than its budget pushes the deck's page dots off
-    /// the bottom of the pill — the same drift `agentsRow` documents.
+    /// the bottom of the pill — the same drift `expandedContentCeiling` documents.
     static func tokenLinesHeight(modelRows: Int) -> CGFloat {
         guard modelRows > 0 else { return 0 }
         // pad + the 11pt total + the 9pt cached line + one 9pt line per model
@@ -839,12 +840,9 @@ enum NotchContentLayout {
         // the reason the old rule keyed off it — but it wants ~78, not the 96
         // the whole row was being sized to.
         case .media: return 78
-        // Agent rows have a title/status line and one terminal-style activity
-        // line. Two are visible — the ceiling is derived from exactly that —
-        // and a third or later session scrolls inside the card instead of
-        // turning the notch into a full-height panel.
-        case .agents(let sessions): return rowsHeight(header: agentsHeader, row: agentsRow,
-                                                      count: sessions.count)
+        // One strip of tiles; further sessions scroll sideways inside it
+        // rather than turning the notch into a full-height panel.
+        case .agents: return agentsShelf
         case .openCodeUsage: return 56
         // Header (13) + 3 + meter (15pt value 18, 2, bar 4, 2, 9pt caption 11
         // = 37) + 3 + a 10pt trailing line (13). The trailing line is the

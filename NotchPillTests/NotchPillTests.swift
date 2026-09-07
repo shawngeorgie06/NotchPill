@@ -3835,36 +3835,24 @@ struct ExpandedHeightTests {
         .media(NowPlaying(title: "t", artist: "a", isPlaying: true))
     }
 
-    // The reported bug: 75% size, one agent row, three CI rows, music playing —
-    // and a pill sized as if every card were full.
-    @Test("a mostly empty row is shorter than a full one")
-    func reportedCase() {
-        let reported = NotchContentLayout.expandedContentBaseHeight([agents(1), ci(3), media])
-        let full = NotchContentLayout.expandedContentBaseHeight([agents(3), ci(3), media])
-        #expect(reported < full)
-    }
-
-    // The other half of the same wrong constant: three agent rows and no media
-    // used to budget 66 and clip the third row.
-    @Test("three agent rows get more than the old flat 66")
-    func threeRowsFit() {
-        #expect(NotchContentLayout.expandedContentBaseHeight([agents(3), ci(3)]) > 66)
-    }
-
-    @Test("height grows with rows, then stops when the card starts scrolling")
-    func growsThenCaps() {
+    // The agents page is a strip that scrolls sideways, so a tenth session
+    // must not make the notch taller than a first. This replaces the old
+    // "grows with rows, then caps" rule, which described a vertical list.
+    @Test("the agents shelf is one height however many sessions it holds")
+    func shelfHeightIsFixed() {
         let one = NotchContentLayout.expandedContentBaseHeight([agents(1)])
-        let two = NotchContentLayout.expandedContentBaseHeight([agents(2)])
         let three = NotchContentLayout.expandedContentBaseHeight([agents(3)])
         let ten = NotchContentLayout.expandedContentBaseHeight([agents(10)])
-        #expect(one < two)
-        // Two rows is the ceiling, so three and ten clamp to the same height
-        // as two. The regression this guards against is `two` clamping down to
-        // `one`'s height, which is what happened when rows grew and the
-        // ceiling did not.
-        #expect(two == NotchContentLayout.expandedContentCeiling)
-        #expect(three == two)
-        #expect(three == ten)
+        #expect(one == NotchContentLayout.agentsShelf)
+        #expect(three == one)
+        #expect(ten == one)
+    }
+
+    // Clipboard and terminal cards still cap at the ceiling; the shelf must
+    // sit under it with room to spare, or the page dots lose their slack.
+    @Test("the shelf fits under the ceiling other cards still cap at")
+    func shelfUnderCeiling() {
+        #expect(NotchContentLayout.agentsShelf < NotchContentLayout.expandedContentCeiling)
     }
 
     @Test("the tallest card sets the height, not the first or the last")
