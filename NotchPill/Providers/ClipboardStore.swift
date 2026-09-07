@@ -40,6 +40,49 @@ struct ClipboardEntry: Identifiable, Equatable {
         let needed = (preview.count + Self.charsPerLine - 1) / Self.charsPerLine
         return min(Self.maxLines, max(1, needed))
     }
+
+    /// What a copy *is*, when that can be told from the text alone: a colour
+    /// gets its swatch, a link its mark, anything else is text. The row shows
+    /// the object where it can rather than making you read the string to
+    /// find out — a `#ff6a00` you recognise by eye before you have parsed it.
+    enum Kind: Equatable {
+        case color(red: Double, green: Double, blue: Double)
+        case url
+        case text
+    }
+
+    var kind: Kind { Self.kind(of: text) }
+
+    static func kind(of text: String) -> Kind {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let rgb = hexColor(trimmed) { return rgb }
+        if let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
+           ["http", "https"].contains(scheme), url.host != nil,
+           !trimmed.contains(where: \.isWhitespace) {
+            return .url
+        }
+        return .text
+    }
+
+    /// `#rgb`, `#rrggbb` or `#rrggbbaa`, with or without the hash. Nothing
+    /// else — a bare six-digit number is far more often an id than a colour,
+    /// so the hash or a hex letter has to be present.
+    private static func hexColor(_ text: String) -> Kind? {
+        var hex = text
+        let hadHash = hex.hasPrefix("#")
+        if hadHash { hex.removeFirst() }
+        guard [3, 6, 8].contains(hex.count),
+              hex.allSatisfy(\.isHexDigit),
+              hadHash || hex.contains(where: { $0.isLetter })
+        else { return nil }
+        if hex.count == 3 { hex = hex.map { "\($0)\($0)" }.joined() }
+        let digits = Array(hex.prefix(6))
+        func channel(_ i: Int) -> Double? {
+            UInt8(String(digits[i..<i + 2]), radix: 16).map { Double($0) / 255 }
+        }
+        guard let r = channel(0), let g = channel(2), let b = channel(4) else { return nil }
+        return .color(red: r, green: g, blue: b)
+    }
 }
 
 /// Recent clipboard text, kept in memory only.

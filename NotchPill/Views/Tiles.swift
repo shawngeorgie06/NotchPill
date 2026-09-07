@@ -996,6 +996,7 @@ struct ExpandedActivityCard: View {
     var tokenUsage: TokenUsageSummary?
     var tokenPeriod: TokenUsagePeriod = .today
     @ObservedObject private var destinations = DestinationStore.shared
+    @ObservedObject private var thumbnails = ThumbnailStore.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private func s(_ value: CGFloat) -> CGFloat { value * readability }
@@ -1597,6 +1598,7 @@ struct ExpandedActivityCard: View {
                         clipboardPinButton(entry)
                         Button { ClipboardStore.shared.copyBack(entry) } label: {
                             HStack(alignment: .top, spacing: s(5)) {
+                                clipboardMark(entry)
                                 Text(entry.preview)
                                     .font(font(size: 10))
                                     .foregroundStyle(.white.opacity(0.85))
@@ -1661,6 +1663,28 @@ struct ExpandedActivityCard: View {
     private func closeClipboardSearch() {
         ClipboardStore.shared.endSearch()
         actions.captureKeyboard(false)
+    }
+
+    /// The copy as an object where the text allows it: a swatch for a colour,
+    /// a link mark for a URL. Plain text gets nothing — a mark on every row
+    /// would be a column of decoration, and the point is that these two stand
+    /// out from the rest.
+    @ViewBuilder
+    private func clipboardMark(_ entry: ClipboardEntry) -> some View {
+        switch entry.kind {
+        case .color(let r, let g, let b):
+            RoundedRectangle(cornerRadius: s(NotchRadius.well), style: .continuous)
+                .fill(Color(red: r, green: g, blue: b))
+                .overlay(RoundedRectangle(cornerRadius: s(NotchRadius.well), style: .continuous)
+                    .stroke(.white.opacity(NotchOpacity.rim), lineWidth: 0.5))
+                .frame(width: s(NotchSpace.mark), height: s(NotchSpace.mark))
+                .accessibilityLabel("colour swatch")
+        case .url:
+            glyphWell("link", tint: NotchDesign.accent)
+                .accessibilityLabel("link")
+        case .text:
+            EmptyView()
+        }
     }
 
     /// Shown filled on a pinned entry, and only on hover otherwise, so an
@@ -2390,6 +2414,32 @@ struct ExpandedActivityCard: View {
         .frame(minWidth: s(108), alignment: .leading)
     }
 
+    /// The file itself when Quick Look can draw it — the screenshot, the
+    /// PDF's first page — and its type icon until then or otherwise. The
+    /// thumbnail is asked for at twice the slot so it is sharp on a Retina
+    /// notch, and sits on the type icon's footprint so the chip does not
+    /// reflow when it arrives.
+    @ViewBuilder
+    private func shelfPreview(_ item: ShelfCardItem) -> some View {
+        if let thumb = thumbnails.thumbnail(for: item.url) {
+            Image(nsImage: thumb)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: s(NotchRadius.well), style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: s(NotchRadius.well), style: .continuous)
+                    .stroke(.white.opacity(NotchOpacity.rim), lineWidth: 0.5))
+                .transition(.opacity)
+        } else {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
+                .resizable()
+                .frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
+                .onAppear {
+                    thumbnails.request(item.url, size: CGSize(width: s(NotchSpace.well + NotchSpace.roomy),
+                                                              height: s(NotchSpace.well)))
+                }
+        }
+    }
+
     private func shelfChip(_ item: ShelfCardItem) -> some View {
         // A Button, not `.onTapGesture`: `.onDrag` installs its own gesture on
         // the same view and swallows taps often enough that clicking a chip did
@@ -2399,9 +2449,8 @@ struct ExpandedActivityCard: View {
             presentDestinationMenu(for: item)
         } label: {
             VStack(spacing: s(NotchSpace.tight)) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
-                    .resizable()
-                    .frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
+                shelfPreview(item)
+                    .frame(width: s(NotchSpace.well + NotchSpace.roomy), height: s(NotchSpace.well))
                 Text(item.name)
                     .font(font(size: NotchType.caption, weight: .medium))
                     .foregroundStyle(.white.opacity(NotchOpacity.secondary))

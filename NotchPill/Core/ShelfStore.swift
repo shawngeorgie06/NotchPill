@@ -61,10 +61,12 @@ final class ShelfStore: ObservableObject {
 
     func remove(_ item: Item) {
         items.removeAll { $0.id == item.id }
+        ThumbnailStore.shared.forget(item.url)
         save()
     }
 
     func clear() {
+        items.forEach { ThumbnailStore.shared.forget($0.url) }
         items.removeAll()
         save()
     }
@@ -74,6 +76,7 @@ final class ShelfStore: ObservableObject {
         do {
             let token = try ShelfFiler.file(item.url, into: folder)
             items.removeAll { $0.id == id }
+            ThumbnailStore.shared.forget(item.url)
             save()
             receipt = ShelfFilingReceipt(
                 token: token,

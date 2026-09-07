@@ -8683,6 +8683,66 @@ struct ClipboardPrivacyTests {
     }
 }
 
+@Suite("Clipboard entry kinds")
+struct ClipboardKindTests {
+    @Test("hex colours are recognised with a hash, in short and long form")
+    func hexColours() {
+        #expect(ClipboardEntry.kind(of: "#ff6a00") == .color(red: 1, green: 106 / 255, blue: 0))
+        #expect(ClipboardEntry.kind(of: "#FFF") == .color(red: 1, green: 1, blue: 1))
+        #expect(ClipboardEntry.kind(of: "  #00000080\n") == .color(red: 0, green: 0, blue: 0))
+        // Without the hash, a hex letter has to be present: 123456 is an id.
+        #expect(ClipboardEntry.kind(of: "ff6a00") == .color(red: 1, green: 106 / 255, blue: 0))
+        #expect(ClipboardEntry.kind(of: "123456") == .text)
+        #expect(ClipboardEntry.kind(of: "#12345") == .text)
+        #expect(ClipboardEntry.kind(of: "#gggggg") == .text)
+    }
+
+    @Test("web links are recognised; everything else is text")
+    func links() {
+        #expect(ClipboardEntry.kind(of: "https://getdroppy.app") == .url)
+        #expect(ClipboardEntry.kind(of: "http://localhost:3000/path?q=1") == .url)
+        #expect(ClipboardEntry.kind(of: "see https://x.y for details") == .text)
+        #expect(ClipboardEntry.kind(of: "file:///tmp/a") == .text)
+        #expect(ClipboardEntry.kind(of: "xcodebuild test -project NotchPill.xcodeproj") == .text)
+    }
+}
+
+@Suite("Thumbnail store")
+struct ThumbnailStoreTests {
+    @Test("a file with no thumbnail is a remembered miss and never a crash")
+    @MainActor
+    func missesAreRemembered() async throws {
+        let store = ThumbnailStore()
+        let url = URL(fileURLWithPath: "/tmp/np-does-not-exist-\(UUID().uuidString).zzz")
+        store.request(url, size: CGSize(width: 34, height: 22))
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(store.thumbnail(for: url) == nil)
+        // Asking again is a no-op, not a second generation.
+        store.request(url, size: CGSize(width: 34, height: 22))
+        #expect(store.thumbnail(for: url) == nil)
+    }
+
+    @Test("an image on disk gets a thumbnail, and forgetting drops it")
+    @MainActor
+    func imageThumbnail() async throws {
+        let url = URL(fileURLWithPath: "/tmp/np-thumb-\(UUID().uuidString).png")
+        let image = NSImage(size: NSSize(width: 40, height: 40))
+        image.lockFocus(); NSColor.systemPink.setFill(); NSRect(x: 0, y: 0, width: 40, height: 40).fill(); image.unlockFocus()
+        try NSBitmapImageRep(data: image.tiffRepresentation!)!
+            .representation(using: .png, properties: [:])!.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let store = ThumbnailStore()
+        store.request(url, size: CGSize(width: 34, height: 22))
+        for _ in 0..<40 where store.thumbnail(for: url) == nil {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(store.thumbnail(for: url) != nil)
+        store.forget(url)
+        #expect(store.thumbnail(for: url) == nil)
+    }
+}
+
 @MainActor
 @Suite("Clipboard pins and search")
 struct ClipboardPinTests {
