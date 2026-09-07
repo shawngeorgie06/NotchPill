@@ -847,13 +847,8 @@ actor AgentSessionScanner {
         defer { sqlite3_close(db) }
 
         let cutoff = Int64(now.addingTimeInterval(-AgentSession.liveWindow).timeIntervalSince1970 * 1000)
-        let sql = """
-        SELECT composerId, workspaceId, lastUpdatedAt, value FROM composerHeaders
-        WHERE lastUpdatedAt > ? AND isArchived = 0 AND isSubagent = 0
-        ORDER BY lastUpdatedAt DESC LIMIT 10
-        """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, Self.cursorSQL, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, cutoff)
 
@@ -867,6 +862,8 @@ actor AgentSessionScanner {
             let meta = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
             let blocked = meta["hasBlockingPendingActions"] as? Bool ?? false
             let folder = workspace.flatMap(cursorWorkspaceFolder)
+            let model = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
+            let parameters = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
             out.append(AgentSession(
                 id: id,
                 agent: "cursor",
@@ -881,9 +878,38 @@ actor AgentSessionScanner {
                 // Cursor names its own conversations, which beats anything that
                 // could be recovered from the prompt.
                 task: AgentSession.summarize((meta["name"] as? String)
-                                             ?? (meta["subtitle"] as? String))))
+                                             ?? (meta["subtitle"] as? String)),
+                model: model,
+                effort: Self.cursorEffort(inParameters: parameters)))
         }
         return out
+    }
+
+    /// Cursor's headers say which conversations are live; the model each one
+    /// runs is in the full conversation record, `cursorDiskKV` under
+    /// `composerData:<id>`, at `modelConfig.modelName`. That record is
+    /// ~140KB of transcript, so the two fields wanted are pulled out in SQL
+    /// and the blob never crosses into Swift. Without this join a Cursor tile
+    /// could name the tool but never the model — which for Cursor, which runs
+    /// anything, is the half that tells sessions apart.
+    static let cursorSQL = """
+    SELECT h.composerId, h.workspaceId, h.lastUpdatedAt, h.value,
+           json_extract(k.value, '$.modelConfig.modelName'),
+           json_extract(k.value, '$.modelConfig.selectedModels[0].parameters')
+    FROM composerHeaders h
+    LEFT JOIN cursorDiskKV k ON k.key = 'composerData:' || h.composerId
+    WHERE h.lastUpdatedAt > ? AND h.isArchived = 0 AND h.isSubagent = 0
+    ORDER BY h.lastUpdatedAt DESC LIMIT 10
+    """
+
+    /// Cursor records the picked model's settings as a list of `{id, value}`
+    /// pairs — `thinking`, `context`, `effort` — rather than named fields.
+    /// Only the effort is read; the rest has no place on the row.
+    nonisolated static func cursorEffort(inParameters json: String?) -> String? {
+        guard let json,
+              let list = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]]
+        else { return nil }
+        return list.first { $0["id"] as? String == "effort" }?["value"] as? String
     }
 
     /// The folder a Cursor conversation belongs to.

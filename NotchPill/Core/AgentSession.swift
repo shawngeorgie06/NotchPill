@@ -267,7 +267,7 @@ struct AgentSession: Equatable, Identifiable {
         // rather than being trimmed down to a word: `gpt-5.6-terra` reduced to
         // its first segment reads "Gpt", which has thrown away the only part
         // that distinguishes it.
-        let known = ["opus": "Opus", "sonnet": "Sonnet", "haiku": "Haiku",
+        let known = ["opus": "Opus", "sonnet": "Sonnet", "haiku": "Haiku", "fable": "Fable",
                      "gpt": "GPT", "o1": "o1", "o3": "o3",
                      "gemini": "Gemini", "grok": "Grok", "llama": "Llama"]
         guard let name = known[family] else { return (id, "", "") }

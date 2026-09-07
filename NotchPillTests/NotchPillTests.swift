@@ -5180,6 +5180,8 @@ struct AgentModelLabelTests {
         #expect(AgentSession.modelLabel("claude-sonnet-5") == "Sonnet 5")
         #expect(AgentSession.modelLabel("claude-opus-4-8") == "Opus 4.8")
         #expect(AgentSession.modelLabel("claude-haiku-4-5-20251001") == "Haiku 4.5")
+        #expect(AgentSession.modelLabel("claude-fable-5-1") == "Fable 5.1")
+        #expect(AgentSession.modelShortLabel("claude-fable-5-1") == "Fable 5.1")
     }
 
     @Test("Known families shorten to what you actually choose between")
@@ -5264,6 +5266,26 @@ struct AgentModelLabelTests {
         let got = AgentSessionScanner.codexModel(in: line)
         #expect(got.model == "gpt-5.6-terra")
         #expect(got.effort == "high")
+    }
+
+    /// Cursor keeps the picked model's settings as `{id, value}` pairs, so the
+    /// effort has to be found by id rather than read as a field.
+    @Test("Cursor's effort is picked out of its parameter list")
+    func parsesCursorEffort() {
+        let params = #"[{"id":"thinking","value":"true"},{"id":"context","value":"300k"},{"id":"effort","value":"high"}]"#
+        #expect(AgentSessionScanner.cursorEffort(inParameters: params) == "high")
+        #expect(AgentSessionScanner.cursorEffort(inParameters: #"[{"id":"thinking","value":"true"}]"#) == nil)
+        #expect(AgentSessionScanner.cursorEffort(inParameters: nil) == nil)
+        #expect(AgentSessionScanner.cursorEffort(inParameters: "not json") == nil)
+    }
+
+    /// The scanner asks SQLite for the two model fields by path so the
+    /// ~140KB conversation record never crosses into Swift.
+    @Test("Cursor's query joins the conversation record for its model")
+    func cursorQueryJoinsModel() {
+        #expect(AgentSessionScanner.cursorSQL.contains("$.modelConfig.modelName"))
+        #expect(AgentSessionScanner.cursorSQL.contains("'composerData:' || h.composerId"))
+        #expect(AgentSessionScanner.cursorSQL.contains("LEFT JOIN"))
     }
 
     @Test("Junk lines are skipped rather than fatal")
