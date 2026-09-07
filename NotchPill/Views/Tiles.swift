@@ -1980,18 +1980,23 @@ struct ExpandedActivityCard: View {
         }
     }
 
+    /// The card people see most, and the one place the island gets large,
+    /// honest colour for free: the album's. The artwork is drawn at twice a
+    /// well, and a blurred copy of it glows behind the card, masked to die
+    /// before the edges so it reads as light from the cover rather than a
+    /// second surface.
     private func mediaCard(_ np: NowPlaying) -> some View {
-        VStack(alignment: .leading, spacing: s(6)) {
-            HStack(spacing: s(8)) {
+        VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+            HStack(spacing: s(NotchSpace.base)) {
                 mediaArtwork(np)
-                VStack(alignment: .leading, spacing: s(1)) {
+                VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
                     Text(np.title)
-                        .font(font(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(font(size: NotchType.display, weight: .semibold))
+                        .foregroundStyle(.white.opacity(NotchOpacity.primary))
                         .lineLimit(expandToFill ? 2 : 1)
                     Text(np.artist)
-                        .font(font(size: 12))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .font(font(size: NotchType.body, weight: .medium))
+                        .foregroundStyle(.white.opacity(NotchOpacity.secondary))
                         .lineLimit(1)
                 }
                 // The text column absorbs every spare point, so the controls
@@ -2015,6 +2020,36 @@ struct ExpandedActivityCard: View {
                 MediaProgressView(nowPlaying: np, style: .expanded, readability: readability, textScale: textScale)
             }
         }
+        .background { mediaGlow(np) }
+    }
+
+    /// The artwork's light. Blurred past recognition, at glow opacity, and
+    /// masked with an elliptical falloff centred where the cover sits, so
+    /// there is no edge to see — which is what lets it live inside the card
+    /// without the pill's clip. Bleeds `base` into the insets so the falloff
+    /// is not visibly boxed by the content rect.
+    @ViewBuilder
+    private func mediaGlow(_ np: NowPlaying) -> some View {
+        if let image = np.artwork {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .blur(radius: s(NotchSpace.section))
+                // A blur paints past its bounds, and the content layer is not
+                // clipped to the pill; unclipped, the glow leaked onto the
+                // desktop beside the island.
+                .clipped()
+                .opacity(NotchOpacity.glow)
+                .mask(
+                    EllipticalGradient(colors: [.white, .clear],
+                                       center: UnitPoint(x: 0.22, y: 0.3),
+                                       startRadiusFraction: 0, endRadiusFraction: 0.8)
+                )
+                .padding(-s(NotchSpace.base))
+                .allowsHitTesting(false)
+                .id(ObjectIdentifier(image))
+                .transition(.opacity)
+        }
     }
 
     private func mediaArtwork(_ np: NowPlaying) -> some View {
@@ -2026,15 +2061,18 @@ struct ExpandedActivityCard: View {
                     .id(ObjectIdentifier(image))
             } else {
                 ZStack {
-                    Rectangle().fill(.white.opacity(0.08))
+                    Rectangle().fill(.white.opacity(NotchOpacity.hairline))
                     Image(systemName: "play.rectangle.fill")
-                        .foregroundStyle(.white.opacity(0.45))
-                        .font(.system(size: s(12)))
+                        .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
+                        .font(font(size: NotchType.display))
                 }
             }
         }
-        .frame(width: s(32), height: s(32))
-        .clipShape(RoundedRectangle(cornerRadius: s(6), style: .continuous))
+        .frame(width: s(NotchSpace.well * 2), height: s(NotchSpace.well * 2))
+        .clipShape(RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous))
+        // A cover is a printed object; the hairline is its edge, as on a tile.
+        .overlay(RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous)
+            .stroke(.white.opacity(NotchOpacity.rim), lineWidth: 0.5))
     }
 
     /// Explicit chevrons make track navigation discoverable in the compact

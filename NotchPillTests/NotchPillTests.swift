@@ -9462,6 +9462,10 @@ struct NotchTokenScaleTests {
         #expect(NotchOpacity.rim < NotchOpacity.tertiary)
         // The band is the one surface meant to be louder than text on it is
         // not — but it still yields to the primary copy beside it.
+        // The glow must stay under the text it sits behind, and over a mere
+        // highlight, or it is either a wash or invisible.
+        #expect(NotchOpacity.glow < NotchOpacity.secondary)
+        #expect(NotchOpacity.glow > NotchOpacity.highlight)
         #expect(NotchOpacity.band > NotchOpacity.secondary)
         #expect(NotchOpacity.band < NotchOpacity.primary)
         // The badge darkens the band without hiding it.

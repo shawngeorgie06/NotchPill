@@ -215,7 +215,11 @@ enum NotchOpacity {
     /// The model badge on a band: black at this opacity over the state colour,
     /// so it reads as a darker patch of the same hue rather than a new one.
     static let badge: Double = 0.30
+    /// Album artwork glowing behind the media card. Strong enough that the
+    /// card takes the cover's colour, weak enough that white text on it is
+    /// still white text on black.
+    static let glow: Double = 0.55
 
     static let all: [Double] = [primary, secondary, tertiary, hairline,
-                                wellFill, highlight, rim, band, badge]
+                                wellFill, highlight, rim, band, badge, glow]
 }

@@ -845,11 +845,11 @@ enum NotchContentLayout {
         case .claudeQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
         case .codexQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
         case .cursorQuota: return quotaCard
-        // Artwork row (a 15pt title over a 12pt artist, ~34) + 6, a 28pt
-        // transport row + 6, then progress: a 4pt bar, 4, and a 13pt time line.
-        // That is 95, and the card was budgeted at 78: on every song with a
-        // progress bar the page dots sat 17pt below the pill.
-        case .media: return 96
+        // Artwork row (a 44pt cover beside a title and artist) + 4, a 28pt
+        // transport row + 4, then progress: a 4pt bar, 4, and a 13pt time
+        // line. That is 101. It was budgeted at 78 with 32pt artwork: on every
+        // song with a progress bar the page dots sat well below the pill.
+        case .media: return 102
         // One strip of tiles; further sessions scroll sideways inside it
         // rather than turning the notch into a full-height panel.
         case .agents: return agentsShelf
