@@ -9455,3 +9455,42 @@ struct AgentRowMetadataTests {
         #expect(plan.badgeIsWarning == false)
     }
 }
+
+@Suite("AgentShelf")
+struct AgentShelfTests {
+    private func session(_ id: String, _ state: AgentSession.State) -> AgentSession {
+        AgentSession(id: id, agent: "claude-code", project: "p", state: state,
+                     lastActivity: Date())
+    }
+
+    @Test("an empty shelf has no caption and nowhere to jump")
+    func empty() {
+        let shelf = AgentShelf([])
+        #expect(shelf.caption == nil)
+        #expect(shelf.jumpTarget == nil)
+    }
+
+    @Test("the caption counts states in a fixed order")
+    func caption() {
+        // Needs-you first because it is the one you act on; completed last
+        // because it is history.
+        let shelf = AgentShelf([session("a", .completed(since: Date())),
+                                session("b", .idle(since: Date())),
+                                session("c", .working),
+                                session("d", .waiting(since: nil)),
+                                session("e", .working)])
+        #expect(shelf.caption == "1 needs you · 2 working · 1 idle · 1 completed")
+    }
+
+    @Test("the jump well prefers waiting, then working, then whatever is first")
+    func jumpTarget() {
+        // One well, so it has to pick. The session blocked on you is the only
+        // one that gets worse the longer you take.
+        let idle = session("i", .idle(since: Date()))
+        let working = session("w", .working)
+        let waiting = session("x", .waiting(since: nil))
+        #expect(AgentShelf([idle, working, waiting]).jumpTarget?.id == "x")
+        #expect(AgentShelf([idle, working]).jumpTarget?.id == "w")
+        #expect(AgentShelf([idle]).jumpTarget?.id == "i")
+    }
+}
