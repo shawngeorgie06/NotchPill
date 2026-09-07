@@ -9354,6 +9354,29 @@ struct NotchTokenScaleTests {
         // the text lines' shared left edge inside the dot.
         #expect(NotchSpace.gutter > 5)
     }
+
+    @Test("radius roles are distinct and the tile is rounder than its well")
+    func radii() {
+        #expect(Set(NotchRadius.all).count == NotchRadius.all.count)
+        #expect(NotchRadius.tile > NotchRadius.well)
+    }
+
+    @Test("chrome opacities sit between hairline and tertiary")
+    func chromeOpacities() {
+        // A well fill brighter than a separator would make every tile a box
+        // again; a rim brighter than tertiary text would outrank the copy.
+        #expect(NotchOpacity.wellFill < NotchOpacity.hairline)
+        #expect(NotchOpacity.hairline < NotchOpacity.highlight)
+        #expect(NotchOpacity.highlight < NotchOpacity.rim)
+        #expect(NotchOpacity.rim < NotchOpacity.tertiary)
+    }
+
+    @Test("a tile is wide enough for its well and padding")
+    func tileHoldsWell() {
+        #expect(NotchSpace.tile > NotchSpace.well + NotchSpace.base * 2)
+        #expect(NotchSpace.all.contains(NotchSpace.well))
+        #expect(NotchSpace.all.contains(NotchSpace.tile))
+    }
 }
 
 @Suite("AgentRowMetadata")

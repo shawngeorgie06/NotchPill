@@ -55,8 +55,33 @@ enum NotchSpace {
     /// the title shares one left edge instead of each inventing its own indent.
     static let gutter: CGFloat = 11
 
+    /// The square an icon sits in, and the diameter of a circular action. One
+    /// size for both so a tile's vendor mark and the shelf's jump control read
+    /// as the same kind of object.
+    static let well: CGFloat = 22
+
+    /// A session tile's width. A horizontal strip needs a fixed width; a
+    /// flexible one has nothing to measure against inside a `ScrollView`.
+    /// Room for a well, a short name, and `base` padding on each side.
+    static let tile: CGFloat = 72
+
     /// Every step, for tests that assert the scale has no duplicates.
-    static let all: [CGFloat] = [tight, snug, base, roomy, section, gutter]
+    static let all: [CGFloat] = [tight, snug, base, roomy, section, gutter, well, tile]
+}
+
+/// Corner radii for nested objects on the island, in unscaled points. Pass
+/// through `s()` like a spacing step.
+///
+/// The island itself keeps its own 22pt silhouette in `NotchRootView`; these
+/// are for the things sitting *on* it, which must be visibly rounder than a
+/// text line and visibly less round than the surface that holds them.
+enum NotchRadius {
+    /// A `NotchSpace.well` square — a vendor mark's backing.
+    static let well: CGFloat = 6
+    /// A session tile. Continuous, so it reads as an object, not a box.
+    static let tile: CGFloat = 14
+
+    static let all: [CGFloat] = [well, tile]
 }
 
 /// Type roles, in unscaled points. Pass through `textSize()`, which applies the
@@ -88,5 +113,16 @@ enum NotchOpacity {
     /// Separators and card strokes.
     static let hairline: Double = 0.08
 
-    static let all: [Double] = [primary, secondary, tertiary, hairline]
+    /// The fill of a well or tile: just enough lift off the black to read as
+    /// a surface, and dimmer than a separator so a row of tiles is not a row
+    /// of boxes.
+    static let wellFill: Double = 0.06
+    /// The sheen along the island's real top edge, where it has one.
+    static let highlight: Double = 0.14
+    /// The island's rim at its brightest — the bottom curve, where the light
+    /// from above lands. Brighter than a separator, dimmer than any text.
+    static let rim: Double = 0.18
+
+    static let all: [Double] = [primary, secondary, tertiary, hairline,
+                                wellFill, highlight, rim]
 }

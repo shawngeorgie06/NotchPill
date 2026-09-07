@@ -1,7 +1,8 @@
 # NotchPill expanded panel: composed shelf
 
 Date: 2026-09-06
-Status: design, approved in chat, not yet planned
+Status: design, approved in chat; planned in
+`docs/superpowers/plans/2026-09-06-notch-panel-composed-shelf.md`
 
 Amends `2026-09-06-notch-ui-motion-and-layout-design.md`. That spec treated
 motion (static → settle springs) and columnar crowding on the agents list. Both
@@ -62,21 +63,27 @@ cutout; glass next to it would fight the hardware.
 
 Depth is two overlays on that fill, clipped to the same shape:
 
-- **Rim.** Stroke at `NotchOpacity.rim` (0.18) instead of today's 0.07
-  (`NotchDesign.pillStroke`). Same 0.5pt line width.
+- **Rim.** A 0.5pt stroke in a vertical gradient: `NotchOpacity.hairline`
+  (0.08) at the top, `NotchOpacity.rim` (0.18) at the bottom curve. On
+  notched hardware the pill's top edge is the seam with the cutout, and a
+  uniformly brighter line there reads as a crack under the notch. The
+  light still comes from above; it just does not land on the seam.
+  `NotchDesign.pillStroke` (used by the HUDs) becomes `rim`.
 - **Inner highlight.** A top-down `LinearGradient` from
   `Color.white.opacity(NotchOpacity.highlight)` (0.14) to clear over
-  `NotchSpace.base`, masked to the pill shape. This is the Droppy top-edge
-  sheen.
+  `NotchSpace.base`, masked to the pill shape — drawn **only where the pill
+  has a real top edge**, i.e. the free-floating island on a display with
+  no notch. This is the Droppy top-edge sheen.
 
 `expandAnimation` in `NotchRootView` is untouched. `contentFadeAnimation`
 is untouched.
 
-`ExpandedView`'s padding (today raw 9 / 6 / 2) moves onto existing
-`NotchSpace.roomy` (12) horizontally and on top, so the inset is a token on
-the 4pt grid rather than a new 10 that would sit between `base` and `roomy`.
-Bottom stays `NotchSpace.tight` so the deck chrome does not float off the
-lower edge.
+`ExpandedView`'s padding (today raw 9 / 6 / 2) moves onto existing tokens:
+`NotchSpace.roomy` (12) horizontally, `NotchSpace.base` (8) on top,
+`NotchSpace.tight` (2) on the bottom. The deck height budget carries 10pt
+of slack for top + bottom, so `roomy` on top would push the page dots off
+the lower edge. No new 10 is added; it would sit between `base` and `roomy`
+and rot the 4pt grid.
 
 ### 2. Agents page as a shelf
 
@@ -89,19 +96,29 @@ Vertical scrolling of three-line rows goes away.
 
 **Tile.** Each session is one object:
 
-- Continuous rounded rect at `NotchRadius.tile`, fill
-  `Color.white.opacity(NotchOpacity.wellFill)` (0.06).
+- `NotchSpace.tile` (72) wide. Continuous rounded rect at
+  `NotchRadius.tile`, fill `Color.white.opacity(NotchOpacity.wellFill)`
+  (0.06), hairline stroke.
 - Waiting keeps the existing tinted fill (state colour at 0.12) and stroke
-  (state colour at 0.48). No other state gets a box.
+  (state colour at 0.48). No other state gets a coloured box.
 - Vendor symbol in a `NotchSpace.well` (22) rounded-square well at
   `NotchRadius.well`.
 - Display name at `NotchType.body`, semibold, one line.
 - Status as a `s(5)` coloured dot (today's gutter dot), not a text capsule.
+- `statusLabel` ("idle 18m") as a tertiary `caption` line under the name.
+  The dot carries the state; this carries the age the old capsule carried,
+  the way Droppy's tile carries "4 weeks ago".
 - The tile is the `focusAgentSession` tap target. `buttonStyle(.plain)`.
 
 Runtime, context, model, effort, and permission leave the tile. They do not
-fit a ~60pt object. `AgentRowMetadata` stays as a tested value type; the
+fit a ~72pt object. `AgentRowMetadata` stays as a tested value type; the
 view stops drawing it.
+
+The layout budget (`NotchContentLayout`) sizes the page as one fixed
+`agentsShelf` height (88) instead of N list rows: a strip scrolls sideways,
+so a tenth session must not make the notch taller than a first. The 144pt
+`expandedContentCeiling` used to be derived from two agent rows; it stays
+at 144 as a literal because clipboard and terminal cards still cap there.
 
 **Jump well.** One circular control, `NotchSpace.well` across, pinned to the
 trailing edge of the strip, vertically centred on the tiles. It focuses the
@@ -125,6 +142,7 @@ type 13/11/9, opacity 1.0/0.60/0.38/0.08) and land on each enum's `all`.
 enum NotchSpace {
     // existing: tight 2, snug 4, base 8, roomy 12, section 20, gutter 11
     static let well: CGFloat = 22   // icon well and jump control diameter
+    static let tile: CGFloat = 72   // session tile width
 }
 
 enum NotchRadius {
@@ -141,11 +159,11 @@ enum NotchOpacity {
 }
 ```
 
-Island inset uses `NotchSpace.roomy`, not a new step: 10 would sit between
-`base` and `roomy` and rot the 4pt grid. `well` (22) is a size, listed on
-`all` but not on the spacing-ascend check, same as `gutter`. The jump
-control is a `Circle` of diameter `s(NotchSpace.well)` and does not need
-its own radius token.
+Island inset uses existing steps, not a new 10 that would sit between
+`base` and `roomy` and rot the 4pt grid. `well` (22) and `tile` (72) are
+sizes, listed on `all` but not on the spacing-ascend check, same as
+`gutter`. The jump control is a `Circle` of diameter `s(NotchSpace.well)`
+and does not need its own radius token.
 
 Every dimension still goes through `s(_:)`. Every font size still goes
 through `textSize(_:)` or `font(size:)`. Tokens are values fed to those
