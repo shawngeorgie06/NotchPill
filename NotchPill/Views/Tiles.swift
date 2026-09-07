@@ -1107,15 +1107,36 @@ struct ExpandedActivityCard: View {
 
     /// The bar on its own, for cards that lay their own figure beside it.
     private func meterBar(percent: Int, tint: Color) -> some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(NotchOpacity.highlight))
-                Capsule()
-                    .fill(tint)
-                    .frame(width: max(s(NotchSpace.bar), geo.size.width * CGFloat(min(100, max(0, percent))) / 100))
+        MeterBar(percent: percent, tint: tint, thickness: s(NotchSpace.bar), reduceMotion: reduceMotion)
+    }
+
+    /// A meter's bar. It fills from empty when it first appears and moves,
+    /// rather than jumps, when the figure changes — a bar that is simply
+    /// already there is a picture of a level; one that fills is a reading.
+    private struct MeterBar: View {
+        let percent: Int
+        let tint: Color
+        let thickness: CGFloat
+        let reduceMotion: Bool
+        @State private var filled = false
+
+        var body: some View {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(NotchOpacity.highlight))
+                    Capsule()
+                        .fill(tint)
+                        .frame(width: filled
+                               ? max(thickness, geo.size.width * CGFloat(min(100, max(0, percent))) / 100)
+                               : thickness)
+                }
+            }
+            .frame(height: thickness)
+            .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: percent)
+            .onAppear {
+                withAnimation(NotchMotion.enter(reduceMotion: reduceMotion)) { filled = true }
             }
         }
-        .frame(height: s(NotchSpace.bar))
     }
 
     /// Which colour a header well or a bar takes for a pool this full. Green
@@ -1207,14 +1228,15 @@ struct ExpandedActivityCard: View {
             .frame(height: s(NotchSpace.well))
             // Sideways, not down. Two tiles fill the panel; the rest are one
             // swipe away instead of stacking the notch taller.
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: s(NotchSpace.snug)) {
-                    ForEach(sessions) { session in
-                        agentTile(session)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: s(NotchSpace.snug)) {
+                        ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
+                            agentTile(session)
+                                .notchReveal(index, scale: readability, reduceMotion: reduceMotion)
+                        }
                     }
                 }
-            }
-            .scrollBounceBehavior(.basedOnSize)
+                .scrollBounceBehavior(.basedOnSize)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1251,6 +1273,7 @@ struct ExpandedActivityCard: View {
             }
             meterTile(percent: quota.usedPercent, label: "current window",
                       footnote: quota.updatedLabel)
+                .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
             if let credits = quota.creditsLabel {
                 Text(credits)
                     .font(font(size: NotchType.caption, weight: .medium))
@@ -1348,8 +1371,10 @@ struct ExpandedActivityCard: View {
             HStack(spacing: s(NotchSpace.snug)) {
                 meterTile(percent: quota.sessionPercent, label: "session",
                           footnote: ClaudeQuota.resetClock(for: quota.sessionResetsAt))
+                    .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
                 meterTile(percent: quota.weeklyPercent, label: "week",
                           footnote: ClaudeQuota.resetClock(for: quota.weeklyResetsAt))
+                    .notchReveal(1, scale: readability, reduceMotion: reduceMotion)
                 // A third column for a per-model window (Opus, Fable, …) was
                 // built here and taken out again: the usage endpoint does not
                 // carry one. `seven_day_opus` and friends exist as keys but are
@@ -1401,10 +1426,13 @@ struct ExpandedActivityCard: View {
                 // the accurate answer rather than the less detailed one.
                 HStack(spacing: s(NotchSpace.snug)) {
                     meterTile(percent: auto, label: "auto")
+                        .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
                     meterTile(percent: api, label: "API")
+                        .notchReveal(1, scale: readability, reduceMotion: reduceMotion)
                 }
             } else {
                 meterTile(percent: quota.percentUsed, label: quota.usageLabel)
+                    .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
             }
 
             Text([quota.isUnlimited ? nil : quota.usageLabel,
@@ -1675,7 +1703,7 @@ struct ExpandedActivityCard: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
-                    ForEach(runs) { run in
+                    ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
                         Button { actions.openURL(run.id) } label: {
                             HStack(spacing: s(NotchSpace.base)) {
                                 glyphWell(symbol(for: run.state), tint: color(for: run.state))
@@ -1697,6 +1725,8 @@ struct ExpandedActivityCard: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .notchReveal(index, scale: readability, reduceMotion: reduceMotion)
+                        .notchBump(on: run.state, reduceMotion: reduceMotion)
                     }
                 }
             }
@@ -1739,8 +1769,9 @@ struct ExpandedActivityCard: View {
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
-                    ForEach(alerts) { alert in
+                    ForEach(Array(alerts.enumerated()), id: \.element.id) { index, alert in
                         alertRow(alert)
+                            .notchReveal(index, scale: readability, reduceMotion: reduceMotion)
                     }
                 }
             }
@@ -1845,6 +1876,9 @@ struct ExpandedActivityCard: View {
         .accessibilityLabel("\(session.displayName), \(session.statusLabel)")
         .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.statusLabel)
         .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.state)
+        // The kind of state, not the state: `.waiting(since:)` carries a
+        // timestamp, and a tile must not swell every time the age ticks.
+        .notchBump(on: session.state.name, reduceMotion: reduceMotion)
     }
 
     /// The tile's coloured header: the vendor mark in white on the state
@@ -2282,7 +2316,10 @@ struct ExpandedActivityCard: View {
             if !items.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: s(NotchSpace.snug)) {
-                        ForEach(items) { item in shelfChip(item) }
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                            shelfChip(item)
+                                .notchReveal(index, scale: readability, reduceMotion: reduceMotion)
+                        }
                     }
                     // The folder badge is a 13pt circle centred 3pt past the
                     // chip's corner, so it reaches ~10pt beyond it; without

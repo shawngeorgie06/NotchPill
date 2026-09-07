@@ -9409,6 +9409,18 @@ struct NotchTokenScaleTests {
         #expect(NotchType.body > NotchType.caption)
     }
 
+    /// Arrival motion has to stay under the threshold where it reads as
+    /// choreography: three staggered tiles inside a fifth of a second, a rise
+    /// no bigger than a snug gap, a swell you notice but that does not move
+    /// the neighbouring tile.
+    @Test("arrival motion is felt, not watched")
+    func motionStaysSmall() {
+        #expect(NotchMotion.stagger * 3 < 0.2)
+        #expect(NotchMotion.rise <= NotchSpace.snug)
+        #expect(NotchMotion.bump > 1)
+        #expect((NotchMotion.bump - 1) * NotchSpace.tile < NotchSpace.snug)
+    }
+
     /// The header mark is a glyph's backing, not a tap target: it must sit
     /// inside a title line, and the bar must be visible on a tile.
     @Test("the header mark fits a title line and the bar is no hairline")

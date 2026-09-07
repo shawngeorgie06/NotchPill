@@ -30,10 +30,78 @@ enum NotchMotion {
         reduceMotion ? floor : .easeIn(duration: 0.16)
     }
 
+    /// The gap between one object arriving and the next on the same card.
+    /// Long enough that three tiles read as three arrivals; short enough that
+    /// the last is settled before you have finished reading the first.
+    static let stagger: TimeInterval = 0.045
+
+    /// How far an arriving object rises into place, in unscaled points.
+    static let rise: CGFloat = 4
+
+    /// How much a tile swells when its state changes. Enough to catch the eye
+    /// in the periphery; not enough to move its neighbours.
+    static let bump: CGFloat = 1.04
+
     /// The exact value the rest of the overlay already uses for Reduce Motion.
     /// Not zero: a true zero-duration animation still lets SwiftUI batch the
     /// change, and matching the existing constant keeps every surface in step.
     private static let floor = Animation.linear(duration: 0.01)
+}
+
+/// An object arriving on a card: it fades in and rises `NotchMotion.rise`
+/// points, `index` staggers behind its siblings. Reduce Motion keeps the fade
+/// and drops the rise.
+///
+/// Applied to the objects — tiles, meters, rows, chips — and not to the
+/// header, which is where the eye lands first and should already be there.
+struct NotchReveal: ViewModifier {
+    let index: Int
+    let scale: CGFloat
+    let reduceMotion: Bool
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown || reduceMotion ? 0 : NotchMotion.rise * scale)
+            .onAppear {
+                withAnimation(NotchMotion.enter(reduceMotion: reduceMotion)
+                    .delay(reduceMotion ? 0 : NotchMotion.stagger * Double(index))) {
+                    shown = true
+                }
+            }
+    }
+}
+
+/// A tile whose state just changed swells by `NotchMotion.bump` and settles,
+/// so a session going from working to waiting is seen without being read.
+/// Nothing under Reduce Motion: the band colour still changes.
+struct NotchBump<Trigger: Equatable>: ViewModifier {
+    let trigger: Trigger
+    let reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content.keyframeAnimator(initialValue: CGFloat(1), trigger: trigger) { view, scale in
+                view.scaleEffect(scale)
+            } keyframes: { _ in
+                SpringKeyframe(NotchMotion.bump, duration: 0.14, spring: .snappy)
+                SpringKeyframe(1, duration: 0.30, spring: .smooth)
+            }
+        }
+    }
+}
+
+extension View {
+    func notchReveal(_ index: Int, scale: CGFloat, reduceMotion: Bool) -> some View {
+        modifier(NotchReveal(index: index, scale: scale, reduceMotion: reduceMotion))
+    }
+
+    func notchBump<T: Equatable>(on trigger: T, reduceMotion: Bool) -> some View {
+        modifier(NotchBump(trigger: trigger, reduceMotion: reduceMotion))
+    }
 }
 
 /// Spacing steps for the notch overlay, in unscaled points.
