@@ -2293,6 +2293,35 @@ struct TranscriptTurnTests {
             #"{"timestamp":"t","type":"response_item","payload":{"type":"user_message"}}"#))
     }
 
+    /// The exact tail of a real Codex transcript: after the assistant record
+    /// come a token usage record, a token count event and a `task_complete`
+    /// event. None of those were "assistant", so the turn end was masked and
+    /// Codex never peeked "finished" through the no-hook path.
+    @Test("REGRESSION: Codex's trailing lifecycle records don't mask the turn")
+    func codexTaskCompleteTail() {
+        #expect(AgentTranscriptProvider.turnEnded(inTail: tail([
+            #"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[]}}"#,
+            #"{"type":"token_usage_record","payload":{"turn_id":"t","usage":{}}}"#,
+            #"{"type":"event_msg","payload":{"type":"token_count","info":{}}}"#,
+            #"{"type":"event_msg","payload":{"type":"task_complete","turn_id":"t","last_agent_message":"Done."}}"#
+        ])))
+    }
+
+    @Test("a Codex turn that has started but not completed is not finished")
+    func codexTaskStarted() {
+        #expect(!AgentTranscriptProvider.turnEnded(inTail: tail([
+            #"{"type":"response_item","payload":{"type":"message","role":"assistant"}}"#,
+            #"{"type":"event_msg","payload":{"type":"task_started","turn_id":"t2"}}"#,
+            #"{"type":"event_msg","payload":{"type":"item_completed"}}"#
+        ])))
+        // The user's message is what starts a turn; an event after it doesn't
+        // turn it into a finished one.
+        #expect(!AgentTranscriptProvider.turnEnded(inTail: tail([
+            #"{"type":"response_item","payload":{"type":"message","role":"user"}}"#,
+            #"{"type":"event_msg","payload":{"type":"item_completed"}}"#
+        ])))
+    }
+
     @Test("an unrecognised record is not evidence of a finished turn")
     func unknownRecord() {
         // Better a missed peek than one fired at nothing.

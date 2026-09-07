@@ -169,11 +169,26 @@ final class AgentTranscriptProvider {
     /// against real transcript shapes. Both bugs shipped in 1.8.x lived here.
     nonisolated static func turnEnded(inTail text: String) -> Bool {
         let ignored: Set<String> = ["attachment", "file-history-snapshot", "summary",
-                                    "system", "token_count", "event", "turn_context"]
+                                    "system", "token_count", "event", "turn_context",
+                                    "token_usage_record"]
         for line in text.split(separator: "\n").reversed() {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
             else { continue }
             let payload = obj["payload"] as? [String: Any]
+            // Codex's lifecycle events say outright where the turn is. A
+            // `task_complete` is the strongest evidence there is — it even
+            // carries `last_agent_message` — and it trails the assistant
+            // record, so without this it was read as "unrecognised" and every
+            // Codex turn since the format grew it went unannounced. Every
+            // other event (`item_completed`, `thread_settings_applied`, …) is
+            // bookkeeping and is skipped like the rest.
+            if obj["type"] as? String == "event_msg" {
+                switch (payload?["type"] as? String)?.lowercased() {
+                case "task_complete": return true
+                case "task_started": return false
+                default: continue
+                }
+            }
             let kind = ((payload?["type"] ?? obj["type"]) as? String)?.lowercased() ?? ""
             if kind.isEmpty || ignored.contains(kind) { continue }
             let role = ((payload?["role"] ?? (obj["message"] as? [String: Any])?["role"]) as? String)?
