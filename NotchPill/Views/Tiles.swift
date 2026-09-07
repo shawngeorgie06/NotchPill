@@ -856,14 +856,17 @@ enum ExpandedActivityBuilder {
         var items: [ExpandedActivity] = []
         // Live agents lead: they are the only card that answers "what is
         // running right now", and they are the reason to look at all.
-        if showAgents, !agentSessions.isEmpty { items.append(.agents(agentSessions)) }
+        // This page is sessions only — media, quota and CI keep their own
+        // swipe pages rather than sharing the agents strip.
+        if showAgents, !agentSessions.isEmpty {
+            items.append(.agents(AgentHomeTray(agentSessions)))
+        }
         if showAgents, let openCodeUsage { items.append(.openCodeUsage(openCodeUsage)) }
         if showAgents, let codexQuota { items.append(.codexQuota(codexQuota)) }
         // Gated on its own setting, not `showAgents`: this one costs a
         // Keychain prompt, so it appears only when explicitly asked for.
         if let claudeQuota { items.append(.claudeQuota(claudeQuota)) }
         if let cursorQuota { items.append(.cursorQuota(cursorQuota)) }
-        // Right after the agents: both answer "is the thing I started done yet?"
         if showCI, !ciRuns.isEmpty { items.append(.ci(ciRuns)) }
         if showRecentAlerts, !recentAlerts.isEmpty { items.append(.recentAlerts(recentAlerts)) }
         if showMedia, let np = nowPlaying, !np.isEmpty { items.append(.media(np)) }
@@ -1005,70 +1008,13 @@ struct ExpandedActivityCard: View {
     }
     private func textSize(_ base: CGFloat) -> CGFloat { base * textScale }
 
-    /// The width every card's header icon is laid out in.
-    ///
-    /// SF Symbols differ enormously in intrinsic width —
-    /// `chevron.left.forwardslash.chevron.right` on the Codex card is roughly
-    /// three times `asterisk` on Claude's — so a header sized to its own icon
-    /// started its title at a different x on every page. Paging left and right
-    /// slid the heading back and forth underneath a pill that was otherwise
-    /// holding perfectly still. A fixed slot costs a few points and buys a
-    /// column.
-    private var headerIconWidth: CGFloat { s(NotchSpace.mark) }
-
-    /// And the height, so the first line of body copy also shares a baseline
-    /// from card to card. It is the glyph well's height: the well is the
-    /// tallest thing on the line, and every card's first body line hangs the
-    /// same distance below it.
-    private var headerHeight: CGFloat { s(NotchSpace.mark) }
-
     /// The grey of a header that has no state to report. The same grey an
     /// idle session's band wears, so "no colour" means the same thing on
     /// every card.
     private var neutralTint: Color { .white.opacity(NotchOpacity.tertiary) }
 
-    /// Every card's first line. `trailing` is whatever that particular card
-    /// puts on the right — a count, a hint — and stays out of the aligned
-    /// leading run.
-    private func cardHeader<Icon: View, Trailing: View>(
-        @ViewBuilder icon: () -> Icon,
-        title: String,
-        titleFont: Font? = nil,
-        tracking: CGFloat = 0,
-        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
-    ) -> some View {
-        HStack(spacing: s(NotchSpace.snug)) {
-            icon().frame(width: headerIconWidth)
-            Text(title)
-                .font(titleFont ?? font(size: NotchType.body, weight: .semibold))
-                .tracking(tracking)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-            trailing()
-        }
-        .foregroundStyle(.white.opacity(NotchOpacity.secondary))
-        .frame(height: headerHeight)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// The common case: a glyph in a tinted well, and a title.
-    ///
-    /// The well is where a card's state colour lives — the same rule the
-    /// session tiles follow. A quota card is tinted by how close its fullest
-    /// pool is to biting; a CI card by its worst run; a card with nothing to
-    /// report gets the neutral grey. Before this the header was a 9pt glyph
-    /// at 45% white, and fourteen cards opened with the same dim smudge.
-    private func cardHeader<Trailing: View>(
-        symbol: String, title: String, tint: Color? = nil,
-        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
-    ) -> some View {
-        cardHeader(icon: { glyphWell(symbol, tint: tint ?? neutralTint) },
-                   title: title, trailing: trailing)
-    }
-
-    /// A white glyph on a small tinted square: the mark every card opens with,
-    /// and the leading object on a list row. The tint is nearly opaque so it
-    /// reads as a colour, not a wash.
+    /// A white glyph on a small tinted square: the leading object on a list
+    /// row. The tint is nearly opaque so it reads as a colour, not a wash.
     private func glyphWell(_ symbol: String, tint: Color) -> some View {
         Image(systemName: symbol)
             .font(font(size: NotchType.caption, weight: .bold))
@@ -1086,24 +1032,31 @@ struct ExpandedActivityCard: View {
     /// Claude, Cursor and Codex each drew this differently — two had bars,
     /// one had a sentence — and read as three unrelated cards. One meter,
     /// three cards.
+    /// A pool and how full it is, as an object: the figure, a bar in the
+    /// pool's colour, and the pool's name, on the same painted tile language
+    /// the agent sessions use — tile radius, base pad, clipped wash.
     private func meterTile(percent: Int, label: String, footnote: String? = nil) -> some View {
-        let shape = RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous)
+        let radius = s(NotchRadius.tile)
         return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
             Text("\(percent)%")
-                .font(font(size: NotchType.display, weight: .semibold).monospacedDigit())
+                .font(font(size: NotchType.hero, weight: .semibold).monospacedDigit())
                 .foregroundStyle(.white.opacity(NotchOpacity.primary))
                 .contentTransition(.numericText())
-            meterBar(percent: percent, tint: quotaColor(percent))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            meterBar(percent: percent, tint: .white.opacity(NotchOpacity.primary))
             Text(footnote.map { "\(label) · \($0)" } ?? label)
                 .font(font(size: NotchType.caption, weight: .medium))
                 .foregroundStyle(.white.opacity(NotchOpacity.secondary))
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .truncationMode(.tail)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, s(NotchSpace.base))
-        .padding(.vertical, s(NotchSpace.snug))
-        .background(shape.fill(.white.opacity(NotchOpacity.wellFill)))
-        .overlay(shape.stroke(.white.opacity(NotchOpacity.hairline), lineWidth: 0.5))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(s(NotchSpace.base))
+        .background(NotchPaintedFill(tint: quotaColor(percent), lit: true,
+                                     cornerRadius: radius))
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
 
     /// The bar on its own, for cards that lay their own figure beside it.
@@ -1133,9 +1086,9 @@ struct ExpandedActivityCard: View {
                 }
             }
             .frame(height: thickness)
-            .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: percent)
+            .animation(NotchMotion.paint(reduceMotion: reduceMotion), value: percent)
             .onAppear {
-                withAnimation(NotchMotion.enter(reduceMotion: reduceMotion)) { filled = true }
+                withAnimation(NotchMotion.paint(reduceMotion: reduceMotion)) { filled = true }
             }
         }
     }
@@ -1174,8 +1127,8 @@ struct ExpandedActivityCard: View {
                 batteryCard(status)
             case .shelf(let items, let receipt, let error, let targeted):
                 shelfCard(items: items, receipt: receipt, error: error, isDropTargeted: targeted)
-            case .agents(let sessions):
-                agentsCard(sessions)
+            case .agents(let tray):
+                agentsCard(tray)
             case .openCodeUsage(let usage):
                 openCodeUsageCard(usage)
             case .codexQuota(let quota):
@@ -1197,66 +1150,57 @@ struct ExpandedActivityCard: View {
         .frame(
             minWidth: expandToFill ? nil : s(76),
             maxWidth: expandToFill ? .infinity : nil,
-            alignment: .leading
+            maxHeight: expandToFill ? .infinity : nil,
+            alignment: .topLeading
         )
         .layoutPriority(expandToFill ? 1 : 0)
+        .clipped()
     }
 
-    /// The agents page is a shelf, not a list: one row of session tiles that
-    /// scrolls sideways, and one well to jump to the session that wants you.
-    ///
-    /// The list it replaces was legible — one left edge, one metadata line —
-    /// and still read as a sheet of type, because nothing on it was an object.
-    /// Tiles are objects. The card joins live transcript state with recent
-    /// terminal events, so a finished or blocked conversation does not
-    /// masquerade as a running process or vanish the instant it goes quiet.
-    private func agentsCard(_ sessions: [AgentSession]) -> some View {
-        let shelf = AgentShelf(sessions)
-        return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            // Caption and the one action share the header row, so the strip
-            // below is tiles edge to edge. There is no tracked "AGENT SESSIONS"
-            // here: the deck chrome already names the page.
-            HStack(spacing: s(NotchSpace.base)) {
-                Text(shelf.caption ?? "")
-                    .font(font(size: NotchType.caption, weight: .semibold))
-                    .foregroundStyle(.white.opacity(NotchOpacity.secondary))
-                    .lineLimit(1)
-                Spacer(minLength: s(NotchSpace.snug))
-                if let target = shelf.jumpTarget {
-                    agentJumpWell(target)
-                }
-            }
-            .frame(height: s(NotchSpace.well))
-            // Sideways, not down. Two tiles fill the panel; the rest are one
-            // swipe away instead of stacking the notch taller.
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: s(NotchSpace.snug)) {
-                        ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
-                            agentTile(session)
-                                .notchReveal(index, scale: readability, reduceMotion: reduceMotion)
-                        }
+    /// Sessions only. Media, quota and CI live on their own swipe pages.
+    private func agentsCard(_ tray: AgentHomeTray) -> some View {
+        GeometryReader { geo in
+            let gap = s(NotchSpace.base)
+            let sessionCount = max(1, tray.sessions.count)
+            let columns = min(sessionCount, geo.size.width >= s(NotchSpace.tile) ? 2 : 1)
+            let agentW = max(s(NotchSpace.hero + NotchSpace.section),
+                             (geo.size.width - gap * CGFloat(max(0, columns - 1)))
+                                / CGFloat(columns))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: gap) {
+                    ForEach(Array(tray.sessions.enumerated()), id: \.element.id) { index, session in
+                        agentTile(session, width: agentW, height: geo.size.height)
+                            .notchReveal(index, scale: readability, reduceMotion: reduceMotion)
                     }
                 }
-                .scrollBounceBehavior(.basedOnSize)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .clipped()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .clipped()
     }
 
     /// A local total, intentionally not an account quota or reset estimate.
     private func openCodeUsageCard(_ usage: OpenCodeUsage) -> some View {
-        VStack(alignment: .leading, spacing: s(3)) {
-            cardHeader(symbol: "curlybraces", title: "OpenCode · today")
-
+        let radius = s(NotchRadius.tile)
+        return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
             Text(usage.tokenLabel)
-                .font(font(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
+                .font(font(size: NotchType.hero, weight: .semibold))
+                .foregroundStyle(.white.opacity(NotchOpacity.primary))
                 .lineLimit(1)
-            Text(usage.costLabel + " local session cost")
-                .font(font(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(0.45))
+                .minimumScaleFactor(0.7)
+            Text(usage.costLabel + " local · today")
+                .font(font(size: NotchType.caption, weight: .medium))
+                .foregroundStyle(.white.opacity(NotchOpacity.secondary))
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(s(NotchSpace.base))
+        .background(NotchPaintedFill(tint: .white.opacity(0.16), lit: false, cornerRadius: radius))
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
     }
 
     /// Codex meters one window. It used to be the one quota card with no bar —
@@ -1264,15 +1208,7 @@ struct ExpandedActivityCard: View {
     /// thing as the Claude card beside it.
     private func codexQuotaCard(_ quota: CodexQuota) -> some View {
         VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            cardHeader(symbol: "chevron.left.forwardslash.chevron.right", title: "Codex",
-                       tint: quotaColor(quota.usedPercent)) {
-                Spacer(minLength: s(NotchSpace.snug))
-                Text(quota.resetLabel)
-                    .font(font(size: NotchType.caption, weight: .medium))
-                    .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
-                    .lineLimit(1)
-            }
-            meterTile(percent: quota.usedPercent, label: "current window",
+            meterTile(percent: quota.usedPercent, label: quota.resetLabel,
                       footnote: quota.updatedLabel)
                 .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
             if let credits = quota.creditsLabel {
@@ -1283,7 +1219,8 @@ struct ExpandedActivityCard: View {
             }
             tokenLines(TokenUsageSummary.codex, tokenUsage, period: tokenPeriod)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
     }
 
 
@@ -1300,14 +1237,14 @@ struct ExpandedActivityCard: View {
     private func tokenLines(_ tool: String, _ usage: TokenUsageSummary?,
                             period: TokenUsagePeriod) -> some View {
         if let usage, usage.total(for: tool) > 0 || usage.cached(for: tool) > 0 {
-            VStack(alignment: .leading, spacing: s(1)) {
-                HStack(spacing: s(4)) {
+            VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
+                HStack(spacing: s(NotchSpace.snug)) {
                     Text(Self.compactTokens(usage.total(for: tool)))
-                        .font(font(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .font(font(size: NotchType.body, weight: .semibold))
+                        .foregroundStyle(.white.opacity(NotchOpacity.primary))
                     Text("tokens · \(period.shortLabel)")
-                        .font(font(size: 9))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .font(font(size: NotchType.caption))
+                        .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
                         .lineLimit(1)
                 }
                 // Cached context is most of the traffic on a long session and
@@ -1315,24 +1252,24 @@ struct ExpandedActivityCard: View {
                 // inside it, it would be the only number you ever saw.
                 if usage.cached(for: tool) > 0 {
                     Text("+\(Self.compactTokens(usage.cached(for: tool))) cached")
-                        .font(font(size: 9))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .font(font(size: NotchType.caption))
+                        .foregroundStyle(.white.opacity(NotchOpacity.hairline))
                         .lineLimit(1)
                 }
                 ForEach(usage.models(for: tool).prefix(usage.modelRows(for: tool)), id: \.model) { entry in
-                    HStack(spacing: s(4)) {
+                    HStack(spacing: s(NotchSpace.snug)) {
                         Text(Self.shortModel(entry.model))
-                            .font(font(size: 9))
-                            .foregroundStyle(.white.opacity(0.45))
+                            .font(font(size: NotchType.caption))
+                            .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
                             .lineLimit(1)
                         Spacer(minLength: 0)
                         Text(Self.compactTokens(entry.tokens))
-                            .font(font(size: 9))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .font(font(size: NotchType.caption))
+                            .foregroundStyle(.white.opacity(NotchOpacity.secondary))
                     }
                 }
             }
-            .padding(.top, s(1))
+            .padding(.top, s(NotchSpace.tight))
         }
     }
 
@@ -1360,15 +1297,6 @@ struct ExpandedActivityCard: View {
 
     private func claudeQuotaCard(_ quota: ClaudeQuota) -> some View {
         VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            // The header wears the fuller pool's colour: that is the one that
-            // stops you, whichever it is.
-            cardHeader(symbol: "asterisk", title: "Claude",
-                       tint: quotaColor(max(quota.sessionPercent, quota.weeklyPercent)))
-
-            // Each window carries its own reset. Naming only the nearer one
-            // hid the session reset whenever the weekly figure happened to be
-            // a few points higher — and the session window is the one that
-            // stops you this afternoon.
             HStack(spacing: s(NotchSpace.snug)) {
                 meterTile(percent: quota.sessionPercent, label: "session",
                           footnote: ClaudeQuota.resetClock(for: quota.sessionResetsAt))
@@ -1376,18 +1304,7 @@ struct ExpandedActivityCard: View {
                 meterTile(percent: quota.weeklyPercent, label: "week",
                           footnote: ClaudeQuota.resetClock(for: quota.weeklyResetsAt))
                     .notchReveal(1, scale: readability, reduceMotion: reduceMotion)
-                // A third column for a per-model window (Opus, Fable, …) was
-                // built here and taken out again: the usage endpoint does not
-                // carry one. `seven_day_opus` and friends exist as keys but are
-                // flags rather than objects, and the only three entries with a
-                // utilization figure are `five_hour`, `seven_day` and
-                // `extra_usage`. `ClaudeQuota.modelWindows` still parses any
-                // real per-model window and the fetcher logs what it finds, so
-                // this becomes a two-line change if that ever lands — but a
-                // control that can never show anything is worse than no
-                // control.
             }
-
             if let extra = quota.extraSpendLabel {
                 Text("extra " + extra)
                     .font(font(size: NotchType.caption, weight: .medium))
@@ -1396,7 +1313,8 @@ struct ExpandedActivityCard: View {
             }
             tokenLines(TokenUsageSummary.claude, tokenUsage, period: tokenPeriod)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
     }
 
     /// Cursor's included usage for the billing cycle.
@@ -1406,25 +1324,27 @@ struct ExpandedActivityCard: View {
     /// percentage alone cannot distinguish "100% of 500" from "100% of 9201".
     private func cursorQuotaCard(_ quota: CursorQuota) -> some View {
         VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            cardHeader(symbol: "cursorarrow", title: "Cursor",
-                       tint: quota.isUnlimited ? neutralTint : quotaColor(
-                        max(quota.percentUsed, quota.autoPercentUsed ?? 0, quota.apiPercentUsed ?? 0)))
-
             if quota.isUnlimited {
-                Text("unlimited")
-                    .font(font(size: NotchType.display, weight: .semibold))
-                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                let radius = s(NotchRadius.tile)
+                VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+                    Text("unlimited")
+                        .font(font(size: NotchType.hero, weight: .semibold))
+                        .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(quota.membershipLabel ?? "Cursor")
+                        .font(font(size: NotchType.caption, weight: .medium))
+                        .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(s(NotchSpace.base))
+                .background(NotchPaintedFill(tint: NotchDesign.devReadyGreen.opacity(0.8),
+                                             lit: true, cornerRadius: radius))
+                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
             } else if let auto = quota.autoPercentUsed, let api = quota.apiPercentUsed,
                       auto > 0 || api > 0 {
-                // Two pools, shown apart. They diverge, and a single averaged
-                // number would hide whichever one is closer to biting.
-                //
-                // Only while the split says something, though. Cursor reports
-                // these as whole numbers, so early in a cycle both read 0 while
-                // the pool itself is genuinely used — the card showed "0% / 0%"
-                // above "38 of 2000", which is two empty bars contradicting the
-                // line under them. When neither pool has moved, the total is
-                // the accurate answer rather than the less detailed one.
                 HStack(spacing: s(NotchSpace.snug)) {
                     meterTile(percent: auto, label: "auto")
                         .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
@@ -1445,8 +1365,11 @@ struct ExpandedActivityCard: View {
                 .font(font(size: NotchType.caption, weight: .medium))
                 .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .truncationMode(.tail)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
     }
 
     /// GitHub Actions for the repos you have agents working in.
@@ -1457,10 +1380,8 @@ struct ExpandedActivityCard: View {
     /// swallow every keystroke on the machine the moment it opened.
     private func terminalCard(_ snapshot: TerminalSnapshot) -> some View {
         VStack(alignment: .leading, spacing: s(3)) {
-            cardHeader(symbol: "apple.terminal.fill",
-                       title: snapshot.isFocused ? "Terminal — typing" : "Terminal",
-                       tint: snapshot.isFocused ? NotchDesign.accent : nil, trailing: {
-                Spacer(minLength: s(6))
+            HStack {
+                Spacer(minLength: 0)
                 if snapshot.exitStatus != nil {
                     Button { TerminalStore.shared.restart() } label: {
                         Image(systemName: "arrow.clockwise")
@@ -1470,7 +1391,8 @@ struct ExpandedActivityCard: View {
                     .buttonStyle(.plain)
                     .help("Start a new shell")
                 }
-            })
+            }
+            .frame(height: snapshot.exitStatus == nil ? 0 : s(NotchSpace.mark))
 
             ZStack(alignment: .topLeading) {
                 TerminalGridView(isFocused: snapshot.isFocused,
@@ -1524,9 +1446,8 @@ struct ExpandedActivityCard: View {
 
     private func clipboardCard(_ items: [ClipboardEntry], searching: Bool) -> some View {
         VStack(alignment: .leading, spacing: s(3)) {
-            cardHeader(symbol: "doc.on.clipboard.fill", title: "Clipboard",
-                       tint: searching ? NotchDesign.accent : nil, trailing: {
-                Spacer(minLength: s(6))
+            HStack(spacing: s(6)) {
+                Spacer(minLength: 0)
                 Button {
                     if searching {
                         ClipboardStore.shared.endSearch()
@@ -1553,30 +1474,21 @@ struct ExpandedActivityCard: View {
                 .help(searching ? "Close search" : "Search remembered copies")
 
                 if !items.isEmpty {
-                    // Pushed to the far edge so it is never next to the first
-                    // entry -- this button throws away everything, and a
-                    // destructive control should not sit under a wandering
-                    // pointer on its way to the list.
                     Button { ClipboardStore.shared.clear() } label: {
-                        HStack(spacing: s(3)) {
-                            Image(systemName: "trash")
-                                .font(.system(size: s(8)))
-                            Text("Clear")
-                                .font(font(size: 9, weight: .medium))
-                        }
-                        .foregroundStyle(.white.opacity(hoveredClipboardClear ? 0.95 : 0.5))
-                        .padding(.horizontal, s(5))
-                        .padding(.vertical, s(2))
-                        .background(
-                            Capsule().fill(Color.white.opacity(hoveredClipboardClear ? 0.16 : 0.07))
-                        )
-                        .contentShape(Capsule())
+                        Image(systemName: "trash")
+                            .font(.system(size: s(8)))
+                            .foregroundStyle(.white.opacity(hoveredClipboardClear ? 0.95 : 0.5))
+                            .padding(s(3))
+                            .background(
+                                Circle().fill(Color.white.opacity(hoveredClipboardClear ? 0.16 : 0.07))
+                            )
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .onHover { hoveredClipboardClear = $0 }
                     .help("Forget every unpinned copy")
                 }
-            })
+            }
 
             if searching {
                 clipboardSearchField
@@ -1721,44 +1633,77 @@ struct ExpandedActivityCard: View {
     /// "repo · workflow", repo first, because the card follows whichever repos
     /// your agents are in and "Release — passed" on its own says nothing about
     /// *whose* release.
+    /// GitHub Actions as objects: each run is a full painted tile — same
+    /// vocabulary as an agent session — with a nested mark, the repo as the
+    /// name, and status as a capsule. Colour is the state.
     private func ciCard(_ runs: [CIRun]) -> some View {
-        VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            cardHeader(symbol: "checkmark.seal.fill", title: "CI",
-                       tint: runs.map { color(for: $0.state) }.first ?? neutralTint)
-
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
+        GeometryReader { geo in
+            let gap = s(NotchSpace.base)
+            let count = max(1, runs.count)
+            let columns = min(count, geo.size.width >= s(NotchSpace.tile) ? 2 : 1)
+            let tileW = max(s(NotchSpace.hero + NotchSpace.section),
+                            (geo.size.width - gap * CGFloat(max(0, columns - 1)))
+                                / CGFloat(columns))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: gap) {
                     ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
-                        Button { actions.openURL(run.id) } label: {
-                            HStack(spacing: s(NotchSpace.base)) {
-                                glyphWell(symbol(for: run.state), tint: color(for: run.state))
-                                (Text(run.repoName)
-                                    .font(font(size: NotchType.body, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
-                                 + Text("  \(run.workflow)")
-                                    .font(font(size: NotchType.caption, weight: .medium))
-                                    .foregroundStyle(.white.opacity(NotchOpacity.secondary)))
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                Spacer(minLength: s(NotchSpace.snug))
-                                Text(run.statusLabel)
-                                    .font(font(size: NotchType.caption, weight: .semibold))
-                                    .foregroundStyle(color(for: run.state))
-                                    .fixedSize(horizontal: true, vertical: false)
-                            }
-                            .frame(height: s(NotchSpace.section))
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(NotchObjectButtonStyle(cornerRadius: s(NotchRadius.well),
-                                                            reduceMotion: reduceMotion))
-                        .notchReveal(index, scale: readability, reduceMotion: reduceMotion)
-                        .notchBump(on: run.state, reduceMotion: reduceMotion)
+                        ciTile(run, width: tileW, height: geo.size.height)
+                            .notchReveal(index, scale: readability, reduceMotion: reduceMotion)
+                            .notchBump(on: run.state, reduceMotion: reduceMotion)
                     }
                 }
             }
             .scrollBounceBehavior(.basedOnSize)
+            .clipped()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .clipped()
+    }
+
+    private func ciTile(_ run: CIRun, width: CGFloat, height: CGFloat) -> some View {
+        let radius = s(NotchRadius.tile)
+        let icon = s(NotchSpace.hero / 2)
+        return Button { actions.openURL(run.id) } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                Image(systemName: symbol(for: run.state))
+                    .font(font(size: NotchType.display, weight: .bold))
+                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                    .frame(width: icon, height: icon)
+                    .background(
+                        RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous)
+                            .fill(.black.opacity(NotchOpacity.badge))
+                    )
+                Spacer(minLength: s(NotchSpace.snug))
+                Text(run.repoName)
+                    .font(font(size: NotchType.display, weight: .semibold))
+                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                    .truncationMode(.tail)
+                Text(run.workflow)
+                    .font(font(size: NotchType.caption, weight: .medium))
+                    .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.top, s(NotchSpace.tight))
+                Text(run.statusLabel)
+                    .font(font(size: NotchType.caption, weight: .semibold))
+                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                    .padding(.horizontal, s(NotchSpace.snug))
+                    .padding(.vertical, s(NotchSpace.tight))
+                    .background(Capsule().fill(.black.opacity(NotchOpacity.badge)))
+                    .padding(.top, s(NotchSpace.snug))
+                    .lineLimit(1)
+            }
+            .padding(s(NotchSpace.base))
+            .frame(width: width, height: height, alignment: .topLeading)
+            .background(NotchPaintedFill(tint: color(for: run.state), lit: true,
+                                         cornerRadius: radius))
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        }
+        .buttonStyle(NotchObjectButtonStyle(cornerRadius: radius, reduceMotion: reduceMotion))
+        .accessibilityLabel("\(run.repoName), \(run.workflow), \(run.statusLabel)")
     }
 
     /// The mark inside a run's well: what happened, not just which colour.
@@ -1778,21 +1723,14 @@ struct ExpandedActivityCard: View {
     /// alert it was until you read it.
     private func recentAlertsCard(_ alerts: [DevReadyAlert]) -> some View {
         VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            cardHeader(symbol: "bell.fill", title: "Notifications",
-                       tint: alerts.contains { $0.kind == .waiting } ? .orange : neutralTint) {
-                if alerts.count > 3 {
-                    Text("\(alerts.count)")
-                        .font(font(size: NotchType.caption, weight: .semibold).monospacedDigit())
-                        .padding(.horizontal, s(NotchSpace.snug))
-                        .padding(.vertical, s(NotchSpace.tight))
-                        .background(.white.opacity(NotchOpacity.highlight), in: Capsule())
-                }
+            HStack {
                 Spacer(minLength: 0)
                 Button("Clear") { actions.clearRecentActivity() }
                     .font(font(size: NotchType.caption, weight: .medium))
                     .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
                     .buttonStyle(.plain)
             }
+            .frame(height: s(NotchSpace.mark))
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
                     ForEach(Array(alerts.enumerated()), id: \.element.id) { index, alert in
@@ -1840,108 +1778,102 @@ struct ExpandedActivityCard: View {
     private func color(for state: CIRun.State) -> Color {
         switch state {
         case .failed: return .red
-        case .running: return .yellow
-        case .passed: return .green
+        case .running: return NotchDesign.devReadyAmber
+        case .passed: return NotchDesign.devReadyGreen
         case .other: return .white.opacity(0.4)
         }
     }
 
-    /// One session as an object: a coloured header band carrying the vendor
-    /// mark, over a dark body with the name and the state's age.
-    ///
-    /// The first cut of this tile was a grey well with a grey glyph and a 5pt
-    /// coloured dot, and read as generic dark UI. Droppy's tiles each wear a
-    /// saturated band with a white mark on it; that band is most of what makes
-    /// them look like objects rather than list rows. Here the band is the
-    /// state colour — `color(for:)` unchanged, used at full strength instead
-    /// of as a dot — so green is working, orange is blocked on you, and idle
-    /// recedes to grey. No vendor branding is invented.
-    ///
-    /// Runtime, context, model, effort and permission mode are not here. They
-    /// were a metadata line under a list row; a tile has no line to put them
-    /// on, and the tile is the tap target that opens the session where all of
-    /// that is visible anyway. `AgentRowMetadata` still computes them and is
-    /// still tested; this view just does not draw it.
-    private func agentTile(_ session: AgentSession) -> some View {
+    /// One session as an object: a painted tile with a nested vendor mark,
+    /// the name sitting on the colour, the model as a caption, and the status
+    /// as a small capsule. Working and waiting light up in the calm greens
+    /// and ambers the rest of the overlay already uses — system `.green` was
+    /// a fluorescent sticker. Idle and completed recede: same structure, dimmer
+    /// type, so a quiet tray is still a tray of objects rather than a hole.
+    private func agentTile(_ session: AgentSession, width: CGFloat, height: CGFloat) -> some View {
         let tint = color(for: session.state)
-        let shape = RoundedRectangle(cornerRadius: s(NotchRadius.tile), style: .continuous)
+        let lit: Bool = {
+            switch session.state {
+            case .working, .waiting: return true
+            case .idle, .completed: return false
+            }
+        }()
+        let ink = lit ? NotchOpacity.primary : NotchOpacity.secondary
+        let whisper = lit ? NotchOpacity.primary : NotchOpacity.tertiary
+        let radius = s(NotchRadius.tile)
+        let icon = s(NotchSpace.hero / 2)
         return Button {
             actions.focusAgentSession(session)
         } label: {
             VStack(alignment: .leading, spacing: 0) {
-                agentTileBand(session, tint: tint)
-                VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
-                    Text(session.displayName)
-                        .font(font(size: NotchType.body, weight: .semibold))
-                        .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                agentMark(session)
+                    .frame(width: icon, height: icon)
+                    .opacity(lit ? 1 : 0.72)
+                    .background(
+                        RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous)
+                            .fill(.black.opacity(NotchOpacity.badge))
+                    )
+                    .accessibilityLabel(session.agentName)
+                Spacer(minLength: s(NotchSpace.snug))
+                Text(session.displayName)
+                    .font(font(size: NotchType.display, weight: .semibold))
+                    .foregroundStyle(.white.opacity(ink))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                    .truncationMode(.tail)
+                if let model = session.modelShortLabel {
+                    Text(model)
+                        .font(font(size: NotchType.caption, weight: .medium))
+                        .foregroundStyle(.white.opacity(whisper))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    // The age the old status capsule carried — "idle 18m" — at
-                    // the weight of a fact you consult, not one you read.
-                    Text(session.statusLabel)
-                        .font(font(size: NotchType.caption, weight: .medium))
-                        .foregroundStyle(.white.opacity(NotchOpacity.secondary))
-                        .contentTransition(.numericText())
-                        .lineLimit(1)
+                        .padding(.top, s(NotchSpace.tight))
+                        .accessibilityLabel(session.modelLabel ?? model)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, s(NotchSpace.base))
-                .padding(.top, s(NotchSpace.snug))
-                .padding(.bottom, s(NotchSpace.base))
+                Text(session.statusLabel)
+                    .font(font(size: NotchType.caption, weight: .semibold))
+                    .foregroundStyle(.white.opacity(whisper))
+                    .padding(.horizontal, s(NotchSpace.snug))
+                    .padding(.vertical, s(NotchSpace.tight))
+                    .background(Capsule().fill(.black.opacity(lit ? NotchOpacity.badge : NotchOpacity.hairline)))
+                    .padding(.top, s(NotchSpace.snug))
+                    .contentTransition(.numericText())
+                    .lineLimit(1)
             }
-            .frame(width: s(NotchSpace.tile))
-            .background(shape.fill(.white.opacity(NotchOpacity.wellFill)))
-            .clipShape(shape)
-            // A session that wants you gets its band colour on the edge too,
-            // so the tile reads as lit rather than merely labelled.
-            .overlay(shape.stroke(session.isWaiting ? tint.opacity(0.48) : .white.opacity(NotchOpacity.hairline),
-                                  lineWidth: 0.5))
-            .contentShape(shape)
+            .padding(s(NotchSpace.base))
+            .frame(width: width, height: height, alignment: .topLeading)
+            .background {
+                agentTileSurface(tint: tint, lit: lit, radius: radius,
+                                 breathing: !reduceMotion && {
+                                     if case .working = session.state { return true }
+                                     return false
+                                 }())
+            }
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         }
-        .buttonStyle(NotchObjectButtonStyle(cornerRadius: s(NotchRadius.tile), reduceMotion: reduceMotion))
+        .buttonStyle(NotchObjectButtonStyle(cornerRadius: radius, reduceMotion: reduceMotion))
         .accessibilityLabel("\(session.displayName), \(session.statusLabel)")
         .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.statusLabel)
         .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.state)
-        // The kind of state, not the state: `.waiting(since:)` carries a
-        // timestamp, and a tile must not swell every time the age ticks.
         .notchBump(on: session.state.name, reduceMotion: reduceMotion)
+        .clipped()
     }
 
-    /// The tile's coloured header: the vendor mark in white on the state
-    /// colour, in a well-sized slot so the mark sits at the same place on
-    /// every tile, and the model as a badge at the other end.
-    ///
-    /// The mark says which tool; the badge says which model, which for Cursor
-    /// or OpenCode is the thing that actually tells two sessions apart. It is
-    /// text, not a glyph: SF Symbols has no mark for Anthropic, OpenAI or
-    /// Google, and one invented here would have to be learned. The badge is a
-    /// darker patch on the band rather than a second colour, so state still
-    /// owns the hue.
-    ///
-    /// An unknown agent gets an empty slot rather than a stand-in glyph — a
-    /// wrong-but-confident mark is worse than none, and the name still shows.
-    private func agentTileBand(_ session: AgentSession, tint: Color) -> some View {
-        HStack(spacing: 0) {
-            agentMark(session)
-                .frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
-                .accessibilityLabel(session.agentName)
-            Spacer(minLength: s(NotchSpace.snug))
-            if let model = session.modelShortLabel {
-                Text(model)
-                    .font(font(size: NotchType.caption, weight: .semibold))
-                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .padding(.horizontal, s(NotchSpace.snug))
-                    .padding(.vertical, s(NotchSpace.tight))
-                    .background(Capsule().fill(.black.opacity(NotchOpacity.badge)))
-                    .accessibilityLabel(session.modelLabel ?? model)
+    /// The painted tile, with a slow sheen when the session is mid-turn so
+    /// "working" is felt without a spinner. Reduce Motion keeps the paint
+    /// and drops the breath.
+    @ViewBuilder
+    private func agentTileSurface(tint: Color, lit: Bool, radius: CGFloat, breathing: Bool) -> some View {
+        if breathing {
+            TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: false)) { context in
+                let pulse = (sin(context.date.timeIntervalSinceReferenceDate * 2.1) + 1) / 2
+                NotchPaintedFill(tint: tint, lit: lit, cornerRadius: radius)
+                    .opacity(0.88 + pulse * 0.12)
             }
+        } else {
+            NotchPaintedFill(tint: tint, lit: lit, cornerRadius: radius)
         }
-        .padding(.horizontal, s(NotchSpace.snug))
-        .padding(.vertical, s(NotchSpace.snug))
-        .frame(maxWidth: .infinity)
-        .background(tint.opacity(NotchOpacity.band))
     }
 
     /// Which tool a session belongs to, as the thing you would recognise
@@ -1970,83 +1902,64 @@ struct ExpandedActivityCard: View {
         }
     }
 
-    /// The shelf's one action: jump to the session `AgentShelf` chose.
-    ///
-    /// One well, not two. Droppy's file shelf has a check and a trash because
-    /// files are confirmed or discarded; an agent session has one real action
-    /// from here, which is to go to it. The glyph borrows the state colour
-    /// only when the target is waiting, so the well itself says "someone
-    /// needs you" before you read anything.
-    private func agentJumpWell(_ target: AgentSession) -> some View {
-        Button {
-            actions.focusAgentSession(target)
-        } label: {
-            Image(systemName: "arrow.up.right")
-                .font(font(size: NotchType.caption, weight: .bold))
-                .foregroundStyle(target.isWaiting
-                    ? color(for: target.state)
-                    : .white.opacity(NotchOpacity.secondary))
-                .frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
-                .background(Circle().fill(.white.opacity(NotchOpacity.wellFill)))
-                .overlay(Circle().stroke(.white.opacity(NotchOpacity.rim), lineWidth: 0.5))
-                .contentShape(Circle())
-        }
-        .buttonStyle(NotchObjectButtonStyle(cornerRadius: s(NotchSpace.well) / 2, reduceMotion: reduceMotion))
-        .accessibilityLabel("Jump to \(target.displayName)")
-    }
-
     /// Waiting is the only state worth interrupting for, so it is the only one
     /// that gets a warm colour; working is calm and idle recedes.
     private func color(for state: AgentSession.State) -> Color {
         switch state {
-        case .waiting: return .orange
-        case .working: return .green
+        case .waiting: return NotchDesign.devReadyAmber
+        case .working: return NotchDesign.devReadyGreen
         case .idle: return .white.opacity(0.35)
         case .completed: return .white.opacity(0.28)
         }
     }
 
-    /// The card people see most, and the one place the island gets large,
-    /// honest colour for free: the album's. The artwork is drawn at twice a
-    /// well, and a blurred copy of it glows behind the card, masked to die
-    /// before the edges so it reads as light from the cover rather than a
-    /// second surface.
+    /// Cover as the object on a painted surface — same tile language as an
+    /// agent session. Title and transport sit beside it; progress underneath.
     private func mediaCard(_ np: NowPlaying) -> some View {
-        VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            HStack(spacing: s(NotchSpace.base)) {
+        let radius = s(NotchRadius.tile)
+        return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+            HStack(alignment: .center, spacing: s(NotchSpace.base)) {
                 mediaArtwork(np)
                 VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
                     Text(np.title)
                         .font(font(size: NotchType.display, weight: .semibold))
                         .foregroundStyle(.white.opacity(NotchOpacity.primary))
-                        .lineLimit(expandToFill ? 2 : 1)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
+                        .truncationMode(.tail)
                     Text(np.artist)
                         .font(font(size: NotchType.body, weight: .medium))
                         .foregroundStyle(.white.opacity(NotchOpacity.secondary))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                    HStack(spacing: s(NotchSpace.roomy)) {
+                        transportButton("backward.fill", action: actions.previous)
+                        transportButton(np.isPlaying ? "pause.fill" : "play.fill", size: 22,
+                                        morphing: true, action: actions.togglePlayPause)
+                        transportButton("forward.fill", action: actions.next)
+                        Spacer(minLength: 0)
+                        EqualizerSlot(isPlaying: np.isPlaying, scale: readability)
+                    }
                 }
-                // The text column absorbs every spare point, so the controls
-                // sit at the trailing edge at a fixed distance from it. Without
-                // this the arrows were positioned by whatever the title happened
-                // to measure, and moved for every song.
-                .frame(maxWidth: .infinity, alignment: .leading)
-                EqualizerSlot(isPlaying: np.isPlaying, scale: readability)
-                HStack(spacing: s(2)) {
-                    mediaArrowButton("chevron.left", label: "Previous track", action: actions.previous)
-                    mediaArrowButton("chevron.right", label: "Next track", action: actions.next)
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
-            HStack(spacing: s(18)) {
-                transportButton("backward.fill", action: actions.previous)
-                transportButton(np.isPlaying ? "pause.fill" : "play.fill", size: 22,
-                                morphing: true, action: actions.togglePlayPause)
-                transportButton("forward.fill", action: actions.next)
-            }
+            .frame(height: s(NotchSpace.hero))
             if np.hasProgress {
                 MediaProgressView(nowPlaying: np, style: .expanded, readability: readability, textScale: textScale)
             }
         }
-        .background { mediaGlow(np) }
+        .padding(s(NotchSpace.base))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background {
+            ZStack {
+                NotchPaintedFill(tint: .white.opacity(0.14), lit: false, cornerRadius: radius)
+                mediaGlow(np)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .clipped()
     }
 
     /// The artwork's light. Blurred past recognition, at glow opacity, and
@@ -2094,59 +2007,44 @@ struct ExpandedActivityCard: View {
                 }
             }
         }
-        .frame(width: s(NotchSpace.well * 2), height: s(NotchSpace.well * 2))
-        .clipShape(RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous))
+        .frame(width: s(NotchSpace.hero), height: s(NotchSpace.hero))
+        .clipShape(RoundedRectangle(cornerRadius: s(NotchRadius.tile), style: .continuous))
         // A cover is a printed object; the hairline is its edge, as on a tile.
-        .overlay(RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous)
+        .overlay(RoundedRectangle(cornerRadius: s(NotchRadius.tile), style: .continuous)
             .stroke(.white.opacity(NotchOpacity.rim), lineWidth: 0.5))
-    }
-
-    /// Explicit chevrons make track navigation discoverable in the compact
-    /// deck. Their visual weight stays light, but the full 32pt square reacts
-    /// so the control is practical at the top edge of the display.
-    private func mediaArrowButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: s(11), weight: .bold))
-                .foregroundStyle(.white.opacity(0.72))
-                .frame(width: s(32), height: s(32))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(TransportButtonStyle())
-        .accessibilityLabel(label)
     }
 
     /// The app's own icon is the object here — the one card that gets a real
     /// full-colour mark for free — so it is drawn at well size, not 19pt.
     private func appCard(title: String, name: String) -> some View {
-        VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            Text(title)
-                .font(font(size: NotchType.caption, weight: .semibold))
-                .foregroundStyle(.white.opacity(NotchOpacity.secondary))
-                .frame(height: headerHeight)
-            HStack(spacing: s(NotchSpace.base)) {
-                if let appIcon {
-                    Image(nsImage: appIcon)
-                        .resizable()
-                        .frame(width: s(NotchSpace.well), height: s(NotchSpace.well))
-                } else {
-                    glyphWell("app.fill", tint: neutralTint)
-                }
-                Text(name)
-                    .font(font(size: NotchType.title, weight: .semibold))
-                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
-                    .lineLimit(expandToFill ? 3 : 2)
-                    .minimumScaleFactor(0.8)
+        HStack(spacing: s(NotchSpace.base)) {
+            if let appIcon {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .frame(width: s(NotchSpace.hero), height: s(NotchSpace.hero))
+                    .clipShape(RoundedRectangle(cornerRadius: s(NotchRadius.tile), style: .continuous))
+            } else {
+                glyphWell("app.fill", tint: neutralTint)
+                    .frame(width: s(NotchSpace.hero), height: s(NotchSpace.hero))
             }
+            VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
+                Text(name)
+                    .font(font(size: NotchType.display, weight: .semibold))
+                    .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                Text(title)
+                    .font(font(size: NotchType.caption, weight: .medium))
+                    .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private func volumeCard(_ level: Int) -> some View {
         VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            cardHeader(symbol: level == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                       title: "Volume")
             Text("\(level)%")
-                .font(font(size: NotchType.display, weight: .semibold).monospacedDigit())
+                .font(font(size: NotchType.hero, weight: .semibold).monospacedDigit())
                 .foregroundStyle(.white.opacity(NotchOpacity.primary))
                 .contentTransition(.numericText())
             meterBar(percent: level, tint: .white.opacity(NotchOpacity.primary))
@@ -2200,9 +2098,8 @@ struct ExpandedActivityCard: View {
 
     private func calendarCard(_ event: CalendarEvent) -> some View {
         VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            cardHeader(symbol: "calendar", title: "Next event", tint: .orange)
             Text(event.title)
-                .font(font(size: NotchType.title, weight: .semibold))
+                .font(font(size: NotchType.display, weight: .semibold))
                 .foregroundStyle(.white.opacity(NotchOpacity.primary))
                 .lineLimit(expandToFill ? 3 : 2)
             Text(relativeStart(for: event.start))
@@ -2214,13 +2111,13 @@ struct ExpandedActivityCard: View {
 
     private func timerCard(_ timer: ActiveTimer) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-                cardHeader(symbol: timer.isFocusSession ? "moon.stars.fill" : "timer",
-                           title: timer.isFocusSession ? "Focus session" : timer.label,
-                           tint: timer.isFocusSession ? NotchDesign.accent : nil)
+                VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
                 Text(StatusFormatting.countdown(timer.remaining(at: context.date)))
-                    .font(font(size: 22, weight: .semibold).monospacedDigit())
+                    .font(font(size: NotchType.hero, weight: .semibold).monospacedDigit())
                     .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                Text(timer.isFocusSession ? "Focus session" : timer.label)
+                    .font(font(size: NotchType.caption, weight: .medium))
+                    .foregroundStyle(.white.opacity(NotchOpacity.secondary))
                 Button(timer.isFocusSession ? "End focus" : "Cancel", action: onCancelTimer)
                     .font(font(size: NotchType.body, weight: .medium))
                     .buttonStyle(.plain)
@@ -2233,29 +2130,11 @@ struct ExpandedActivityCard: View {
     /// Two meters, tinted by how full each is. Two percentages in a column
     /// read identically at 23% and 93%; a bar does not.
     private func systemStatsCard(_ stats: SystemStats) -> some View {
-        VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            cardHeader(symbol: "gauge.with.dots.needle.67percent", title: "System",
-                       tint: quotaColor(max(stats.cpuPercent, stats.memoryPercent)))
-            statLine(title: "CPU", value: stats.cpuPercent)
-            statLine(title: "RAM", value: stats.memoryPercent)
+        HStack(spacing: s(NotchSpace.snug)) {
+            meterTile(percent: stats.cpuPercent, label: "CPU")
+            meterTile(percent: stats.memoryPercent, label: "RAM")
         }
         .frame(minWidth: s(88), alignment: .leading)
-    }
-
-    private func statLine(title: String, value: Int) -> some View {
-        HStack(spacing: s(NotchSpace.base)) {
-            Text(title)
-                .font(font(size: NotchType.caption, weight: .semibold))
-                .foregroundStyle(.white.opacity(NotchOpacity.secondary))
-                .frame(width: s(NotchSpace.well + NotchSpace.base), alignment: .leading)
-            meterBar(percent: value, tint: quotaColor(value))
-            Text("\(value)%")
-                .font(font(size: NotchType.body, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white.opacity(NotchOpacity.primary))
-                .contentTransition(.numericText())
-                .frame(width: s(NotchSpace.well + NotchSpace.base), alignment: .trailing)
-        }
-        .frame(height: s(NotchSpace.mark))
     }
 
     /// Green while there is plenty, amber as it runs down — the battery's own
@@ -2263,15 +2142,15 @@ struct ExpandedActivityCard: View {
     /// the quota cards meter.
     private func batteryCard(_ status: BatteryStatus) -> some View {
         VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            cardHeader(symbol: batterySymbol(for: status),
-                       title: status.isCharging ? "Charging" : "Battery",
-                       tint: status.isCharging ? NotchDesign.devReadyGreen : quotaColor(100 - status.level))
             Text("\(status.level)%")
-                .font(font(size: 22, weight: .semibold).monospacedDigit())
+                .font(font(size: NotchType.hero, weight: .semibold).monospacedDigit())
                 .foregroundStyle(.white.opacity(NotchOpacity.primary))
                 .contentTransition(.numericText())
             meterBar(percent: status.level,
                      tint: status.isCharging ? NotchDesign.devReadyGreen : quotaColor(100 - status.level))
+            Text(status.isCharging ? "charging" : "battery")
+                .font(font(size: NotchType.caption, weight: .medium))
+                .foregroundStyle(.white.opacity(NotchOpacity.secondary))
             lowPowerRow(status)
         }
         .frame(minWidth: s(72), alignment: .leading)
@@ -2352,8 +2231,7 @@ struct ExpandedActivityCard: View {
                             .buttonStyle(.plain)
                     }
                 } else {
-                    cardHeader(symbol: "tray.full.fill", title: "Shelf",
-                               tint: isDropTargeted ? NotchDesign.accent : nil) {
+                    HStack {
                         Spacer(minLength: 0)
                         if !items.isEmpty {
                             ShareLink(items: items.map(\.url)) {
@@ -2370,6 +2248,7 @@ struct ExpandedActivityCard: View {
                             .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
                         }
                     }
+                    .frame(height: items.isEmpty ? 0 : s(NotchSpace.mark))
                 }
             }
 
@@ -2531,20 +2410,6 @@ struct ExpandedActivityCard: View {
             actions.fileShelfItem(item.id, folder)
         }
         actions.holdNotchOpen(false)
-    }
-
-    /// Charging is a bolt; otherwise the battery at its level. The old
-    /// `battery.50.bolt` family does not exist in SF Symbols — only the full
-    /// one has a bolt variant — so a charging Mac drew no glyph at all.
-    private func batterySymbol(for status: BatteryStatus) -> String {
-        if status.isCharging { return "bolt.fill" }
-        switch status.level {
-        case 0...10: return "battery.0percent"
-        case 11...35: return "battery.25percent"
-        case 36...65: return "battery.50percent"
-        case 66...90: return "battery.75percent"
-        default: return "battery.100percent"
-        }
     }
 
     private func relativeStart(for date: Date) -> String {

@@ -73,13 +73,71 @@ struct AgentSession: Equatable, Identifiable {
     ///
     /// Most specific answer wins. A running sub-agent is the most specific —
     /// "which agent is this?" means the persona doing the work. Failing that,
-    /// the terminal's name for the session says what it is *about*, which beats
-    /// the vendor: three sessions in one repo used to be three rows all reading
-    /// "Claude", distinguishable only by a task line that is often missing.
+    /// a human session title says what the work is *about*, which beats the
+    /// vendor: three sessions in one repo used to be three rows all reading
+    /// "Claude". Cursor names untitled composers "Attach session 1e82e7"; that
+    /// is an id, not a name, so it loses to the task, then the vendor. The
+    /// project stays context, not a name — two Cursor tiles both reading
+    /// "NotchPill" would hide the vendor without identifying the work.
     var displayName: String {
         if let subagent, !subagent.isEmpty { return prettify(subagent) }
-        if let sessionTitle, !sessionTitle.isEmpty { return sessionTitle }
+        if let sessionTitle, Self.isHumanTitle(sessionTitle) {
+            return sessionTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let task = Self.summarize(task, limit: 36) {
+            return task
+        }
         return agentName
+    }
+
+    /// A title the user would recognise as the work, not as an id the host
+    /// invented. Conservative on purpose: a wrong-but-confident id on the tile
+    /// is worse than falling back to the task or the vendor.
+    nonisolated static func isHumanTitle(_ raw: String) -> Bool {
+        let title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard title.count >= 2 else { return false }
+
+        let folded = title.lowercased()
+        if folded.contains("attach session") { return false }
+
+        if title.range(
+            of: #"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"#,
+            options: .regularExpression
+        ) != nil {
+            return false
+        }
+
+        let defaults: Set<String> = [
+            "new chat", "new session", "new conversation", "untitled",
+            "untitled chat", "composer", "chat", "session", "agent",
+            "cursor", "claude", "codex", "opencode"
+        ]
+        if defaults.contains(folded) { return false }
+
+        let separators = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)
+        let tokens = title.components(separatedBy: separators).filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return false }
+
+        let filler: Set<String> = [
+            "session", "chat", "attach", "composer", "agent", "new",
+            "untitled", "conversation"
+        ]
+        let meaningful = tokens.filter { !filler.contains($0.lowercased()) }
+        if !meaningful.isEmpty, meaningful.allSatisfy({ isMachineIdToken($0) }) {
+            return false
+        }
+        if meaningful.isEmpty { return false }
+        return true
+    }
+
+    /// Hex blobs the host uses as session ids: `1e82e7`, `deadbeef`. English
+    /// words that happen to be hex letters (`access`, `decade`) are kept —
+    /// they have no digit and are shorter than a typical hash.
+    nonisolated static func isMachineIdToken(_ token: String) -> Bool {
+        guard token.count >= 6, token.count <= 40 else { return false }
+        guard token.allSatisfy(\.isHexDigit) else { return false }
+        if token.contains(where: \.isNumber) { return true }
+        return token.count >= 8
     }
 
     /// "code-reviewer" → "Code Reviewer".

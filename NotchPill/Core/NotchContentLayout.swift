@@ -107,7 +107,7 @@ enum NotchContentLayout {
                                    page: Int? = nil,
                                    tokenRows: Int = 0) -> NotchContentLayoutMetrics {
         let maxW = metrics.maxExpandedRenderedWidth
-        let preferredWidth = 360 * metrics.userScale
+        let preferredWidth = 400 * metrics.userScale
         let width = min(maxW, max(metrics.notchWidth + 112, preferredWidth))
         let cardHeight = min(expandedContentCeiling,
                              max(56, expandedContentBaseHeight(activities, page: page,
@@ -120,11 +120,17 @@ enum NotchContentLayout {
         let deckChrome: CGFloat = showsDeckChrome(for: activities) ? deckChromeHeight : 0
         return NotchContentLayoutMetrics(
             size: CGSize(width: width,
-                         height: metrics.notchHeight + metrics.topGap + cardHeight + deckChrome + 10),
+                         height: metrics.notchHeight + metrics.topGap + cardHeight
+                            + deckChrome + expandedTrayInset),
             readability: 1,
             textScale: textCompensation(forUserScale: metrics.userScale)
         )
     }
+
+    /// Top + bottom padding the expanded deck spends to keep content off the
+    /// silhouette rim (`NotchSpace.base` each). Shared by the height budget
+    /// and `ExpandedView` so the dots cannot be pushed past the lower edge.
+    static let expandedTrayInset: CGFloat = NotchSpace.base * 2
 
     static func expandedDeckSize(metrics: NotchMetrics, activities: [ExpandedActivity],
                                  page: Int? = nil, tokenRows: Int = 0) -> CGSize {
@@ -651,7 +657,7 @@ enum NotchContentLayout {
     /// shrank the type for all of them — there, trimming the tail was the only
     /// way to keep anything readable. `expandedDeckLayout` does not work that
     /// way: it gives each card a full-width page at a fixed
-    /// `360 * userScale`, with readability pinned at 1. Card count costs
+    /// `400 * userScale`, with readability pinned at 1. Card count costs
     /// nothing in width and nothing in text size.
     ///
     /// What it does cost is page dots, and those live in a strip as wide as
@@ -790,16 +796,11 @@ enum NotchContentLayout {
     /// own `ScrollView` takes over, so the pill must not keep growing.
     private static let expandedMaxCardRows = 3
 
-    /// The agents page as a shelf: a caption over one row of tiles that scrolls
-    /// sideways, so its height does not depend on how many sessions there are.
-    ///
-    /// Header row 22 (caption beside the jump well) + 4 gap, then a tile: a
-    /// 30pt band (22 mark, 4 pad each side), 4, name, 2, status, 8 pad. At
-    /// default text that tile is ~68; at the smallest pill size
-    /// `textCompensation` is 1.22 and the two text lines push it to ~73 while
-    /// `s()` stays at 1, so the budget is taken from that end. Anything less
-    /// and the small pill spends the page dots' slack on the tile.
-    static let agentsShelf: CGFloat = 100
+    /// Header row is gone: the tiles fill the page. Room for a 36pt nested
+    /// icon, a two-line name, a model caption and a status capsule, including
+    /// the 1.22× text compensation at the smallest pill. Tighter than this
+    /// and the icon sits on the name.
+    static let agentsShelf: CGFloat = 120
 
     /// Clipboard rows are not uniform: each is as tall as its own copy needs,
     /// so a one-line snippet does not reserve the room a paragraph would.
@@ -840,84 +841,55 @@ enum NotchContentLayout {
     private static func expandedCardBaseHeight(_ activity: ExpandedActivity,
                                                tokenRows: Int = 0) -> CGFloat {
         switch activity {
-        // Header well (16) + 4, then a meter tile: 4 pad, 18 figure, 4, 6 bar,
-        // 4, 11 caption, 4 pad = 51; + 4 + an 11pt trailing line ("extra $x",
-        // credits, "412 of 2000 · renews in 11d"). The three quota cards share
-        // one meter now, so they share one budget — and it leaves room under
-        // the ceiling for two rows of token lines when that setting is on.
+        // Hero figure (28) + 4 + bar (6) + 4 + caption (11) + tile pad (8) = 61,
+        // plus a trailing line (11). No header: the number is the page.
         case .claudeQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
         case .codexQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
         case .cursorQuota: return quotaCard
-        // Artwork row (a 44pt cover beside a title and artist) + 4, a 28pt
-        // transport row + 4, then progress: a 4pt bar, 4, and a 13pt time
-        // line. That is 101. It was budgeted at 78 with 32pt artwork: on every
-        // song with a progress bar the page dots sat well below the pill.
-        case .media: return 102
-        // One strip of tiles; further sessions scroll sideways inside it
-        // rather than turning the notch into a full-height panel.
+        // Hero cover (72) beside title and transport inside a painted tile
+        // pad (8), then a progress row (~20).
+        case .media: return 112
         case .agents: return agentsShelf
-        case .openCodeUsage: return 56
-        // Header (16) + 4, then a 52pt chip strip: 40pt chips plus the room
-        // the folder badge hangs into.
+        case .openCodeUsage: return quotaCard
         case .shelf: return 72
-        // Header (16) + 4, then 20pt single-line rows with a 2pt gap. The rows
-        // used to be two lines on an 18pt budget, so the third was always
-        // half-clipped.
-        case .ci(let runs): return rowsHeight(header: 20, row: 22, count: runs.count)
+        // Same shelf height as agents: each run is a full painted tile.
+        case .ci: return agentsShelf
         case .clipboard(let items, let searching): return clipboardHeight(items, searching: searching)
-        // A header well (16) over `TerminalStore.rows` lines of 9pt monospace
-        // at 11pt leading, plus 4 of pad. The row count is the budget, so a
-        // shell that prints more scrolls inside the card rather than pushing
-        // the deck's page dots off the bottom of the pill.
-        case .terminal: return 16 + 4 + 11 * CGFloat(TerminalStore.rows)
-        case .recentAlerts(let alerts): return rowsHeight(header: 20, row: 22, count: alerts.count)
-        // Header (16) + 4 + a 22pt figure (26) + 4 + bar (6) + 4 + the 18pt
-        // Low Power row. Was budgeted at the 56 default, which is why the page
-        // dots sat under the row.
+        case .terminal: return 4 + 11 * CGFloat(TerminalStore.rows)
+        case .recentAlerts(let alerts): return rowsHeight(header: 16, row: 22, count: alerts.count)
         case .battery: return 78
-        // Header (16) + 4 + figure (18) + 4 + bar (6) + 4 + the 18pt output
-        // picker row.
-        case .volume: return 72
-        // Header (16) + 4 + a title that may wrap to two lines (32) + 4 + 13.
-        case .calendar: return 72
-        // Header (16) + 4 + a 22pt countdown (26) + 4 + the cancel button (14).
-        case .timer: return 66
-        // Everything else is a label over a value.
+        case .volume: return 64
+        case .calendar: return 56
+        case .timer: return 64
+        case .systemStats: return quotaCard
+        case .activeApp, .appSwitch: return NotchSpace.hero
         default: return 56
         }
     }
 
     /// See `.claudeQuota` above.
-    static let quotaCard: CGFloat = 86
+    static let quotaCard: CGFloat = 80
 
     private static func expandedCardBaseWidth(_ activity: ExpandedActivity) -> CGFloat {
         switch activity {
-        case .media: return 248
+        case .media: return 400
         case .calendar: return 118
         case .timer: return 96
-        case .systemStats: return 96
+        case .systemStats: return 176
         case .shelf: return 108
-        // A clipboard line is text and wants the room; anything narrower
-        // truncates every entry into uselessness.
         case .clipboard: return 340
-        // `TerminalStore.columns` of 9pt SF Mono. Narrower and the shell wraps
-        // every real command line; wider and the card no longer fits the pill.
         case .terminal: return 340
-        // Widest card by design: three rows of "project … status" need the room,
-        // and a truncated project name defeats the point of the card.
-        case .agents: return 210
+        case .agents: return 400
         case .openCodeUsage: return 124
-        case .codexQuota: return 164
+        case .codexQuota: return 176
         case .claudeQuota: return 176
         case .cursorQuota: return 176
-        case .ci: return 150
+        case .ci: return 176
         case .recentAlerts: return 170
-        case .activeApp, .appSwitch: return 92
-        // The extra room is the output picker row under the level bar.
-        case .volume: return 100
+        case .activeApp, .appSwitch: return 160
+        case .volume: return 120
         case .clock: return 76
-        // The extra room is the Low Power Mode row under the percentage.
-        case .battery: return 100
+        case .battery: return 120
         }
     }
 }

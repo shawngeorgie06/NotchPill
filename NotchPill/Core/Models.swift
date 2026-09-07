@@ -749,6 +749,16 @@ struct ShelfCardItem: Identifiable, Equatable, Hashable {
     let url: URL
 }
 
+/// Live agents own this page. Sessions only — media, quota and CI are their
+/// own swipes when you want them.
+struct AgentHomeTray: Equatable {
+    var sessions: [AgentSession]
+
+    init(_ sessions: [AgentSession]) {
+        self.sessions = sessions
+    }
+}
+
 enum ExpandedActivity: Equatable, Identifiable {
     case media(NowPlaying)
     case appSwitch(String)
@@ -761,7 +771,7 @@ enum ExpandedActivity: Equatable, Identifiable {
     case battery(BatteryStatus)
     case shelf(items: [ShelfCardItem], receipt: ShelfFilingReceipt?, error: String?,
                isDropTargeted: Bool = false)
-    case agents([AgentSession])
+    case agents(AgentHomeTray)
     case openCodeUsage(OpenCodeUsage)
     case codexQuota(CodexQuota)
     case claudeQuota(ClaudeQuota)
@@ -822,7 +832,8 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .battery(let b): return "battery-\(b.level)-\(b.isCharging)-\(b.isLowPower)"
         case .shelf(let items, let receipt, let error, let targeted):
             return "shelf-\(items.map(\.name).joined(separator: "|"))-\(receipt?.itemName ?? "")-\(error ?? "")-\(targeted)"
-        case .agents(let list): return "agents-" + list.map(\.id).joined(separator: ",")
+        case .agents(let tray):
+            return "agents-" + tray.sessions.map(\.id).joined(separator: ",")
         case .openCodeUsage(let usage): return "opencode-\(usage.totalTokens)-\(usage.cost)"
         case .codexQuota(let quota): return "codex-quota-\(quota.usedPercent)"
         case .claudeQuota(let quota):

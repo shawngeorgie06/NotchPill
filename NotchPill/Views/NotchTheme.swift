@@ -24,6 +24,19 @@ enum NotchMotion {
         reduceMotion ? floor : .spring(response: 0.30, dampingFraction: 0.85)
     }
 
+    /// Swiping from one deck page to the next. Longer and more damped than
+    /// `settle`: a page is a whole surface, and the short ease-out that used
+    /// to drive it read as a cut rather than a slide.
+    static func page(reduceMotion: Bool) -> Animation {
+        reduceMotion ? floor : .spring(response: 0.40, dampingFraction: 0.90)
+    }
+
+    /// A painted surface or meter filling in. Softer than `enter` so the wash
+    /// lands as colour arriving, not as an object bouncing into place.
+    static func paint(reduceMotion: Bool) -> Animation {
+        reduceMotion ? floor : .spring(response: 0.52, dampingFraction: 0.92)
+    }
+
     /// Anything leaving. Quicker than arrival and deliberately not a spring —
     /// overshoot on the way out reads as hesitation.
     static func exit(reduceMotion: Bool) -> Animation {
@@ -49,6 +62,13 @@ enum NotchMotion {
     /// How long a transient label stays after the thing it names changes —
     /// the page's name after a swipe. Long enough to read once.
     static let linger: TimeInterval = 1.4
+
+    /// How far a page sits under its neighbours while sliding in, so the
+    /// swap reads as depth rather than a hard cut.
+    static let pageScale: CGFloat = 0.985
+
+    /// How far a painted tile grows from while its wash lands.
+    static let paintScale: CGFloat = 0.97
 
     /// The exact value the rest of the overlay already uses for Reduce Motion.
     /// Not zero: a true zero-duration animation still lets SwiftUI batch the
@@ -137,6 +157,60 @@ extension View {
     }
 }
 
+/// Depth for an object sitting on the island: a vertical wash of the tint,
+/// a sheen along the top edge, and a rim that is brighter where the light
+/// lands. A flat fill at `NotchOpacity.band` is a sticker; this is a tile.
+///
+/// The wash lands rather than pops: on appear it fills from a slightly
+/// smaller, transparent state, and lit/idle changes interpolate instead of
+/// swapping. Reduce Motion keeps the final paint with no travel.
+struct NotchPaintedFill: View {
+    let tint: Color
+    var lit: Bool = true
+    let cornerRadius: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var painted = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let ready = painted || reduceMotion
+        ZStack {
+            shape.fill(
+                LinearGradient(
+                    colors: lit
+                        ? [tint, tint.opacity(0.72)]
+                        : [Color.white.opacity(0.20), Color.white.opacity(0.08)],
+                    startPoint: .top, endPoint: .bottom
+                )
+            )
+            shape.fill(
+                LinearGradient(
+                    colors: [.white.opacity(lit ? NotchOpacity.rim : NotchOpacity.highlight), .clear],
+                    startPoint: .top, endPoint: .center
+                )
+            )
+        }
+        .overlay(
+            shape.stroke(
+                LinearGradient(
+                    colors: [.white.opacity(lit ? NotchOpacity.secondary : NotchOpacity.highlight),
+                             .white.opacity(NotchOpacity.hairline)],
+                    startPoint: .top, endPoint: .bottom
+                ),
+                lineWidth: 0.5
+            )
+        )
+        .opacity(ready ? 1 : 0)
+        .scaleEffect(ready ? 1 : NotchMotion.paintScale)
+        .onAppear {
+            withAnimation(NotchMotion.paint(reduceMotion: reduceMotion)) {
+                painted = true
+            }
+        }
+        .animation(NotchMotion.paint(reduceMotion: reduceMotion), value: lit)
+    }
+}
+
 /// Spacing steps for the notch overlay, in unscaled points.
 ///
 /// Always pass these through the view's `s()`, which applies the user's pill
@@ -161,12 +235,15 @@ enum NotchSpace {
     /// as the same kind of object.
     static let well: CGFloat = 22
 
-    /// A session tile's width. A horizontal strip needs a fixed width; a
-    /// flexible one has nothing to measure against inside a `ScrollView`.
-    /// Two of these plus a `snug` gap fill the 180pt the panel has left after
-    /// its `roomy` insets, so the strip is tiles edge to edge, not tiles and
-    /// a gap.
-    static let tile: CGFloat = 88
+    /// A session object's minimum width. The strip sizes each tile to half
+    /// the island, so this is a floor, not the drawn size: two names have to
+    /// fit, which 88pt never did.
+    static let tile: CGFloat = 168
+
+    /// Album art, a CI status block, the app icon: the large object a page
+    /// is about. Bigger than a well (a tap target) and smaller than a tile
+    /// (a session).
+    static let hero: CGFloat = 72
 
     /// A card header's glyph well: the small tinted square every card opens
     /// with, sized to sit on one 13pt title line. Smaller than `well`, which
@@ -178,7 +255,7 @@ enum NotchSpace {
     static let bar: CGFloat = 6
 
     /// Every step, for tests that assert the scale has no duplicates.
-    static let all: [CGFloat] = [tight, snug, base, roomy, section, gutter, well, tile, mark, bar]
+    static let all: [CGFloat] = [tight, snug, base, roomy, section, gutter, well, tile, mark, bar, hero]
 }
 
 /// Corner radii for nested objects on the island, in unscaled points. Pass
@@ -191,7 +268,9 @@ enum NotchRadius {
     /// A `NotchSpace.well` square — a vendor mark's backing.
     static let well: CGFloat = 6
     /// A session tile. Continuous, so it reads as an object, not a box.
-    static let tile: CGFloat = 14
+    /// 14pt on a 108pt-tall tile still looked rectangular; 18 is the step
+    /// that makes the silhouette a squircle without becoming a pill.
+    static let tile: CGFloat = 18
     /// A card-sized object shorter than a tile — a meter, a shelf chip, a
     /// list row's surface. `tile`'s 14 on a 40pt object reads as a pill.
     static let card: CGFloat = 10
@@ -212,10 +291,13 @@ enum NotchType {
     /// The one number a metric card is about — a percentage, a level. Larger
     /// than a title because it is read from across the desk, not up close.
     static let display: CGFloat = 15
+    /// The number the island is *for* on a quota or timer page. Display is a
+    /// figure on a card; this is the card.
+    static let hero: CGFloat = 28
 
     /// The distinct sizes, for the duplicate assertion. `mono` is deliberately
     /// absent: it shares `caption`'s size and that is the point.
-    static let all: [CGFloat] = [display, title, body, caption]
+    static let all: [CGFloat] = [hero, display, title, body, caption]
 }
 
 /// The four jobs opacity does on this surface. `Tiles.swift` had 157 opacity

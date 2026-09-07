@@ -971,6 +971,138 @@ struct ExpandedActivityBuilderTests {
         #expect(items == [.clock])
     }
 
+    /// Quiet usage still keeps its swipe page — the agents page itself is
+    /// sessions only.
+    @Test("a quiet quota keeps its swipe page beside live agents")
+    func quietQuotaKeepsItsPage() {
+        let session = AgentSession(id: "s", agent: "claude-code", project: "NotchPill",
+                                   state: .working, lastActivity: Date())
+        let quiet = ClaudeQuota(sessionPercent: 12, weeklyPercent: 20)
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            agentSessions: [session], claudeQuota: quiet,
+            showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: true)
+        #expect(items.map(\.kind) == ["agents", "claudeQuota"])
+        guard case .agents(let tray) = items.first else {
+            Issue.record("expected the agents page")
+            return
+        }
+        #expect(tray.sessions.count == 1)
+    }
+
+    @Test("a hot quota keeps its own page, not the agents page")
+    func hotQuotaKeepsItsPage() {
+        let session = AgentSession(id: "s", agent: "claude-code", project: "NotchPill",
+                                   state: .working, lastActivity: Date())
+        let hot = ClaudeQuota(sessionPercent: 72, weeklyPercent: 20)
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            agentSessions: [session], claudeQuota: hot,
+            showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: true)
+        #expect(items.map(\.kind) == ["agents", "claudeQuota"])
+    }
+
+    @Test("a quiet quota is still the page when nothing else is on the deck")
+    func quietQuotaStaysWhenItIsTheContent() {
+        let quiet = ClaudeQuota(sessionPercent: 12, weeklyPercent: 20)
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            claudeQuota: quiet,
+            showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: true)
+        #expect(items.map(\.kind) == ["claudeQuota"])
+    }
+
+    @Test("CI keeps its swipe page beside live agents")
+    func ciKeepsItsPage() {
+        let session = AgentSession(id: "s", agent: "claude-code", project: "NotchPill",
+                                   state: .working, lastActivity: Date())
+        let passed = CIRun(id: "r", repo: "o/r", workflow: "CI", branch: "main",
+                           state: .passed, started: Date())
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            agentSessions: [session], ciRuns: [passed],
+            showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: true, showCI: true)
+        #expect(items.map(\.kind) == ["agents", "ci"])
+    }
+
+    @Test("a failing build keeps its own page, not the agents page")
+    func failedCIKeepsItsPage() {
+        let session = AgentSession(id: "s", agent: "claude-code", project: "NotchPill",
+                                   state: .working, lastActivity: Date())
+        let failed = CIRun(id: "r", repo: "o/r", workflow: "CI", branch: "main",
+                           state: .failed, started: Date())
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            agentSessions: [session], ciRuns: [failed],
+            showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: true, showCI: true)
+        #expect(items.map(\.kind) == ["agents", "ci"])
+    }
+
+    @Test("now playing keeps its own page beside live agents")
+    func mediaKeepsItsPage() {
+        let session = AgentSession(id: "s", agent: "claude-code", project: "NotchPill",
+                                   state: .working, lastActivity: Date())
+        let np = NowPlaying(title: "Song", artist: "Artist", isPlaying: true)
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: np, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            agentSessions: [session],
+            showMedia: true, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: true)
+        #expect(items.map(\.kind) == ["agents", "media"])
+        guard case .agents(let tray) = items.first else {
+            Issue.record("expected the agents page")
+            return
+        }
+        #expect(tray.sessions.count == 1)
+    }
+
+    @Test("now playing keeps its own page when no agents are live")
+    func mediaAloneStaysAPage() {
+        let np = NowPlaying(title: "Song", artist: "Artist", isPlaying: true)
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: np, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            showMedia: true, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: true)
+        #expect(items.map(\.kind) == ["media"])
+    }
+
+    @Test("shelf and clipboard stay their own pages beside the tray")
+    func shelfStaysASwipe() {
+        let session = AgentSession(id: "s", agent: "claude-code", project: "NotchPill",
+                                   state: .working, lastActivity: Date())
+        let item = ShelfCardItem(id: UUID(), name: "a.txt",
+                                 url: URL(fileURLWithPath: "/tmp/a.txt"))
+        let clip = ClipboardEntry(id: UUID(), text: "copied", copiedAt: Date())
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            agentSessions: [session],
+            showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: true, showAgents: true,
+            shelfItems: [item], clipboard: [clip])
+        #expect(items.map(\.kind) == ["agents", "shelf", "clipboard"])
+    }
+
     @Test("pinned activity moves to the front without changing the others")
     func pinnedActivity() {
         let items: [ExpandedActivity] = [.clock, .timer(ActiveTimer(label: "Focus", endDate: .now.addingTimeInterval(60))), .volume(40)]
@@ -2592,7 +2724,7 @@ struct AgentSessionTests {
         #expect(items.first?.kind == "agents")
     }
 
-    @Test("OpenCode usage follows live agents and is not presented as a quota")
+    @Test("OpenCode usage keeps its page beside live agents")
     func openCodeUsageFollowsAgents() {
         let usage = OpenCodeUsage(inputTokens: 900, outputTokens: 100, reasoningTokens: 0,
                                   cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0)
@@ -2604,6 +2736,20 @@ struct AgentSessionTests {
             showCalendar: false, showTimer: false, showSystemStats: false,
             showBattery: false, showShelf: false, showAgents: true)
         #expect(items.map(\.kind) == ["agents", "openCodeUsage"])
+    }
+
+    @Test("OpenCode usage keeps its page when it is the content")
+    func openCodeUsageWithoutAgents() {
+        let usage = OpenCodeUsage(inputTokens: 900, outputTokens: 100, reasoningTokens: 0,
+                                  cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0)
+        let items = ExpandedActivityBuilder.activities(
+            nowPlaying: nil, nextEvent: nil, appSwitchHint: nil, frontmostApp: nil,
+            systemVolume: nil, timer: nil, systemStats: nil, battery: nil,
+            agentSessions: [], openCodeUsage: usage,
+            showMedia: false, showActiveApp: false, showVolume: false, showClock: false,
+            showCalendar: false, showTimer: false, showSystemStats: false,
+            showBattery: false, showShelf: false, showAgents: true)
+        #expect(items.map(\.kind) == ["openCodeUsage"])
     }
 
     @Test("the toggle actually suppresses the card")
@@ -3045,10 +3191,16 @@ struct CmuxIndexTests {
 
 @Suite("Agent row naming")
 struct AgentDisplayNameTests {
-    private func session(subagent: String? = nil, title: String? = nil) -> AgentSession {
-        AgentSession(id: "s", agent: "claude-code", project: "NotchPill",
+    private func session(
+        agent: String = "claude-code",
+        project: String = "NotchPill",
+        subagent: String? = nil,
+        task: String? = nil,
+        title: String? = nil
+    ) -> AgentSession {
+        AgentSession(id: "s", agent: agent, project: project,
                      state: .working, lastActivity: Date(),
-                     subagent: subagent, sessionTitle: title)
+                     subagent: subagent, task: task, sessionTitle: title)
     }
 
     // The complaint: three sessions in one repo were three rows all reading
@@ -3069,6 +3221,57 @@ struct AgentDisplayNameTests {
     @Test("an empty title is not a name")
     func emptyTitleIgnored() {
         #expect(session(title: "").displayName == "Claude")
+    }
+
+    /// Cursor names untitled composers after the session id. That is an
+    /// identifier, not the work, and it used to be the whole tile.
+    @Test("Cursor's attach-session title is not a name")
+    func attachSessionRejected() {
+        let junk = "Attach session 1e82e7"
+        #expect(!AgentSession.isHumanTitle(junk))
+        #expect(session(agent: "cursor", title: junk).displayName == "Cursor")
+        #expect(session(agent: "cursor", task: "Wire the overlay", title: junk)
+            .displayName == "Wire the overlay")
+    }
+
+    @Test("a hex session id is not a name")
+    func hexIdRejected() {
+        #expect(!AgentSession.isHumanTitle("1e82e7"))
+        #expect(session(agent: "cursor", title: "session 1e82e7").displayName == "Cursor")
+    }
+
+    @Test("a UUID is not a name")
+    func uuidRejected() {
+        #expect(!AgentSession.isHumanTitle("550e8400-e29b-41d4-a716-446655440000"))
+        #expect(session(title: "550e8400-e29b-41d4-a716-446655440000").displayName == "Claude")
+    }
+
+    @Test("a sub-agent still wins over a junk title")
+    func subagentWinsOverJunk() {
+        #expect(session(subagent: "code-reviewer", title: "Attach session 1e82e7")
+            .displayName == "Code Reviewer")
+    }
+
+    /// `access` is six hex letters. Rejecting every hex-looking word would
+    /// hide real titles.
+    @Test("English that happens to look like hex is still a name")
+    func hexLookingEnglishKept() {
+        #expect(AgentSession.isHumanTitle("access control review"))
+        #expect(session(title: "access control review").displayName
+                == "access control review")
+    }
+
+    @Test("a conventional-commit title is still a name")
+    func conventionalCommitKept() {
+        #expect(session(title: "fix: handle empty shelf").displayName
+                == "fix: handle empty shelf")
+    }
+
+    @Test("New Chat and Composer are host defaults, not names")
+    func hostDefaultsRejected() {
+        #expect(!AgentSession.isHumanTitle("New Chat"))
+        #expect(!AgentSession.isHumanTitle("Composer"))
+        #expect(session(agent: "cursor", title: "New Chat").displayName == "Cursor")
     }
 }
 
@@ -3847,10 +4050,10 @@ struct DiagnosticsReportTests {
 @Suite("Expanded pill height")
 struct ExpandedHeightTests {
     private func agents(_ n: Int) -> ExpandedActivity {
-        .agents((0..<n).map {
+        .agents(AgentHomeTray((0..<n).map {
             AgentSession(id: "s\($0)", agent: "claude-code", project: "p",
                          state: .working, lastActivity: Date())
-        })
+        }))
     }
 
     private func ci(_ n: Int) -> ExpandedActivity {
@@ -6954,7 +7157,7 @@ struct DeckPageHeightTests {
     /// the difference showing as empty space.
     @Test func aShortCardDoesNotInheritATallOne() {
         let deck: [ExpandedActivity] = [
-            .agents(sessions(3)),
+            .agents(AgentHomeTray(sessions(3))),
             .claudeQuota(ClaudeQuota(sessionPercent: 26, weeklyPercent: 28)),
         ]
         let agentsPage = NotchContentLayout.expandedDeckSize(metrics: metrics,
@@ -6969,7 +7172,7 @@ struct DeckPageHeightTests {
     @Test func aCardIsTheSameHeightWhereverItSits() {
         let quota = ExpandedActivity.claudeQuota(ClaudeQuota(sessionPercent: 26, weeklyPercent: 28))
         let alone = NotchContentLayout.expandedContentBaseHeight([quota], page: 0)
-        let inDeck = NotchContentLayout.expandedContentBaseHeight([.agents(sessions(3)), quota],
+        let inDeck = NotchContentLayout.expandedContentBaseHeight([.agents(AgentHomeTray(sessions(3))), quota],
                                                                   page: 1)
         #expect(alone == inDeck)
     }
@@ -6978,7 +7181,7 @@ struct DeckPageHeightTests {
     /// pill; falling back to the tallest card is the old, safe behaviour.
     @Test func anOutOfRangePageFallsBackRatherThanGuessing() {
         let deck: [ExpandedActivity] = [
-            .agents(sessions(3)),
+            .agents(AgentHomeTray(sessions(3))),
             .claudeQuota(ClaudeQuota(sessionPercent: 26, weeklyPercent: 28)),
         ]
         let tallest = NotchContentLayout.expandedContentBaseHeight(deck)
@@ -7989,7 +8192,7 @@ struct ActivityKindLabelTests {
         let cases: [ExpandedActivity] = [
             .claudeQuota(quota), .cursorQuota(cursor), .activeApp(name: "x"),
             .systemStats(SystemStats(cpuPercent: 1, memoryPercent: 1)),
-            .ci([]), .agents([]), .clock,
+            .ci([]), .agents(AgentHomeTray([])), .clock,
             .shelf(items: [ShelfCardItem(id: UUID(), name: "a",
                                          url: URL(fileURLWithPath: "/tmp/a"))],
                    receipt: nil, error: nil),
@@ -8030,7 +8233,7 @@ struct DeckChromeTests {
         let deck = NotchContentLayout.expandedDeckLayout(metrics: metrics, activities: onePage)
         let expectedHeight = metrics.notchHeight + metrics.topGap
             + max(CGFloat(56), NotchContentLayout.expandedContentBaseHeight(onePage))
-            + NotchContentLayout.deckChromeHeight + 10
+            + NotchContentLayout.deckChromeHeight + NotchContentLayout.expandedTrayInset
         #expect(deck.size.height == expectedHeight)
     }
 
@@ -8057,7 +8260,7 @@ struct DeckChromeTests {
             let deck = NotchContentLayout.expandedDeckLayout(
                 metrics: metrics, activities: [activity, .clock], page: 0)
             let contentRoom = deck.size.height - metrics.notchHeight - metrics.topGap
-                - NotchContentLayout.deckChromeHeight - 10
+                - NotchContentLayout.deckChromeHeight - NotchContentLayout.expandedTrayInset
             #expect(contentRoom >= drawn,
                     "\(activity.kind) gets \(contentRoom)pt for \(drawn)pt of content")
         }
@@ -8444,7 +8647,7 @@ struct ActivityIdentityTests {
     @Test func distinctKindsKeepDistinctIdentities() {
         let ids = [ExpandedActivity.clock, .volume(50), .systemStats(SystemStats(cpuPercent: 1, memoryPercent: 1)),
                    .battery(BatteryStatus(level: 50, isCharging: false)),
-                   .agents([]), .ci([]), .shelf(items: [], receipt: nil, error: nil),
+                   .agents(AgentHomeTray([])), .ci([]), .shelf(items: [], receipt: nil, error: nil),
                    track("Song A", playing: true)].map(\.id)
         #expect(Set(ids).count == ids.count)
     }
@@ -9423,6 +9626,8 @@ struct NotchMotionTests {
         let floor = Animation.linear(duration: 0.01)
         #expect(NotchMotion.enter(reduceMotion: true) == floor)
         #expect(NotchMotion.settle(reduceMotion: true) == floor)
+        #expect(NotchMotion.page(reduceMotion: true) == floor)
+        #expect(NotchMotion.paint(reduceMotion: true) == floor)
         #expect(NotchMotion.exit(reduceMotion: true) == floor)
     }
 
@@ -9431,16 +9636,30 @@ struct NotchMotionTests {
         let floor = Animation.linear(duration: 0.01)
         #expect(NotchMotion.enter(reduceMotion: false) != floor)
         #expect(NotchMotion.settle(reduceMotion: false) != floor)
+        #expect(NotchMotion.page(reduceMotion: false) != floor)
+        #expect(NotchMotion.paint(reduceMotion: false) != floor)
         #expect(NotchMotion.exit(reduceMotion: false) != floor)
     }
 
-    @Test("the three tokens are distinct from each other")
+    @Test("the named tokens are distinct from each other")
     func tokensDiffer() {
-        // Three names for one curve would be a lie in the source: a reader
-        // would think `exit` had been tuned when it had not.
-        #expect(NotchMotion.enter(reduceMotion: false) != NotchMotion.settle(reduceMotion: false))
-        #expect(NotchMotion.enter(reduceMotion: false) != NotchMotion.exit(reduceMotion: false))
-        #expect(NotchMotion.settle(reduceMotion: false) != NotchMotion.exit(reduceMotion: false))
+        // Shared curves under different names would be a lie in the source: a
+        // reader would think `page` had been tuned when it had not.
+        let enter = NotchMotion.enter(reduceMotion: false)
+        let settle = NotchMotion.settle(reduceMotion: false)
+        let page = NotchMotion.page(reduceMotion: false)
+        let paint = NotchMotion.paint(reduceMotion: false)
+        let exit = NotchMotion.exit(reduceMotion: false)
+        #expect(enter != settle)
+        #expect(enter != page)
+        #expect(enter != paint)
+        #expect(enter != exit)
+        #expect(settle != page)
+        #expect(settle != paint)
+        #expect(settle != exit)
+        #expect(page != paint)
+        #expect(page != exit)
+        #expect(paint != exit)
     }
 }
 
@@ -9464,6 +9683,7 @@ struct NotchTokenScaleTests {
 
     @Test("type roles descend from display to caption")
     func typeDescends() {
+        #expect(NotchType.hero > NotchType.display)
         #expect(NotchType.display > NotchType.title)
         #expect(NotchType.title > NotchType.body)
         #expect(NotchType.body > NotchType.caption)
@@ -9478,10 +9698,15 @@ struct NotchTokenScaleTests {
         #expect(NotchMotion.stagger * 3 < 0.2)
         #expect(NotchMotion.rise <= NotchSpace.snug)
         #expect(NotchMotion.bump > 1)
-        #expect((NotchMotion.bump - 1) * NotchSpace.tile < NotchSpace.snug)
+        #expect((NotchMotion.bump - 1) * NotchSpace.tile < NotchSpace.base)
         // Press is the mirror of bump: the same distance the other way.
         #expect(NotchMotion.press < 1)
         #expect(abs((1 - NotchMotion.press) - (NotchMotion.bump - 1)) < 0.0001)
+        // Page and paint travel less than a snug gap / a few percent of size.
+        #expect(NotchMotion.pageScale > NotchMotion.press)
+        #expect(NotchMotion.pageScale < 1)
+        #expect(NotchMotion.paintScale > NotchMotion.press)
+        #expect(NotchMotion.paintScale < NotchMotion.pageScale)
     }
 
     /// The header mark is a glyph's backing, not a tap target: it must sit
@@ -9512,6 +9737,7 @@ struct NotchTokenScaleTests {
     func radii() {
         #expect(Set(NotchRadius.all).count == NotchRadius.all.count)
         #expect(NotchRadius.tile > NotchRadius.card)
+        #expect(NotchRadius.tile >= 16)
         #expect(NotchRadius.card > NotchRadius.well)
     }
 
@@ -9538,6 +9764,8 @@ struct NotchTokenScaleTests {
 
     @Test("a tile is wide enough for its well and padding")
     func tileHoldsWell() {
+        #expect(NotchSpace.hero > NotchSpace.well)
+        #expect(NotchSpace.hero < NotchSpace.tile)
         #expect(NotchSpace.tile > NotchSpace.well + NotchSpace.base * 2)
         #expect(NotchSpace.all.contains(NotchSpace.well))
         #expect(NotchSpace.all.contains(NotchSpace.tile))

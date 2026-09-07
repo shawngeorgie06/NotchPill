@@ -147,12 +147,19 @@ struct NotchRootView: View {
                 // up to it, which is the "pop" on open; on close the reverse,
                 // full-size copy held sharp inside a shrinking surface until it
                 // was cut off.
+                //
+                // Masked to the same silhouette the fill draws. Without it,
+                // agent tiles, quota meters and media glow paint into the
+                // wallpaper past the rounded bottom corners — the "outside
+                // the border" look. Peeks already mask this way.
                 expandedContent
+                    .mask(growingSurfaceMask(progress: state.expansionProgress))
                     .opacity(Double(state.expansionProgress))
                     .animation(contentFadeAnimation, value: state.expansionProgress)
                     .transition(.identity)
             } else if !collapsedChips.isEmpty {
                 collapsedContent
+                    .mask(growingSurfaceMask(progress: 1))
                     .transition(.opacity)
             }
         }
@@ -229,7 +236,12 @@ struct NotchRootView: View {
     /// Deliberately the same geometry `expandedBackground` draws — if the two
     /// drifted, the text would be clipped to a shape that is not the pill.
     private var growingPeekMask: some View {
-        let progress = state.devReadyPresentation
+        growingSurfaceMask(progress: state.devReadyPresentation)
+    }
+
+    /// One silhouette for fill and content. Peek, expanded deck and collapsed
+    /// chips all clip to this so nothing paints past the rim.
+    private func growingSurfaceMask(progress: CGFloat) -> some View {
         let width = metrics.notchWidth + (frameSize.width - metrics.notchWidth) * progress
         let height = metrics.notchHeight + (frameSize.height - metrics.notchHeight) * progress
         let floating = !metrics.hasPhysicalNotch
@@ -497,39 +509,42 @@ struct ExpandedView: View {
     var body: some View {
         Group {
             if activities.isEmpty {
-                VStack(spacing: 8) {
+                VStack(spacing: NotchSpace.snug * readability) {
                     Image(systemName: "rectangle.inset.filled")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.2))
-                    Text("No cards enabled")
-                        .font(.system(size: 13 * textScale, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .font(.system(size: NotchType.display * textScale, weight: .medium))
+                        .foregroundStyle(.white.opacity(NotchOpacity.hairline))
+                    Text("Nothing on the island")
+                        .font(.system(size: NotchType.body * textScale, weight: .semibold))
+                        .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
+                    Text("Turn on cards in Settings")
+                        .font(.system(size: NotchType.caption * textScale, weight: .medium))
+                        .foregroundStyle(.white.opacity(NotchOpacity.hairline))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 activityDeck
             }
         }
-        // Content sits in the tray rather than flush to its silhouette. The
-        // top stays at `base`: the deck budget carries 10pt of slack for top
-        // and bottom together, and `roomy` there would push the page dots off
-        // the lower edge.
-        .padding(.horizontal, NotchSpace.roomy * readability)
+        // Content sits inside the tray, clear of the 22pt bottom corners.
+        // Horizontal `section` (20) keeps tiles and meters out of the curve;
+        // vertical budget matches `expandedTrayInset` in the height layout.
+        .padding(.horizontal, NotchSpace.section * readability)
         .padding(.top, NotchSpace.base * readability)
-        .padding(.bottom, NotchSpace.tight * readability)
+        .padding(.bottom, NotchSpace.base * readability)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .clipped()
         // Keyed on the track, not the whole value. `NowPlaying` carries
         // `isPlaying`, so animating on it made pause reflow the entire deck —
         // the sideways slide that reads as "skipped to the next song". Play and
         // pause are now a local symbol morph instead; see `mediaCard`.
         .animation(.easeOut(duration: 0.16), value: state.nowPlaying?.trackKey)
-        .animation(.easeOut(duration: 0.14), value: state.appSwitchHint)
-        .animation(.easeOut(duration: 0.14), value: state.frontmostApp)
-        .animation(.easeOut(duration: 0.12), value: state.systemVolume)
+        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: state.appSwitchHint)
+        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: state.frontmostApp)
+        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: state.systemVolume)
         // Keyed on contents, not identity. Identity drives the page slide (see
         // `ExpandedActivity.id`); this only smooths a card growing or shrinking
         // around what changed inside it.
-        .animation(.easeOut(duration: 0.14), value: activities.map(\.contentKey))
+        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: activities.map(\.contentKey))
         .onChange(of: activityKinds) { _, kinds in
             state.reconcileExpandedDeck(kinds: kinds)
         }
@@ -558,15 +573,18 @@ struct ExpandedView: View {
                     .padding(.horizontal, 3)
                 }
             }
+            .clipped()
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 24)
                     .onEnded { value in
-                        if value.translation.width < -24 { selectNextPage() }
-                        if value.translation.width > 24 { selectPreviousPage() }
+                        withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
+                            if value.translation.width < -24 { selectNextPage() }
+                            if value.translation.width > 24 { selectPreviousPage() }
+                        }
                     }
             )
-            .animation(.easeOut(duration: 0.16), value: clampedPage)
+            .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
 
             if NotchContentLayout.showsDeckChrome(for: activities) {
                 deckChrome
@@ -581,33 +599,30 @@ struct ExpandedView: View {
     /// The dots stay: they are the one tap-to-page control, and the swipe
     /// has no other affordance.
     private var deckChrome: some View {
-        HStack(spacing: NotchSpace.base * readability) {
+        ZStack {
             if showsPageLabel {
                 Label(activityLabel(activities[clampedPage]),
                       systemImage: activityIcon(activities[clampedPage]))
                     .font(.system(size: NotchType.caption * textScale, weight: .semibold))
                     .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
                     .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .transition(.opacity)
             }
 
-            Spacer(minLength: 0)
-
-            // No chevrons. They were the last of the arrows: two tap
-            // targets restating what the dots already show and the
-            // swipe already does, spending 52pt of a strip that is
-            // narrow to begin with. The dots stay tappable, so nothing
-            // that could be reached by an arrow became unreachable.
             HStack(spacing: NotchSpace.snug * readability) {
                 ForEach(Array(activities.indices), id: \.self) { index in
-                    Button { state.selectExpandedDeckPage(index, kinds: activityKinds) } label: {
+                    Button {
+                        withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
+                            state.selectExpandedDeckPage(index, kinds: activityKinds)
+                        }
+                    } label: {
                         Capsule()
                             .fill(index == clampedPage
                                   ? Color.white.opacity(NotchOpacity.primary)
-                                  : .white.opacity(NotchOpacity.rim))
-                            .frame(width: (index == clampedPage ? NotchSpace.roomy : NotchSpace.snug) * readability,
-                                   height: NotchSpace.snug * readability)
+                                  : .white.opacity(NotchOpacity.highlight))
+                            .frame(width: (index == clampedPage ? NotchSpace.base : NotchSpace.tight * 2) * readability,
+                                   height: NotchSpace.tight * 2 * readability)
                             .frame(width: NotchSpace.mark * readability, height: NotchSpace.mark * readability)
                             .contentShape(Rectangle())
                     }
@@ -615,6 +630,7 @@ struct ExpandedView: View {
                     .accessibilityLabel("Show \(activityLabel(activities[index]))")
                 }
             }
+            .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
         }
         .frame(height: NotchSpace.mark * readability)
         .contentShape(Rectangle())
@@ -650,9 +666,14 @@ struct ExpandedView: View {
     private var pageTransition: AnyTransition {
         let entering: Edge = state.expandedDeckDirection >= 0 ? .trailing : .leading
         let leaving: Edge = state.expandedDeckDirection >= 0 ? .leading : .trailing
+        let scale = NotchMotion.pageScale
         return .asymmetric(
-            insertion: .move(edge: entering).combined(with: .opacity),
-            removal: .move(edge: leaving).combined(with: .opacity)
+            insertion: .move(edge: entering)
+                .combined(with: .opacity)
+                .combined(with: .scale(scale: scale)),
+            removal: .move(edge: leaving)
+                .combined(with: .opacity)
+                .combined(with: .scale(scale: scale))
         )
     }
 
