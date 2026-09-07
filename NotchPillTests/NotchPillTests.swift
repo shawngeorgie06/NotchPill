@@ -9479,6 +9479,9 @@ struct NotchTokenScaleTests {
         #expect(NotchMotion.rise <= NotchSpace.snug)
         #expect(NotchMotion.bump > 1)
         #expect((NotchMotion.bump - 1) * NotchSpace.tile < NotchSpace.snug)
+        // Press is the mirror of bump: the same distance the other way.
+        #expect(NotchMotion.press < 1)
+        #expect(abs((1 - NotchMotion.press) - (NotchMotion.bump - 1)) < 0.0001)
     }
 
     /// The header mark is a glyph's backing, not a tap target: it must sit

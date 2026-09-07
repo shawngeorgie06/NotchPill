@@ -42,6 +42,10 @@ enum NotchMotion {
     /// in the periphery; not enough to move its neighbours.
     static let bump: CGFloat = 1.04
 
+    /// How much an object compresses under the pointer while pressed. The
+    /// mirror of `bump`: the same distance, the other way.
+    static let press: CGFloat = 0.96
+
     /// The exact value the rest of the overlay already uses for Reduce Motion.
     /// Not zero: a true zero-duration animation still lets SwiftUI batch the
     /// change, and matching the existing constant keeps every surface in step.
@@ -91,6 +95,31 @@ struct NotchBump<Trigger: Equatable>: ViewModifier {
                 SpringKeyframe(1, duration: 0.30, spring: .smooth)
             }
         }
+    }
+}
+
+/// How every object on the island answers the pointer: it lifts under hover
+/// (a wash of white over its own surface, its rim brightening) and compresses
+/// under press. One style for tiles, rows and chips, so they all feel like the
+/// same material; before this only the shelf chips reacted to hover and only
+/// the transport buttons to press.
+///
+/// The wash is drawn over the label, not as its background, so it works on
+/// any surface the object already has — a tinted band, a well fill, nothing.
+struct NotchObjectButtonStyle: ButtonStyle {
+    let cornerRadius: CGFloat
+    let reduceMotion: Bool
+    @State private var hovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        configuration.label
+            .overlay(shape.fill(.white.opacity(hovered ? NotchOpacity.wellFill : 0)))
+            .overlay(shape.stroke(.white.opacity(hovered ? NotchOpacity.rim : 0), lineWidth: 0.5))
+            .scaleEffect(configuration.isPressed && !reduceMotion ? NotchMotion.press : 1)
+            .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: configuration.isPressed)
+            .animation(NotchMotion.exit(reduceMotion: reduceMotion), value: hovered)
+            .onHover { hovered = $0 }
     }
 }
 

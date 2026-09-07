@@ -1615,12 +1615,13 @@ struct ExpandedActivityCard: View {
                             .padding(.vertical, s(2))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(
-                                RoundedRectangle(cornerRadius: s(4), style: .continuous)
-                                    .fill(Color.white.opacity(entry.isPinned ? 0.12 : 0.06))
+                                RoundedRectangle(cornerRadius: s(NotchRadius.well), style: .continuous)
+                                    .fill(Color.white.opacity(entry.isPinned ? NotchOpacity.highlight : NotchOpacity.wellFill))
                             )
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(NotchObjectButtonStyle(cornerRadius: s(NotchRadius.well),
+                                                            reduceMotion: reduceMotion))
                         .help("Copy again")
                       }
                       .onHover { hoveredClipboardPin = $0 ? entry.id : nil }
@@ -1748,7 +1749,8 @@ struct ExpandedActivityCard: View {
                             .frame(height: s(NotchSpace.section))
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(NotchObjectButtonStyle(cornerRadius: s(NotchRadius.well),
+                                                            reduceMotion: reduceMotion))
                         .notchReveal(index, scale: readability, reduceMotion: reduceMotion)
                         .notchBump(on: run.state, reduceMotion: reduceMotion)
                     }
@@ -1830,7 +1832,7 @@ struct ExpandedActivityCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NotchObjectButtonStyle(cornerRadius: s(NotchRadius.well), reduceMotion: reduceMotion))
     }
 
     /// Red is reserved for a failure — the only state that wants you to stop
@@ -1896,7 +1898,7 @@ struct ExpandedActivityCard: View {
                                   lineWidth: 0.5))
             .contentShape(shape)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NotchObjectButtonStyle(cornerRadius: s(NotchRadius.tile), reduceMotion: reduceMotion))
         .accessibilityLabel("\(session.displayName), \(session.statusLabel)")
         .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.statusLabel)
         .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.state)
@@ -1989,7 +1991,7 @@ struct ExpandedActivityCard: View {
                 .overlay(Circle().stroke(.white.opacity(NotchOpacity.rim), lineWidth: 0.5))
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NotchObjectButtonStyle(cornerRadius: s(NotchSpace.well) / 2, reduceMotion: reduceMotion))
         .accessibilityLabel("Jump to \(target.displayName)")
     }
 
@@ -2460,10 +2462,11 @@ struct ExpandedActivityCard: View {
             }
             .frame(width: s(NotchSpace.well + NotchSpace.section + NotchSpace.roomy),
                    height: s(NotchSpace.section * 2))
+            // The hover lift is the shared style's now; `hoveredShelfItem`
+            // still drives the remove button.
             .background(
                 RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous)
-                    .fill(Color.white.opacity(hoveredShelfItem == item.id
-                                              ? NotchOpacity.highlight : NotchOpacity.wellFill))
+                    .fill(Color.white.opacity(NotchOpacity.wellFill))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous)
@@ -2471,7 +2474,7 @@ struct ExpandedActivityCard: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NotchObjectButtonStyle(cornerRadius: s(NotchRadius.card), reduceMotion: reduceMotion))
         // Drag a chip straight into Finder, Mail, Messages -- the way a file
         // leaves the shelf without picking a folder first. The click above is
         // AppKit's and does not compete with this.
