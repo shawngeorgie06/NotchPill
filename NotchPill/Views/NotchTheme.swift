@@ -82,6 +82,22 @@ enum NotchMotion {
 ///
 /// Applied to the objects — tiles, meters, rows, chips — and not to the
 /// header, which is where the eye lands first and should already be there.
+/// Set inside a `notchReveal` subtree so decorations know their arrival is
+/// already being animated for them. One arriving object gets one arrival:
+/// a painted fill that fades itself in *while* the reveal fades its parent
+/// in composites two ramps, and the tile reads as a half-black rectangle
+/// that then fills with colour.
+private struct NotchArrivalOwnedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var notchArrivalOwned: Bool {
+        get { self[NotchArrivalOwnedKey.self] }
+        set { self[NotchArrivalOwnedKey.self] = newValue }
+    }
+}
+
 struct NotchReveal: ViewModifier {
     let index: Int
     let scale: CGFloat
@@ -98,6 +114,9 @@ struct NotchReveal: ViewModifier {
                     shown = true
                 }
             }
+            // Applied outward, so it reaches `.background` content too —
+            // which is exactly where the painted fills live.
+            .environment(\.notchArrivalOwned, true)
     }
 }
 
@@ -169,11 +188,13 @@ struct NotchPaintedFill: View {
     var lit: Bool = true
     let cornerRadius: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// True when an enclosing `notchReveal` is already animating this tile in.
+    @Environment(\.notchArrivalOwned) private var arrivalOwned
     @State private var painted = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        let ready = painted || reduceMotion
+        let ready = painted || reduceMotion || arrivalOwned
         ZStack {
             shape.fill(
                 LinearGradient(
@@ -203,6 +224,8 @@ struct NotchPaintedFill: View {
         .opacity(ready ? 1 : 0)
         .scaleEffect(ready ? 1 : NotchMotion.paintScale)
         .onAppear {
+            // Only paint ourselves in when nobody else is doing it for us.
+            guard !arrivalOwned else { return }
             withAnimation(NotchMotion.paint(reduceMotion: reduceMotion)) {
                 painted = true
             }
