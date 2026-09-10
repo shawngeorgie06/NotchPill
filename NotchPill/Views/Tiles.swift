@@ -1055,7 +1055,14 @@ struct ExpandedActivityCard: View {
                 .minimumScaleFactor(0.75)
                 .truncationMode(.tail)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Height comes from the content, never from the card. Stretching to
+        // the container tied the tile's height to a number that ANIMATES when
+        // you page between cards of different heights — and `.background`
+        // follows that animating height while the text stays pinned to
+        // topLeading. You saw the label on black with the fill still growing
+        // up behind it. A tile that sizes itself has nothing to grow into.
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
         .padding(s(NotchSpace.base))
         .background(NotchPaintedFill(tint: quotaColor(percent), lit: true,
                                      cornerRadius: radius))
@@ -1199,7 +1206,9 @@ struct ExpandedActivityCard: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Same reason as `meterTile`: content-sized, not card-sized.
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
         .padding(s(NotchSpace.base))
         .background(NotchPaintedFill(tint: .white.opacity(0.16), lit: false, cornerRadius: radius))
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -1340,7 +1349,9 @@ struct ExpandedActivityCard: View {
                         .foregroundStyle(.white.opacity(NotchOpacity.secondary))
                         .lineLimit(1)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                // Same reason as `meterTile`: content-sized, not card-sized.
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(s(NotchSpace.base))
                 .background(NotchPaintedFill(tint: NotchDesign.devReadyGreen.opacity(0.8),
                                              lit: true, cornerRadius: radius))
