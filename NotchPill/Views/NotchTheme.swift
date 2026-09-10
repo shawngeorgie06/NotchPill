@@ -82,22 +82,6 @@ enum NotchMotion {
 ///
 /// Applied to the objects — tiles, meters, rows, chips — and not to the
 /// header, which is where the eye lands first and should already be there.
-/// Set inside a `notchReveal` subtree so decorations know their arrival is
-/// already being animated for them. One arriving object gets one arrival:
-/// a painted fill that fades itself in *while* the reveal fades its parent
-/// in composites two ramps, and the tile reads as a half-black rectangle
-/// that then fills with colour.
-private struct NotchArrivalOwnedKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
-extension EnvironmentValues {
-    var notchArrivalOwned: Bool {
-        get { self[NotchArrivalOwnedKey.self] }
-        set { self[NotchArrivalOwnedKey.self] = newValue }
-    }
-}
-
 struct NotchReveal: ViewModifier {
     let index: Int
     let scale: CGFloat
@@ -114,9 +98,6 @@ struct NotchReveal: ViewModifier {
                     shown = true
                 }
             }
-            // Applied outward, so it reaches `.background` content too —
-            // which is exactly where the painted fills live.
-            .environment(\.notchArrivalOwned, true)
     }
 }
 
@@ -180,21 +161,22 @@ extension View {
 /// a sheen along the top edge, and a rim that is brighter where the light
 /// lands. A flat fill at `NotchOpacity.band` is a sticker; this is a tile.
 ///
-/// The wash lands rather than pops: on appear it fills from a slightly
-/// smaller, transparent state, and lit/idle changes interpolate instead of
-/// swapping. Reduce Motion keeps the final paint with no travel.
+/// The fill does NOT animate its own arrival. It is a decoration painted
+/// behind something else, and whatever it sits behind owns the arrival —
+/// `notchReveal` for a tile in a list, the card's own transition otherwise.
+/// A self-fade here was the "half-black rectangle that fills in" glitch: two
+/// opacity ramps composited on one object. Worse, it drove that ramp from
+/// `@State` set in `onAppear`, so any re-render that reset the state without
+/// firing `onAppear` again left the fill stuck at opacity 0 — a tile whose
+/// colour turned black and stayed black. Only `lit` changes interpolate.
 struct NotchPaintedFill: View {
     let tint: Color
     var lit: Bool = true
     let cornerRadius: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// True when an enclosing `notchReveal` is already animating this tile in.
-    @Environment(\.notchArrivalOwned) private var arrivalOwned
-    @State private var painted = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        let ready = painted || reduceMotion || arrivalOwned
         ZStack {
             shape.fill(
                 LinearGradient(
@@ -221,15 +203,6 @@ struct NotchPaintedFill: View {
                 lineWidth: 0.5
             )
         )
-        .opacity(ready ? 1 : 0)
-        .scaleEffect(ready ? 1 : NotchMotion.paintScale)
-        .onAppear {
-            // Only paint ourselves in when nobody else is doing it for us.
-            guard !arrivalOwned else { return }
-            withAnimation(NotchMotion.paint(reduceMotion: reduceMotion)) {
-                painted = true
-            }
-        }
         .animation(NotchMotion.paint(reduceMotion: reduceMotion), value: lit)
     }
 }
