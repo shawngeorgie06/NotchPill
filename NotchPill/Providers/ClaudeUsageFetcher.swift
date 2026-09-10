@@ -125,6 +125,12 @@ enum ClaudeUsageFetcher {
 
     enum FetchError: Error, Equatable {
         case noCredentials
+        /// The Keychain could not answer *right now* — the Mac is in dark wake,
+        /// the keychain is locked, or macOS cannot put up the consent UI. A
+        /// signed-in user looks exactly like this to `SecItemCopyMatching`, so
+        /// this must never be treated as `noCredentials`: retrying is correct
+        /// and re-prompting is not a risk, because no prompt was possible.
+        case keychainUnavailable
         /// Signed in, but this token cannot read the account.
         case missingScope
         case unauthorized

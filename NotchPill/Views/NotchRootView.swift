@@ -525,12 +525,12 @@ struct ExpandedView: View {
                 activityDeck
             }
         }
-        // Content sits inside the tray, clear of the 22pt bottom corners.
-        // Horizontal `section` (20) keeps tiles and meters out of the curve;
-        // vertical budget matches `expandedTrayInset` in the height layout.
-        .padding(.horizontal, NotchSpace.section * readability)
-        .padding(.top, NotchSpace.base * readability)
-        .padding(.bottom, NotchSpace.base * readability)
+        // Tray pages keep content off the 22pt corners. Island-surface pages
+        // (media) paint the whole body — padding would reopen the black frame
+        // around a smaller card. Their own content inset clears the curve.
+        .padding(.horizontal, isIslandSurfacePage ? 0 : NotchSpace.section * readability)
+        .padding(.top, isIslandSurfacePage ? 0 : NotchSpace.base * readability)
+        .padding(.bottom, isIslandSurfacePage ? 0 : NotchSpace.base * readability)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .clipped()
         // Keyed on the track, not the whole value. `NowPlaying` carries
@@ -553,43 +553,82 @@ struct ExpandedView: View {
     /// One readable card at a time. The old row made every card narrower as
     /// new signals appeared; this deck makes new signals discoverable without
     /// changing the island's silhouette or shrinking their text.
+    @ViewBuilder
     private var activityDeck: some View {
-        VStack(spacing: NotchSpace.snug * readability) {
-            ZStack {
-                if activities.indices.contains(clampedPage) {
-                    ExpandedActivityCard(
-                        activity: activities[clampedPage],
-                        appIcon: state.frontmostAppIcon,
-                        actions: actions,
-                        onCancelTimer: { timer.cancel() },
-                        readability: readability,
-                        textScale: textScale,
-                        expandToFill: true,
-                        tokenUsage: settings.showTokenUsage ? tokens.summary : nil,
-                        tokenPeriod: settings.resolvedTokenPeriod
-                    )
-                    .id(activities[clampedPage].id)
-                    .transition(pageTransition)
-                    .padding(.horizontal, 3)
-                }
+        if isIslandSurfacePage {
+            islandSurfaceDeck
+        } else {
+            trayDeck
+        }
+    }
+
+    /// Media owns the island body. The wash fills edge to edge; dots sit on
+    /// top of it rather than in a black strip underneath.
+    private var islandSurfaceDeck: some View {
+        ZStack(alignment: .bottom) {
+            pageCard
+            if NotchContentLayout.showsDeckChrome(for: activities) {
+                deckChrome
+                    .padding(.horizontal, NotchSpace.base * readability)
+                    .padding(.bottom, NotchSpace.base * readability)
             }
-            .clipped()
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 24)
-                    .onEnded { value in
-                        withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
-                            if value.translation.width < -24 { selectNextPage() }
-                            if value.translation.width > 24 { selectPreviousPage() }
-                        }
-                    }
-            )
-            .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .gesture(pageSwipeGesture)
+        .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
+    }
+
+    /// Agents, quota, CI, shelf — objects sitting in a tray with room for the
+    /// silhouette curve and a chrome strip below.
+    private var trayDeck: some View {
+        VStack(spacing: NotchSpace.snug * readability) {
+            pageCard
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .clipped()
+                .contentShape(Rectangle())
+                .gesture(pageSwipeGesture)
+                .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
 
             if NotchContentLayout.showsDeckChrome(for: activities) {
                 deckChrome
             }
         }
+    }
+
+    @ViewBuilder
+    private var pageCard: some View {
+        ZStack {
+            if activities.indices.contains(clampedPage) {
+                ExpandedActivityCard(
+                    activity: activities[clampedPage],
+                    appIcon: state.frontmostAppIcon,
+                    actions: actions,
+                    onCancelTimer: { timer.cancel() },
+                    readability: readability,
+                    textScale: textScale,
+                    expandToFill: true,
+                    bottomChromeHeight: isIslandSurfacePage
+                        ? NotchContentLayout.deckChromeHeight + NotchSpace.base * 2
+                        : 0,
+                    tokenUsage: settings.showTokenUsage ? tokens.summary : nil,
+                    tokenPeriod: settings.resolvedTokenPeriod
+                )
+                .id(activities[clampedPage].id)
+                .transition(pageTransition)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var pageSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onEnded { value in
+                withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
+                    if value.translation.width < -24 { selectNextPage() }
+                    if value.translation.width > 24 { selectPreviousPage() }
+                }
+            }
     }
 
     /// The strip under the card: page dots, and the page's name only while
@@ -662,6 +701,15 @@ struct ExpandedView: View {
     }
 
     private var activityKinds: [String] { activities.map(\.kind) }
+
+    /// Pages whose content *is* the island surface (one full wash), not a
+    /// tray of objects. They keep a tighter horizontal inset so the wash
+    /// meets the silhouette instead of floating as a window inside it.
+    private var isIslandSurfacePage: Bool {
+        guard activities.indices.contains(clampedPage) else { return false }
+        if case .media = activities[clampedPage] { return true }
+        return false
+    }
 
     private var pageTransition: AnyTransition {
         let entering: Edge = state.expandedDeckDirection >= 0 ? .trailing : .leading

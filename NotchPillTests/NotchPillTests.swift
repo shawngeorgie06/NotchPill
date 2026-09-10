@@ -6949,7 +6949,7 @@ struct UsageBackoffTests {
                 return (Data(), response)
             },
             readKeychain: {
-                Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8)
+                .blob(Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8))
             })
         let start = Date()
         _ = await service.quota(now: start)
@@ -6960,6 +6960,54 @@ struct UsageBackoffTests {
         #expect(calls == 1)
         _ = await service.quota(now: start.addingTimeInterval(700))
         #expect(calls == 2)
+    }
+
+    /// A Keychain that cannot answer right now is not a signed-out user.
+    ///
+    /// Measured on 2026-09-08: the Mac went into dark wake, `SecItemCopyMatching`
+    /// returned -25320 ("In dark wake, no UI possible"), the service read that
+    /// as `.noCredentials`, set `givenUp`, and the card stayed gone for the next
+    /// 39 hours because `givenUp` only clears on relaunch. A transient refusal
+    /// has to back off and try again.
+    @Test func darkWakeKeychainRetriesInsteadOfGivingUp() async throws {
+        var reads = 0
+        var transportCalls = 0
+        let service = ClaudeUsageService(
+            transport: { request in
+                transportCalls += 1
+                let body = Data(#"{"five_hour":{"utilization":11},"seven_day":{"utilization":22}}"#.utf8)
+                return (body, HTTPURLResponse(url: request.url!, statusCode: 200,
+                                              httpVersion: nil, headerFields: nil)!)
+            },
+            readKeychain: {
+                reads += 1
+                // Unavailable on the first ask, fine on the next.
+                return reads == 1
+                    ? .unavailable
+                    : .blob(Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8))
+            },
+            store: nil)
+        let start = Date()
+        #expect(await service.quota(now: start) == nil)
+        #expect(transportCalls == 0)
+        // Past the backoff the service must ask the Keychain again rather than
+        // sitting on a permanent verdict.
+        let later = await service.quota(now: start.addingTimeInterval(4000))
+        #expect(later?.sessionPercent == 11)
+        #expect(reads == 2)
+    }
+
+    /// A Keychain with no item at all still gives up — re-asking re-prompts.
+    @Test func missingKeychainItemStillGivesUp() async throws {
+        var reads = 0
+        let service = ClaudeUsageService(
+            transport: { _ in Issue.record("must not reach the network"); return (Data(), URLResponse()) },
+            readKeychain: { reads += 1; return .absent },
+            store: nil)
+        let start = Date()
+        #expect(await service.quota(now: start) == nil)
+        #expect(await service.quota(now: start.addingTimeInterval(4000)) == nil)
+        #expect(reads == 1)
     }
 }
 
@@ -7048,7 +7096,7 @@ struct ClaudeQuotaCacheTests {
                                         httpVersion: nil, headerFields: nil)!)
             },
             readKeychain: {
-                Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8)
+                .blob(Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8))
             },
             store: defaults)
         let start = Date()
@@ -7064,7 +7112,7 @@ struct ClaudeQuotaCacheTests {
                                          httpVersion: nil, headerFields: nil)!)
             },
             readKeychain: {
-                Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8)
+                .blob(Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8))
             },
             store: defaults)
         let restored = try #require(await limited.quota(now: start.addingTimeInterval(60)))
@@ -7085,7 +7133,7 @@ struct ClaudeQuotaCacheTests {
                                          httpVersion: nil, headerFields: nil)!)
             },
             readKeychain: {
-                Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8)
+                .blob(Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8))
             },
             store: defaults)
         #expect(await limited.quota(now: Date()) == nil)

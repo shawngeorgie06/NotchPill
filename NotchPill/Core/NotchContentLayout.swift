@@ -846,9 +846,10 @@ enum NotchContentLayout {
         case .claudeQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
         case .codexQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
         case .cursorQuota: return quotaCard
-        // Hero cover (72) beside title and transport inside a painted tile
-        // pad (8), then a progress row (~20).
-        case .media: return 112
+        // Hero cover grows with the island body; progress + overlaid dots sit
+        // under it. Budget includes what used to be tray inset and chrome strip
+        // — those are now inside the surface, not below a floating card.
+        case .media: return 140
         case .agents: return agentsShelf
         case .openCodeUsage: return quotaCard
         case .shelf: return 72

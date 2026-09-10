@@ -44,12 +44,23 @@ actor ClaudeUsageService {
     static let maxBackoff: TimeInterval = 1800
 
     private let transport: (URLRequest) async throws -> (Data, URLResponse)
-    private let readKeychain: () -> Data?
+    private let readKeychain: () -> KeychainRead
+
+    /// What the Keychain had to say. `absent` and `unavailable` both mean "no
+    /// token in hand", and collapsing them into one `nil` is what let a dark
+    /// wake masquerade as a signed-out user.
+    enum KeychainRead: Equatable {
+        case blob(Data)
+        /// No such item. The user is not signed in to Claude Code.
+        case absent
+        /// The item may well exist; macOS would not say. Transient.
+        case unavailable
+    }
 
     init(transport: @escaping (URLRequest) async throws -> (Data, URLResponse) = {
              try await URLSession.shared.data(for: $0)
          },
-         readKeychain: @escaping () -> Data? = ClaudeUsageService.keychainBlob,
+         readKeychain: @escaping () -> KeychainRead = ClaudeUsageService.keychainBlob,
          store: UserDefaults? = .standard) {
         self.transport = transport
         self.readKeychain = readKeychain
@@ -80,7 +91,7 @@ actor ClaudeUsageService {
     /// Reads the credential Claude Code stored. Returns nil when the item is
     /// missing or access was declined — both are "no usage card", neither is an
     /// error worth surfacing twice.
-    nonisolated static func keychainBlob() -> Data? {
+    nonisolated static func keychainBlob() -> KeychainRead {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: ClaudeUsageFetcher.keychainService,
@@ -89,13 +100,20 @@ actor ClaudeUsageService {
         ]
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess else {
-            if status != errSecItemNotFound {
-                LogStore.log("claude", "keychain read refused (OSStatus \(status))")
-            }
-            return nil
+        switch status {
+        case errSecSuccess:
+            guard let data = item as? Data else { return .unavailable }
+            return .blob(data)
+        case errSecItemNotFound:
+            return .absent
+        default:
+            // Everything else is macOS declining to answer, not an answer of
+            // "no". -25320 (dark wake, no UI possible) is the one measured in
+            // the wild; -25308 (interaction not allowed) and -25291 (keychain
+            // not available) arrive the same way, from a locked or asleep Mac.
+            LogStore.log("claude", "keychain unavailable (OSStatus \(status)) — will retry")
+            return .unavailable
         }
-        return item as? Data
     }
 
     /// One request at a time, whoever asks.
@@ -161,6 +179,12 @@ actor ClaudeUsageService {
                     : "not signed in to Claude Code")
                 cached = nil
                 return nil
+            case .keychainUnavailable:
+                // Deliberately not `givenUp`: the Keychain never said no, it
+                // said not now. Backing off is what makes the card come back
+                // on its own instead of only after a relaunch.
+                let wait = backoff(suggested: nil, now: now)
+                LogStore.log("claude", "keychain unavailable — next try in \(Int(wait))s")
             case .unauthorized:
                 LogStore.log("claude", "token rejected — sign in to Claude Code again")
             case .rateLimited(let retryAfter):
@@ -206,8 +230,13 @@ actor ClaudeUsageService {
     }
 
     private func fetch(now: Date) async throws -> ClaudeQuota {
-        guard let blob = readKeychain(),
-              let creds = ClaudeUsageFetcher.credentials(in: blob) else {
+        let read = readKeychain()
+        guard case .blob(let blob) = read else {
+            throw read == .unavailable
+                ? ClaudeUsageFetcher.FetchError.keychainUnavailable
+                : ClaudeUsageFetcher.FetchError.noCredentials
+        }
+        guard let creds = ClaudeUsageFetcher.credentials(in: blob) else {
             throw ClaudeUsageFetcher.FetchError.noCredentials
         }
         // Checked before spending a request: a CLI token can hold only

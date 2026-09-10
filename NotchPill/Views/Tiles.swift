@@ -986,6 +986,9 @@ struct ExpandedActivityCard: View {
     var readability: CGFloat = 1.0
     var textScale: CGFloat = 1.0
     var expandToFill: Bool = false
+    /// Height reserved at the bottom when page dots overlay this surface
+    /// (media). Zero on tray pages where chrome lives outside the card.
+    var bottomChromeHeight: CGFloat = 0
     @State private var hoveredShelfItem: UUID?
     @State private var hoveredClipboardClear = false
     @State private var hoveredClipboardSearch = false
@@ -1913,52 +1916,72 @@ struct ExpandedActivityCard: View {
         }
     }
 
-    /// Cover as the object on a painted surface — same tile language as an
-    /// agent session. Title and transport sit beside it; progress underneath.
+    /// The island body for Now Playing. Wash and glow fill edge to edge;
+    /// artwork / title / transport / progress are laid out inside a content
+    /// inset so they clear the silhouette curve and the overlaid dots.
     private func mediaCard(_ np: NowPlaying) -> some View {
-        let radius = s(NotchRadius.tile)
-        return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            HStack(alignment: .center, spacing: s(NotchSpace.base)) {
-                mediaArtwork(np)
-                VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
-                    Text(np.title)
-                        .font(font(size: NotchType.display, weight: .semibold))
-                        .foregroundStyle(.white.opacity(NotchOpacity.primary))
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.75)
-                        .truncationMode(.tail)
-                    Text(np.artist)
-                        .font(font(size: NotchType.body, weight: .medium))
-                        .foregroundStyle(.white.opacity(NotchOpacity.secondary))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .truncationMode(.tail)
-                    Spacer(minLength: 0)
-                    HStack(spacing: s(NotchSpace.roomy)) {
-                        transportButton("backward.fill", action: actions.previous)
-                        transportButton(np.isPlaying ? "pause.fill" : "play.fill", size: 22,
-                                        morphing: true, action: actions.togglePlayPause)
-                        transportButton("forward.fill", action: actions.next)
+        GeometryReader { geo in
+            let inset = s(NotchSpace.base)
+            let chrome = max(0, bottomChromeHeight)
+            let progressH: CGFloat = np.hasProgress ? s(22) : 0
+            let gap = s(NotchSpace.snug)
+            let usableH = max(s(NotchSpace.hero),
+                              geo.size.height - inset * 2 - chrome - progressH
+                                - (np.hasProgress ? gap : 0))
+            // Grow the cover with the island: at least hero, at most half the
+            // width or the usable row height — whichever is smaller.
+            let art = min(max(s(NotchSpace.hero), usableH),
+                          geo.size.width * 0.42)
+
+            VStack(alignment: .leading, spacing: gap) {
+                HStack(alignment: .center, spacing: s(NotchSpace.base)) {
+                    mediaArtwork(np, size: art)
+                    VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
+                        Text(np.title)
+                            .font(font(size: NotchType.display, weight: .semibold))
+                            .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.75)
+                            .truncationMode(.tail)
+                        Text(np.artist)
+                            .font(font(size: NotchType.body, weight: .medium))
+                            .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .truncationMode(.tail)
                         Spacer(minLength: 0)
-                        EqualizerSlot(isPlaying: np.isPlaying, scale: readability)
+                        HStack(spacing: s(NotchSpace.roomy)) {
+                            transportButton("backward.fill", action: actions.previous)
+                            transportButton(np.isPlaying ? "pause.fill" : "play.fill", size: 22,
+                                            morphing: true, action: actions.togglePlayPause)
+                            transportButton("forward.fill", action: actions.next)
+                            Spacer(minLength: 0)
+                            EqualizerSlot(isPlaying: np.isPlaying, scale: readability)
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .frame(height: art)
+
+                if np.hasProgress {
+                    MediaProgressView(nowPlaying: np, style: .expanded,
+                                      readability: readability, textScale: textScale)
+                }
+
+                Spacer(minLength: 0)
             }
-            .frame(height: s(NotchSpace.hero))
-            if np.hasProgress {
-                MediaProgressView(nowPlaying: np, style: .expanded, readability: readability, textScale: textScale)
-            }
+            .padding(inset)
+            .padding(.bottom, chrome)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
-        .padding(s(NotchSpace.base))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             ZStack {
-                NotchPaintedFill(tint: .white.opacity(0.14), lit: false, cornerRadius: radius)
+                // Radius 0: NotchShape is the only silhouette.
+                NotchPaintedFill(tint: .white.opacity(0.14), lit: false, cornerRadius: 0)
                 mediaGlow(np)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .clipped()
     }
 
@@ -1991,8 +2014,10 @@ struct ExpandedActivityCard: View {
         }
     }
 
-    private func mediaArtwork(_ np: NowPlaying) -> some View {
-        Group {
+    private func mediaArtwork(_ np: NowPlaying, size: CGFloat? = nil) -> some View {
+        let side = size ?? s(NotchSpace.hero)
+        let radius = min(s(NotchRadius.tile), side * 0.22)
+        return Group {
             if let image = np.artwork {
                 Image(nsImage: image)
                     .resizable()
@@ -2007,10 +2032,10 @@ struct ExpandedActivityCard: View {
                 }
             }
         }
-        .frame(width: s(NotchSpace.hero), height: s(NotchSpace.hero))
-        .clipShape(RoundedRectangle(cornerRadius: s(NotchRadius.tile), style: .continuous))
+        .frame(width: side, height: side)
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         // A cover is a printed object; the hairline is its edge, as on a tile.
-        .overlay(RoundedRectangle(cornerRadius: s(NotchRadius.tile), style: .continuous)
+        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
             .stroke(.white.opacity(NotchOpacity.rim), lineWidth: 0.5))
     }
 
