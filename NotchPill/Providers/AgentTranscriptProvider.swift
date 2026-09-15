@@ -93,7 +93,15 @@ final class AgentTranscriptProvider {
             if size != state.size {
                 state.size = size
                 state.lastChange = now
-                state.pinged = false
+                // A finished transcript can still grow — token tallies, world
+                // state, rate-limit snapshots. Clearing `pinged` on every byte
+                // let those trailers re-fire the same "done" peek after the
+                // dedup window, so a Codex completion looked like it would
+                // never dismiss. Only reopen the gate when the file no longer
+                // looks finished (a new user turn / task_started).
+                if state.pinged, !endsWithAgentTurn(url) {
+                    state.pinged = false
+                }
                 states[key] = state
                 continue
             }
@@ -151,9 +159,10 @@ final class AgentTranscriptProvider {
     /// Whether the transcript's last substantive record is the agent speaking.
     ///
     /// Claude Code tags records `{"type":"assistant"|"user"}`; Codex nests a
-    /// `payload` and marks assistant output with a role or an `agent_message`
-    /// type. Bookkeeping records (attachments, file-history snapshots, token
-    /// counts) are skipped — they trail a turn and would otherwise mask it.
+    /// `payload` and marks a finished turn with `task_complete` (or, on older
+    /// rollouts, an `agent_message`). Bookkeeping records (attachments,
+    /// file-history snapshots, token counts) are skipped — they trail a turn
+    /// and would otherwise mask it.
     private func endsWithAgentTurn(_ url: URL) -> Bool {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
         defer { try? handle.close() }
@@ -194,6 +203,18 @@ final class AgentTranscriptProvider {
             let role = ((payload?["role"] ?? (obj["message"] as? [String: Any])?["role"]) as? String)?
                 .lowercased()
             if kind.contains("user") || role == "user" { return false }
+            // Legacy Codex: before `task_complete` existed, an `agent_message`
+            // was the turn's last word. Keep recognising it so old rollouts
+            // still peek.
+            if kind == "agent_message" { return true }
+            // Codex nests every record under `payload`. In that shape, a plain
+            // assistant `message` is *not* the end of the turn — Codex writes
+            // one, pauses, then runs tools, then writes another. Treating those
+            // as "finished" re-armed the dismiss timer on every tool pause, so
+            // the Codex "done" peek never cleared the way Claude's does.
+            // Completion is `task_complete` (handled above) or legacy
+            // `agent_message`.
+            if payload != nil { return false }
             if kind.contains("assistant") || kind.contains("agent") || role == "assistant" {
                 return true
             }

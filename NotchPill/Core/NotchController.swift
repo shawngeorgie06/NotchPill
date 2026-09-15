@@ -1521,7 +1521,25 @@ final class NotchController {
         if AppSettings.shared.devReadyPlaySound {
             NSSound(named: AppSettings.shared.devReadySound)?.play()
         }
+        // Recover from a stale hover left by an earlier single-dismiss: the
+        // pointer is no longer on a peek, so it must not suppress this fade.
+        dropStalePeekHover()
         scheduleDevReadyDismiss()
+    }
+
+    /// Clears a hover hold that outlived its peek.
+    ///
+    /// Single-dismiss used to forget only the pin and leave `isHovered` alone.
+    /// The next finished ping then hit `scheduleDevReadyDismiss`'s hold guard
+    /// and never faded — measured as every Codex peek needing a manual ✕
+    /// while Claude, which the user rarely clicked through, kept fading.
+    private func dropStalePeekHover() {
+        guard peekHold.isHovered else { return }
+        let overPeek = isPointerOverPill(NSEvent.mouseLocation)
+            && state.devReadyAlerts.contains { $0.kind == .finished }
+        guard !overPeek else { return }
+        _ = peekHold.setHovered(false)
+        LogStore.log("peek", "cleared stale hover before fade timer")
     }
 
     /// A peek left the screen on its timer. Recorded only when reminders are
@@ -1584,7 +1602,13 @@ final class NotchController {
         // Every path that would re-arm the timer funnels through here, so this
         // one guard is enough to make a hold mean what it says — including the
         // paths that re-arm after a sibling row is dismissed or a reply closes.
-        guard !peekHold.holdsPeek else { return }
+        guard !peekHold.holdsPeek else {
+            // Logged because a silent return here is exactly how Codex peeks
+            // looked "stuck": a prior dismiss left isHovered true, so every
+            // later finished ping skipped its fade with nothing in the log.
+            LogStore.log("peek", "fade timer skipped (held)", level: .warn)
+            return
+        }
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             for alert in self.state.devReadyAlerts where alert.kind == .finished {
@@ -1638,6 +1662,11 @@ final class NotchController {
                 applyWindowFrame(animated: true)
                 return
             }
+            // Last peek removed by tap/✕/unpin. The fade path always reset the
+            // hold here; this branch used to `return` on the empty guard below
+            // and leave isHovered set, so the next finished ping never faded.
+            collapseAfterDevReady()
+            return
         }
 
         guard !state.devReadyAlerts.isEmpty else { return }
@@ -1683,6 +1712,7 @@ final class NotchController {
         LogStore.log("peek", "dismissed (single)")
         if state.devReadyAlerts.count == 1 { state.beginDevReadyDismissal() }
         state.removeDevReady(id: id)
+        _ = peekHold.forget(id)
         guard state.devReadyAlerts.isEmpty else {
             if !state.devReadyAlerts.contains(where: { $0.kind == .finished }) {
                 devReadyDismissItem?.cancel()
@@ -1705,11 +1735,16 @@ final class NotchController {
 
     /// Cancels the fade timer and collapses the pill, unless the pointer is still
     /// on it (in which case hover keeps it open and we only resize).
+    ///
+    /// Always clears the peek hold: a dismiss while the pointer is still over
+    /// the pill used to leave `isHovered` set, and the next finished ping then
+    /// skipped its fade timer with no log line to explain why.
     private func collapseAfterDevReady() {
         devReadyDismissItem?.cancel()
         devReadyDismissItem = nil
         waitingDismissItems.values.forEach { $0.cancel() }
         waitingDismissItems = [:]
+        peekHold.reset()
 
         let mouse = NSEvent.mouseLocation
         if isPointerOverPill(mouse) || expandHoverScreenRect().insetBy(dx: -8, dy: -6).contains(mouse) {

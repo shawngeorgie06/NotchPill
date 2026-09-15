@@ -2454,6 +2454,26 @@ struct TranscriptTurnTests {
         ])))
     }
 
+    /// REGRESSION: Codex writes an assistant `message`, pauses, then runs tools.
+    /// Treating that pause as "finished" re-armed the dismiss timer for the
+    /// whole turn, so the done peek never cleared the way Claude's does.
+    @Test("REGRESSION: a Codex assistant message mid-loop is not finished")
+    func codexAssistantMessageIsNotTurnEnd() {
+        #expect(!AgentTranscriptProvider.turnEnded(inTail: tail([
+            #"{"type":"response_item","payload":{"type":"message","role":"user"}}"#,
+            #"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[]}}"#,
+            #"{"type":"event_msg","payload":{"type":"item_completed"}}"#,
+            #"{"type":"event_msg","payload":{"type":"token_count","info":{}}}"#
+        ])))
+        // Quiet after a tool result is still mid-turn.
+        #expect(!AgentTranscriptProvider.turnEnded(inTail: tail([
+            #"{"type":"response_item","payload":{"type":"message","role":"assistant"}}"#,
+            #"{"type":"response_item","payload":{"type":"function_call","name":"bash"}}"#,
+            #"{"type":"response_item","payload":{"type":"function_call_output","output":"ok"}}"#,
+            #"{"type":"event_msg","payload":{"type":"token_count"}}"#
+        ])))
+    }
+
     @Test("an unrecognised record is not evidence of a finished turn")
     func unknownRecord() {
         // Better a missed peek than one fired at nothing.
@@ -7794,6 +7814,20 @@ struct PeekHoldTests {
         #expect(!hold.isPinned("a"))
         let changed17 = hold.setHovered(true)
         #expect(changed17, "hover starts fresh, so the next hover is a change")
+    }
+
+    /// REGRESSION: forgetting only the pin (as single-dismiss used to) leaves
+    /// isHovered set. The next finished ping then skips its fade timer — the
+    /// Codex "done" peeks that never cleared until you hit ✕.
+    @Test("Forgetting a pin alone must not be treated as a full clear")
+    func forgetLeavesHoverHolding() {
+        var hold = PeekHold()
+        _ = hold.setHovered(true)
+        _ = hold.togglePin("a")
+        _ = hold.forget("a")
+        #expect(hold.holdsPeek, "hover still holds — callers must reset() when the list empties")
+        hold.reset()
+        #expect(!hold.holdsPeek)
     }
 }
 
