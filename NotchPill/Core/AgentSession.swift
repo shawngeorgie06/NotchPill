@@ -492,6 +492,93 @@ struct AgentSession: Equatable, Identifiable {
         }
     }
 
+    /// Fetch-style glance line for the Sessions list: what the agent is doing
+    /// right now, not the internal state enum.
+    var glanceActivityLabel: String {
+        switch state {
+        case .waiting: return "Waiting for you"
+        case .working:
+            if let task = Self.summarize(task, limit: 42) { return task }
+            return "Running"
+        case .idle: return "Idle"
+        case .completed: return "Done"
+        }
+    }
+
+    /// Elapsed clock for the trailing Sessions column (`6:07`), matching the
+    /// Fetch glance. Prefers how long it has been waiting when blocked; else
+    /// how long the session has been alive.
+    var glanceElapsedLabel: String? {
+        let anchor: Date?
+        switch state {
+        case .waiting(let since): anchor = since ?? startedAt
+        case .working, .idle, .completed: anchor = startedAt
+        }
+        guard let anchor else { return nil }
+        let seconds = max(0, Int(Date().timeIntervalSince(anchor)))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    /// Human-friendly vendor title matching Fetch ("Claude Code", "Codex", etc.).
+    var vendorDisplayName: String {
+        switch knownAgent {
+        case .claudeCode: return "Claude Code"
+        case .codex: return "Codex"
+        case .cursor: return "Cursor"
+        case .openCode: return "OpenCode"
+        case nil:
+            let raw = agent.trimmingCharacters(in: .whitespacesAndNewlines)
+            return raw.isEmpty ? "Agent" : raw.capitalized
+        }
+    }
+
+    /// Secondary detail line for the Sessions list row.
+    var glanceSecondaryText: String {
+        switch state {
+        case .waiting:
+            return "Waiting for you"
+        case .working:
+            if let task = Self.summarize(task, limit: 38), task != displayName {
+                return task
+            }
+            if !project.isEmpty && project != displayName {
+                return project
+            }
+            return "Thinking..."
+        case .idle:
+            if !project.isEmpty && project != displayName {
+                return project
+            }
+            return "Idle"
+        case .completed:
+            return "Completed"
+        }
+    }
+
+    /// Group header on the Sessions list ("CLAUDE CODE", "CODEX").
+    var sessionsGroupTitle: String {
+        switch knownAgent {
+        case .claudeCode: return "CLAUDE CODE"
+        case .codex: return "CODEX"
+        case .cursor: return "CURSOR"
+        case .openCode: return "OPENCODE"
+        case nil:
+            let raw = agent.trimmingCharacters(in: .whitespacesAndNewlines)
+            return raw.isEmpty ? "AGENT" : raw.uppercased()
+        }
+    }
+
+    /// Sort key so Claude and Codex stay in stable vendor bands.
+    var sessionsGroupOrder: Int {
+        switch knownAgent {
+        case .claudeCode: return 0
+        case .codex: return 1
+        case .cursor: return 2
+        case .openCode: return 3
+        case nil: return 4
+        }
+    }
+
     /// The task line is phrased as an activity, so the card answers the human
     /// question — “what is it doing?” — rather than reading like transcript
     /// metadata. The actual task text remains the source of truth.
@@ -705,14 +792,19 @@ struct OpenCodeUsage: Equatable {
 /// The rate-limit signal written locally by Codex desktop. Unlike a token total,
 /// this is the provider's own current-window percentage and reset timestamp.
 struct CodexQuota: Equatable {
+    /// Rolling session window (`primary_window`, usually five hours).
     var usedPercent: Int
     var resetsAt: Date?
+    /// Rolling weekly window (`secondary_window`, usually seven days).
+    var weeklyPercent: Int?
+    var weeklyResetsAt: Date?
     /// Opaque balance recorded by Codex desktop for credit-backed plans.
     var creditBalance: Decimal?
     var updatedAt: Date?
 
     var remainingPercent: Int { max(0, 100 - usedPercent) }
     var usageLabel: String { "\(usedPercent)% used" }
+    var headlinePercent: Int { max(usedPercent, weeklyPercent ?? 0) }
 
     var resetLabel: String {
         guard let resetsAt else { return "Reset time unavailable" }

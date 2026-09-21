@@ -403,6 +403,14 @@ struct DevReadyPeekRow: View {
         alert.canReplyFromNotch(replyEnabled: AppSettings.shared.agentReplyEnabled)
     }
 
+    /// Fetch's "Other…" row already opens the composer. The ↰ control next to
+    /// dismiss would be a second, unlabeled path to the same place.
+    private var showsFetchOther: Bool {
+        guard let parsed = alert.parsedQuestion, parsed.hasOther,
+              !parsed.options.isEmpty else { return false }
+        return canReply
+    }
+
     private var accentColor: Color {
         alert.kind == .waiting ? NotchDesign.devReadyAmber : NotchDesign.devReadyGreen
     }
@@ -504,7 +512,7 @@ struct DevReadyPeekRow: View {
             .simultaneousGesture(dismissGesture)
             .accessibilityHint(accessibilityHint)
 
-            if canReply {
+            if canReply && !showsFetchOther {
                 Button {
                     actions.beginReply(alert)
                 } label: {
@@ -575,6 +583,12 @@ struct DevReadyPeekRow: View {
         VStack(alignment: .leading, spacing: 6) {
             if let request = alert.permissionRequest {
                 permissionBody(request)
+            } else if let parsed = alert.parsedQuestion, !parsed.options.isEmpty {
+                Text(parsed.headline)
+                    .font(.system(size: 12.5, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .fixedSize(horizontal: false, vertical: true)
             } else if let question = alert.questionText {
                 Text(question)
                     .font(.system(size: 11, weight: .medium))
@@ -584,7 +598,9 @@ struct DevReadyPeekRow: View {
             }
             if canAnswer {
                 Group {
-                    if alert.permissionRequest?.isPlan == true {
+                    if let parsed = alert.parsedQuestion, !parsed.options.isEmpty {
+                        fetchQuestionOptions(parsed)
+                    } else if alert.permissionRequest?.isPlan == true {
                         planReviewButtons
                     } else {
                         answerButtons(alert.answers)
@@ -592,8 +608,104 @@ struct DevReadyPeekRow: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 6)
+            } else if canReply, let parsed = alert.parsedQuestion, !parsed.options.isEmpty {
+                fetchOtherReplyButton
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 6)
             }
         }
+    }
+
+    private func fetchQuestionOptions(_ parsed: ParsedQuestion) -> some View {
+        VStack(spacing: 5) {
+            ForEach(parsed.options) { option in
+                fetchOptionRow(option)
+            }
+            if parsed.hasOther && canReply {
+                fetchOtherReplyButton
+            }
+        }
+    }
+
+    private func fetchOptionRow(_ option: QuestionOptionChoice) -> some View {
+        Button {
+            if option.opensPlanRevision {
+                actions.beginPlanRevision(alert)
+            } else {
+                actions.answer(alert, option.answer)
+            }
+        } label: {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(option.label)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        if option.isRecommended {
+                            Text("(Recommended)")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(NotchDesign.devReadyAmber)
+                        }
+                    }
+                    if let desc = option.description, !desc.isEmpty {
+                        Text(desc)
+                            .font(.system(size: 10.5, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text(option.keycap)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 20, height: 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Color.white.opacity(0.12))
+                    )
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(option.label)
+    }
+
+    private var fetchOtherReplyButton: some View {
+        Button {
+            actions.beginReply(alert)
+        } label: {
+            HStack {
+                Text("Other…")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.65))
+                Spacer()
+                Text("o")
+                    .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(width: 20, height: 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Color.white.opacity(0.08))
+                    )
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.03))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help("Reply in the notch")
     }
 
     private var planReviewButtons: some View {
@@ -1016,6 +1128,38 @@ struct ExpandedActivityCard: View {
     /// every card.
     private var neutralTint: Color { .white.opacity(NotchOpacity.tertiary) }
 
+    /// Provider name for quota cards. The Fetch tab bar replaced the deck
+    /// footer that used to flash "Claude quota" on hover, so each card names
+    /// itself when you swipe between Codex, Claude, and Cursor on Usage.
+    @ViewBuilder
+    private func quotaProviderHeader(
+        _ title: String,
+        bundleIds: [String] = [],
+        symbol: String? = nil,
+        mark: String? = nil
+    ) -> some View {
+        HStack(spacing: s(NotchSpace.snug)) {
+            if let icon = AppIconCache.shared.icon(forAnyOf: bundleIds) {
+                Image(nsImage: icon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: s(NotchSpace.mark), height: s(NotchSpace.mark))
+                    .clipShape(RoundedRectangle(cornerRadius: s(NotchRadius.well), style: .continuous))
+            } else if let mark {
+                Image(mark)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: s(NotchSpace.mark), height: s(NotchSpace.mark))
+            } else if let symbol {
+                glyphWell(symbol, tint: neutralTint)
+            }
+            Text(title)
+                .font(font(size: NotchType.title, weight: .semibold))
+                .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+                .lineLimit(1)
+        }
+    }
+
     /// A white glyph on a small tinted square: the leading object on a list
     /// row. The tint is nearly opaque so it reads as a colour, not a wash.
     private func glyphWell(_ symbol: String, tint: Color) -> some View {
@@ -1074,32 +1218,32 @@ struct ExpandedActivityCard: View {
         MeterBar(percent: percent, tint: tint, thickness: s(NotchSpace.bar), reduceMotion: reduceMotion)
     }
 
-    /// A meter's bar. It fills from empty when it first appears and moves,
-    /// rather than jumps, when the figure changes — a bar that is simply
-    /// already there is a picture of a level; one that fills is a reading.
+    /// A meter's bar. Only the level moves when `percent` changes — the tile's
+    /// own `notchReveal` owns arrival. A separate `onAppear` width ramp here
+    /// was the Claude/Cursor glitch: two meters in an `HStack` kept resetting
+    /// `@State` and replaying the fill while the deck's layout animation was
+    /// still resizing their `GeometryReader` columns.
     private struct MeterBar: View {
         let percent: Int
         let tint: Color
         let thickness: CGFloat
         let reduceMotion: Bool
-        @State private var filled = false
+
+        private var fraction: CGFloat {
+            CGFloat(min(100, max(0, percent))) / 100
+        }
 
         var body: some View {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(NotchOpacity.highlight))
+            Capsule()
+                .fill(.white.opacity(NotchOpacity.highlight))
+                .overlay(alignment: .leading) {
                     Capsule()
                         .fill(tint)
-                        .frame(width: filled
-                               ? max(thickness, geo.size.width * CGFloat(min(100, max(0, percent))) / 100)
-                               : thickness)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .scaleEffect(x: fraction, y: 1, anchor: .leading)
                 }
-            }
-            .frame(height: thickness)
-            .animation(NotchMotion.paint(reduceMotion: reduceMotion), value: percent)
-            .onAppear {
-                withAnimation(NotchMotion.paint(reduceMotion: reduceMotion)) { filled = true }
-            }
+                .frame(height: thickness)
+                .animation(NotchMotion.paint(reduceMotion: reduceMotion), value: percent)
         }
     }
 
@@ -1167,34 +1311,138 @@ struct ExpandedActivityCard: View {
         .clipped()
     }
 
-    /// Sessions only. Media, quota and CI live on their own swipe pages.
+    /// Sessions list in the Fetch glance style: vendor groups, a status light,
+    /// what the agent is doing, and an elapsed clock. Tiles used to pack the
+    /// same facts into painted cards; the list is the thing you scan.
     private func agentsCard(_ tray: AgentHomeTray) -> some View {
-        GeometryReader { geo in
-            let gap = s(NotchSpace.base)
-            let sessionCount = max(1, tray.sessions.count)
-            let columns = min(sessionCount, geo.size.width >= s(NotchSpace.tile) ? 2 : 1)
-            let agentW = max(s(NotchSpace.hero + NotchSpace.section),
-                             (geo.size.width - gap * CGFloat(max(0, columns - 1)))
-                                / CGFloat(columns))
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: gap) {
-                    ForEach(Array(tray.sessions.enumerated()), id: \.element.id) { index, session in
-                        agentTile(session, width: agentW, height: geo.size.height)
-                            .notchReveal(index, scale: readability, reduceMotion: reduceMotion)
+        let groups = Self.sessionGroups(tray.sessions)
+        return ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: s(NotchSpace.base)) {
+                ForEach(Array(groups.enumerated()), id: \.element.title) { groupIndex, group in
+                    VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+                        Text(group.title)
+                            .font(font(size: NotchType.caption, weight: .semibold))
+                            .tracking(0.6)
+                            .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
+                        ForEach(Array(group.sessions.enumerated()), id: \.element.id) { rowIndex, session in
+                            agentSessionRow(session)
+                                .notchReveal(groupIndex + rowIndex,
+                                             scale: readability,
+                                             reduceMotion: reduceMotion)
+                        }
                     }
                 }
             }
-            .scrollBounceBehavior(.basedOnSize)
-            .clipped()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
+    }
+
+    private struct SessionGroup: Equatable {
+        let vendorName: String
+        let sessions: [AgentSession]
+        var title: String {
+            let count = sessions.count
+            let noun = count == 1 ? "session" : "sessions"
+            return "\(vendorName) — \(count) \(noun)"
+        }
+    }
+
+    private static func sessionGroups(_ sessions: [AgentSession]) -> [SessionGroup] {
+        let ordered = sessions.sorted { lhs, rhs in
+            if lhs.sessionsGroupOrder != rhs.sessionsGroupOrder {
+                return lhs.sessionsGroupOrder < rhs.sessionsGroupOrder
+            }
+            return lhs.lastActivity > rhs.lastActivity
+        }
+        var groups: [SessionGroup] = []
+        for session in ordered {
+            let vendor = session.vendorDisplayName
+            if let last = groups.last, last.vendorName == vendor {
+                groups[groups.count - 1] = SessionGroup(
+                    vendorName: last.vendorName, sessions: last.sessions + [session])
+            } else {
+                groups.append(SessionGroup(vendorName: vendor,
+                                           sessions: [session]))
+            }
+        }
+        return groups
+    }
+
+    /// One session as a Fetch-style row: light · identity · activity · clock.
+    private func agentSessionRow(_ session: AgentSession) -> some View {
+        let light = glanceLight(for: session.state)
+        return Button {
+            actions.focusAgentSession(session)
+        } label: {
+            HStack(spacing: s(NotchSpace.snug)) {
+                Circle()
+                    .fill(light)
+                    .frame(width: s(NotchSpace.bar), height: s(NotchSpace.bar))
+                    .shadow(color: light.opacity(0.55), radius: reduceMotion ? 0 : 3)
+                agentMark(session)
+                    .frame(width: s(NotchSpace.section), height: s(NotchSpace.section))
+                    .background(
+                        RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous)
+                            .fill(.black.opacity(NotchOpacity.badge))
+                    )
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
+                    Text(session.displayName)
+                        .font(font(size: NotchType.body, weight: .semibold))
+                        .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(session.glanceSecondaryText)
+                        .font(font(size: NotchType.caption, weight: .medium))
+                        .foregroundStyle(session.isWaiting
+                            ? NotchDesign.devReadyAmber
+                            : .white.opacity(NotchOpacity.secondary))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if let elapsed = session.glanceElapsedLabel {
+                    Text(elapsed)
+                        .font(font(size: NotchType.mono, weight: .medium))
+                        .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
+                        .contentTransition(.numericText())
+                }
+            }
+            .padding(.horizontal, s(NotchSpace.snug))
+            .padding(.vertical, s(NotchSpace.snug))
+            .background(
+                RoundedRectangle(cornerRadius: s(NotchRadius.well), style: .continuous)
+                    .fill(.white.opacity(NotchOpacity.hairline))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: s(NotchRadius.well), style: .continuous))
+        }
+        .buttonStyle(NotchObjectButtonStyle(cornerRadius: s(NotchRadius.well),
+                                            reduceMotion: reduceMotion))
+        .accessibilityLabel("\(session.displayName), \(session.glanceActivityLabel)")
+        .animation(NotchMotion.settle(reduceMotion: reduceMotion),
+                   value: session.glanceActivityLabel)
+        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.state)
+        .notchBump(on: session.state.name, reduceMotion: reduceMotion)
+    }
+
+    /// Fetch's traffic lights: green idle, red working, amber waiting on you.
+    private func glanceLight(for state: AgentSession.State) -> Color {
+        switch state {
+        case .working: return Color(red: 0.92, green: 0.32, blue: 0.28)
+        case .waiting: return NotchDesign.devReadyAmber
+        case .idle: return NotchDesign.devReadyGreen
+        case .completed: return .white.opacity(0.35)
+        }
     }
 
     /// A local total, intentionally not an account quota or reset estimate.
     private func openCodeUsageCard(_ usage: OpenCodeUsage) -> some View {
         let radius = s(NotchRadius.tile)
         return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+            quotaProviderHeader("OpenCode", symbol: "curlybraces")
             Text(usage.tokenLabel)
                 .font(font(size: NotchType.hero, weight: .semibold))
                 .foregroundStyle(.white.opacity(NotchOpacity.primary))
@@ -1215,14 +1463,29 @@ struct ExpandedActivityCard: View {
         .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
     }
 
-    /// Codex meters one window. It used to be the one quota card with no bar —
-    /// "52% used" as a sentence — so it never registered as the same kind of
-    /// thing as the Claude card beside it.
+    /// Codex meters session and week side by side when the API reports both
+    /// windows — the same layout as Claude Code beside it.
     private func codexQuotaCard(_ quota: CodexQuota) -> some View {
         VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
-            meterTile(percent: quota.usedPercent, label: quota.resetLabel,
-                      footnote: quota.updatedLabel)
-                .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
+            quotaProviderHeader(
+                "Codex",
+                bundleIds: ["com.openai.codex", "com.openai.chat"],
+                symbol: "chevron.left.forwardslash.chevron.right")
+            if let weekly = quota.weeklyPercent {
+                HStack(spacing: s(NotchSpace.snug)) {
+                    meterTile(percent: quota.usedPercent, label: "session",
+                              footnote: ClaudeQuota.resetClock(for: quota.resetsAt))
+                        .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
+                    meterTile(percent: weekly, label: "week",
+                              footnote: ClaudeQuota.resetClock(for: quota.weeklyResetsAt))
+                        .notchReveal(1, scale: readability, reduceMotion: reduceMotion)
+                }
+                .geometryGroup()
+            } else {
+                meterTile(percent: quota.usedPercent, label: quota.resetLabel,
+                          footnote: quota.updatedLabel)
+                    .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
+            }
             if let credits = quota.creditsLabel {
                 Text(credits)
                     .font(font(size: NotchType.caption, weight: .medium))
@@ -1309,6 +1572,11 @@ struct ExpandedActivityCard: View {
 
     private func claudeQuotaCard(_ quota: ClaudeQuota) -> some View {
         VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+            quotaProviderHeader(
+                "Claude Code",
+                bundleIds: ["com.anthropic.claudefordesktop", "com.anthropic.claude"],
+                symbol: "asterisk",
+                mark: "ClaudeMark")
             HStack(spacing: s(NotchSpace.snug)) {
                 meterTile(percent: quota.sessionPercent, label: "session",
                           footnote: ClaudeQuota.resetClock(for: quota.sessionResetsAt))
@@ -1317,6 +1585,7 @@ struct ExpandedActivityCard: View {
                           footnote: ClaudeQuota.resetClock(for: quota.weeklyResetsAt))
                     .notchReveal(1, scale: readability, reduceMotion: reduceMotion)
             }
+            .geometryGroup()
             if let extra = quota.extraSpendLabel {
                 Text("extra " + extra)
                     .font(font(size: NotchType.caption, weight: .medium))
@@ -1336,6 +1605,10 @@ struct ExpandedActivityCard: View {
     /// percentage alone cannot distinguish "100% of 500" from "100% of 9201".
     private func cursorQuotaCard(_ quota: CursorQuota) -> some View {
         VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+            quotaProviderHeader(
+                "Cursor",
+                bundleIds: ["com.todesktop.230313mzl4w4u92"],
+                symbol: "cursorarrow")
             if quota.isUnlimited {
                 let radius = s(NotchRadius.tile)
                 VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
@@ -1365,6 +1638,7 @@ struct ExpandedActivityCard: View {
                     meterTile(percent: api, label: "API")
                         .notchReveal(1, scale: readability, reduceMotion: reduceMotion)
                 }
+                .geometryGroup()
             } else {
                 meterTile(percent: quota.percentUsed, label: quota.usageLabel)
                     .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
@@ -1798,98 +2072,6 @@ struct ExpandedActivityCard: View {
         }
     }
 
-    /// One session as an object: a painted tile with a nested vendor mark,
-    /// the name sitting on the colour, the model as a caption, and the status
-    /// as a small capsule. Working and waiting light up in the calm greens
-    /// and ambers the rest of the overlay already uses — system `.green` was
-    /// a fluorescent sticker. Idle and completed recede: same structure, dimmer
-    /// type, so a quiet tray is still a tray of objects rather than a hole.
-    private func agentTile(_ session: AgentSession, width: CGFloat, height: CGFloat) -> some View {
-        let tint = color(for: session.state)
-        let lit: Bool = {
-            switch session.state {
-            case .working, .waiting: return true
-            case .idle, .completed: return false
-            }
-        }()
-        let ink = lit ? NotchOpacity.primary : NotchOpacity.secondary
-        let whisper = lit ? NotchOpacity.primary : NotchOpacity.tertiary
-        let radius = s(NotchRadius.tile)
-        let icon = s(NotchSpace.hero / 2)
-        return Button {
-            actions.focusAgentSession(session)
-        } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                agentMark(session)
-                    .frame(width: icon, height: icon)
-                    .opacity(lit ? 1 : 0.72)
-                    .background(
-                        RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous)
-                            .fill(.black.opacity(NotchOpacity.badge))
-                    )
-                    .accessibilityLabel(session.agentName)
-                Spacer(minLength: s(NotchSpace.snug))
-                Text(session.displayName)
-                    .font(font(size: NotchType.display, weight: .semibold))
-                    .foregroundStyle(.white.opacity(ink))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-                    .truncationMode(.tail)
-                if let model = session.modelShortLabel {
-                    Text(model)
-                        .font(font(size: NotchType.caption, weight: .medium))
-                        .foregroundStyle(.white.opacity(whisper))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .padding(.top, s(NotchSpace.tight))
-                        .accessibilityLabel(session.modelLabel ?? model)
-                }
-                Text(session.statusLabel)
-                    .font(font(size: NotchType.caption, weight: .semibold))
-                    .foregroundStyle(.white.opacity(whisper))
-                    .padding(.horizontal, s(NotchSpace.snug))
-                    .padding(.vertical, s(NotchSpace.tight))
-                    .background(Capsule().fill(.black.opacity(lit ? NotchOpacity.badge : NotchOpacity.hairline)))
-                    .padding(.top, s(NotchSpace.snug))
-                    .contentTransition(.numericText())
-                    .lineLimit(1)
-            }
-            .padding(s(NotchSpace.base))
-            .frame(width: width, height: height, alignment: .topLeading)
-            .background {
-                agentTileSurface(tint: tint, lit: lit, radius: radius,
-                                 breathing: !reduceMotion && {
-                                     if case .working = session.state { return true }
-                                     return false
-                                 }())
-            }
-            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-        }
-        .buttonStyle(NotchObjectButtonStyle(cornerRadius: radius, reduceMotion: reduceMotion))
-        .accessibilityLabel("\(session.displayName), \(session.statusLabel)")
-        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.statusLabel)
-        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: session.state)
-        .notchBump(on: session.state.name, reduceMotion: reduceMotion)
-        .clipped()
-    }
-
-    /// The painted tile, with a slow sheen when the session is mid-turn so
-    /// "working" is felt without a spinner. Reduce Motion keeps the paint
-    /// and drops the breath.
-    @ViewBuilder
-    private func agentTileSurface(tint: Color, lit: Bool, radius: CGFloat, breathing: Bool) -> some View {
-        if breathing {
-            TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: false)) { context in
-                let pulse = (sin(context.date.timeIntervalSinceReferenceDate * 2.1) + 1) / 2
-                NotchPaintedFill(tint: tint, lit: lit, cornerRadius: radius)
-                    .opacity(0.88 + pulse * 0.12)
-            }
-        } else {
-            NotchPaintedFill(tint: tint, lit: lit, cornerRadius: radius)
-        }
-    }
-
     /// Which tool a session belongs to, as the thing you would recognise
     /// fastest: the vendor's app icon when the app is installed, Anthropic's
     /// own mark for Claude Code when it is not (it ships in the bundle), and
@@ -1913,17 +2095,6 @@ struct ExpandedActivityCard: View {
                 .foregroundStyle(.white.opacity(NotchOpacity.primary))
         } else {
             Color.clear
-        }
-    }
-
-    /// Waiting is the only state worth interrupting for, so it is the only one
-    /// that gets a warm colour; working is calm and idle recedes.
-    private func color(for state: AgentSession.State) -> Color {
-        switch state {
-        case .waiting: return NotchDesign.devReadyAmber
-        case .working: return NotchDesign.devReadyGreen
-        case .idle: return .white.opacity(0.35)
-        case .completed: return .white.opacity(0.28)
         }
     }
 

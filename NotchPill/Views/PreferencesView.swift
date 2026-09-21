@@ -37,8 +37,12 @@ struct PreferencesView: View {
     // MARK: - Sections
 
     private var collapsedSection: some View {
-        SettingsPanel(title: "Collapsed Preview", subtitle: "Chips below the notch on hover") {
-            Toggle("Show collapsed preview", isOn: $settings.showCollapsedActivity)
+        SettingsPanel(title: "Collapsed Preview",
+                      subtitle: "The notch stays blank at rest. Hover expands the island.") {
+            Toggle("Show chips while collapsed", isOn: $settings.showCollapsedActivity)
+                .help("Off by default. When on, compact chips sit under the notch "
+                      + "even before you hover — useful as a glance strip, but "
+                      + "not the usual Fetch-style blank rest state.")
             settingsGroup {
                 Toggle("Media", isOn: $settings.showCollapsedMedia)
                 Toggle("Timer", isOn: $settings.showCollapsedTimer)

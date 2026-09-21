@@ -88,23 +88,39 @@ enum CodexUsageFetcher {
 
     // MARK: - Response
 
+    /// One rate-limit window from `/wham/usage` or a transcript `token_count`.
+    struct Window: Equatable {
+        var usedPercent: Int
+        var resetsAt: Date?
+    }
+
+    /// Parses `primary_window` / `secondary_window` (API) or `primary` /
+    /// `secondary` (transcript) objects.
+    static func window(in dict: [String: Any]?) -> Window? {
+        guard let dict else { return nil }
+        let used = (dict["used_percent"] as? Double)
+            ?? (dict["used_percent"] as? NSNumber)?.doubleValue
+        guard let used else { return nil }
+        let resetSeconds = (dict["reset_at"] as? Double)
+            ?? (dict["reset_at"] as? NSNumber)?.doubleValue
+            ?? (dict["resets_at"] as? Double)
+            ?? (dict["resets_at"] as? NSNumber)?.doubleValue
+        return Window(usedPercent: min(100, max(0, Int(used.rounded()))),
+                      resetsAt: resetSeconds.map(Date.init(timeIntervalSince1970:)))
+    }
+
     /// Maps the usage payload onto the model the card already renders.
     ///
-    /// `primary_window` is the plan's own window, whatever its length — 5h on
-    /// some plans, 30d on others — so no duration is assumed here; `resetsAt`
-    /// carries the only date that matters.
+    /// `primary_window` is the rolling session pool (usually five hours) and
+    /// `secondary_window` is the weekly one (usually seven days). Some plans
+    /// omit the weekly window; the card falls back to a single meter then.
     static func quota(in data: Data, now: Date = Date()) -> CodexQuota? {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let limit = root["rate_limit"] as? [String: Any],
-              let primary = limit["primary_window"] as? [String: Any]
+              let primary = window(in: limit["primary_window"] as? [String: Any])
         else { return nil }
 
-        let used = (primary["used_percent"] as? Double)
-            ?? (primary["used_percent"] as? NSNumber)?.doubleValue
-        guard let used else { return nil }
-
-        let resetSeconds = (primary["reset_at"] as? Double)
-            ?? (primary["reset_at"] as? NSNumber)?.doubleValue
+        let secondary = window(in: limit["secondary_window"] as? [String: Any])
 
         // `balance` is a decimal *string* ("298.4291950000"). Parsed with a
         // POSIX locale so a comma-decimal locale cannot misread it, and as
@@ -122,8 +138,10 @@ enum CodexUsageFetcher {
             }
         }
 
-        return CodexQuota(usedPercent: min(100, max(0, Int(used.rounded()))),
-                          resetsAt: resetSeconds.map(Date.init(timeIntervalSince1970:)),
+        return CodexQuota(usedPercent: primary.usedPercent,
+                          resetsAt: primary.resetsAt,
+                          weeklyPercent: secondary?.usedPercent,
+                          weeklyResetsAt: secondary?.resetsAt,
                           creditBalance: balance,
                           // Live from the provider, so "now" is honest — unlike
                           // the transcript, where this was the age of a cached

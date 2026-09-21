@@ -99,9 +99,10 @@ final class TokenUsageStore: ObservableObject {
     private var isScanning = false
     private var lastScan = Date.distantPast
 
-    /// Slow enough that a scan is never the reason a laptop is warm; the
-    /// numbers are a running total, not a live readout.
-    private static let minInterval: TimeInterval = 90
+    /// The transcript is local and append-only, so a short incremental scan is
+    /// cheap once a file is known. This keeps the token line current while the
+    /// notch is open instead of waiting for the next open gesture.
+    private static let minInterval: TimeInterval = 30
 
     struct FileState: Codable {
         var size: Int

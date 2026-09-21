@@ -117,11 +117,19 @@ enum NotchContentLayout {
         // rather than making media, active app, or any other one-page setup
         // look like a different kind of notch. Its space is reserved here,
         // alongside the card, so it cannot hang below the pill.
-        let deckChrome: CGFloat = showsDeckChrome(for: activities) ? deckChromeHeight : 0
+        //
+        // Fetch-style Sessions · Tray · Usage tabs replace the dot strip on
+        // tray pages. Budget the tab row instead of the dots when it shows,
+        // or the meters and token lines clip against the pill rim.
+        let footerChrome: CGFloat = {
+            guard showsDeckChrome(for: activities) else { return 0 }
+            return showsFetchTabBar(for: activities, page: page)
+                ? fetchTabBarHeight : deckChromeHeight
+        }()
         return NotchContentLayoutMetrics(
             size: CGSize(width: width,
                          height: metrics.notchHeight + metrics.topGap + cardHeight
-                            + deckChrome + expandedTrayInset),
+                            + footerChrome + expandedTrayInset),
             readability: 1,
             textScale: textCompensation(forUserScale: metrics.userScale)
         )
@@ -144,6 +152,28 @@ enum NotchContentLayout {
     static func showsDeckChrome(for activities: [ExpandedActivity]) -> Bool {
         !activities.isEmpty
     }
+
+    /// Fetch-style Sessions · Tray · Usage tabs. Mirrors `ExpandedView` so the
+    /// layout budget reserves the tab row instead of the page dots when visible.
+    static func showsFetchTabBar(for activities: [ExpandedActivity], page: Int?) -> Bool {
+        let sessions = activities.firstIndex(where: { if case .agents = $0 { return true }; return false })
+        let tray = activities.firstIndex(where: { if case .shelf = $0 { return true }; return false })
+        let usage = activities.firstIndex(where: {
+            switch $0 {
+            case .codexQuota, .claudeQuota, .cursorQuota, .openCodeUsage: return true
+            default: return false
+            }
+        })
+        let count = (sessions != nil ? 1 : 0) + (tray != nil ? 1 : 0) + (usage != nil ? 1 : 0)
+        guard count > 0 else { return false }
+        if count >= 2 { return true }
+        guard let page, activities.indices.contains(page) else { return false }
+        return page == sessions || page == tray || page == usage
+    }
+
+    /// Caption-sized tab row plus its top padding. Replaces `deckChromeHeight`
+    /// on tray pages that show the Fetch tab bar.
+    static let fetchTabBarHeight: CGFloat = 22
 
     // MARK: - Dev ready peek
 
@@ -553,19 +583,56 @@ enum NotchContentLayout {
         // when these two drifted the peek reserved space for buttons it never
         // drew.
         let canAnswer = alert.canAnswerFromNotch(replyEnabled: answerEnabled)
+        let canReply = alert.canReplyFromNotch(replyEnabled: answerEnabled)
+        let parsed = alert.parsedQuestion
+        let hasFetchOptions = parsed.map { !$0.options.isEmpty } ?? false
         let sectionSpacing: CGFloat = 6
         // A permission request draws its own body — a summary line plus up to
-        // four diff lines — in place of the one-line question.
-        let messageExtra: CGFloat
+        // four diff lines — in place of the one-line question. Fetch option
+        // rows can still sit under that body (Allow/Deny, Approve/Revise).
+        var extra: CGFloat = sectionSpacing
         if let request = alert.permissionRequest {
             let lines = request.isPlan ? request.planPreview.count
                 : max(request.previewLines.count, request.commandPreviewLineLimit)
-            messageExtra = 18 + CGFloat(lines) * 14 + 6
-        } else {
-            messageExtra = alert.questionText != nil ? 30 : 0
+            extra += 18 + CGFloat(lines) * 14 + 6
+        } else if hasFetchOptions {
+            extra += fetchQuestionHeadlineHeight
+        } else if alert.questionText != nil {
+            extra += 30
         }
-        let buttonExtra: CGFloat = canAnswer ? 6 + answerButtonHeight + 6 : 0
-        return sectionSpacing + messageExtra + buttonExtra
+        if hasFetchOptions, let parsed {
+            if canAnswer {
+                extra += fetchOptionsHeight(parsed, includeOther: parsed.hasOther && canReply)
+            } else if parsed.hasOther && canReply {
+                extra += fetchOtherRowHeight + 6
+            }
+        } else if canAnswer {
+            extra += 6 + answerButtonHeight + 6
+        }
+        return extra
+    }
+
+    /// Headline above Fetch option rows (`12.5pt` bold, one wrapped line).
+    static let fetchQuestionHeadlineHeight: CGFloat = 22
+    /// Compact "Other…" row under the numbered choices.
+    static let fetchOtherRowHeight: CGFloat = 28
+    /// Option row with only a label and keycap.
+    static let fetchOptionRowHeight: CGFloat = 36
+    /// Option row that also draws a two-line description.
+    static let fetchOptionRowWithDescriptionHeight: CGFloat = 54
+    /// Gap between Fetch option rows (`VStack(spacing: 5)`).
+    static let fetchOptionRowSpacing: CGFloat = 5
+
+    /// Height of the numbered option stack the waiting peek actually draws.
+    static func fetchOptionsHeight(_ parsed: ParsedQuestion, includeOther: Bool) -> CGFloat {
+        let rows = parsed.options.reduce(CGFloat(0)) { total, option in
+            let hasDesc = !(option.description?.isEmpty ?? true)
+            return total + (hasDesc ? fetchOptionRowWithDescriptionHeight : fetchOptionRowHeight)
+        }
+        let count = parsed.options.count + (includeOther ? 1 : 0)
+        let gaps = fetchOptionRowSpacing * CGFloat(max(0, count - 1))
+        let other = includeOther ? fetchOtherRowHeight : 0
+        return rows + gaps + other + 6
     }
 
     /// Taller peek for `.waiting` alerts — adds room for the question message line
@@ -753,7 +820,7 @@ enum NotchContentLayout {
     /// The page is a fixed-height shelf now and no longer reaches it, but the
     /// clipboard and terminal cards still cap here, so the number stays where
     /// it was rather than moving every other card.
-    static let expandedContentCeiling: CGFloat = 144
+    static let expandedContentCeiling: CGFloat = 168
 
     /// Height for the card **on screen**, not the tallest card in the deck.
     ///
@@ -841,8 +908,9 @@ enum NotchContentLayout {
     private static func expandedCardBaseHeight(_ activity: ExpandedActivity,
                                                tokenRows: Int = 0) -> CGFloat {
         switch activity {
-        // Hero figure (28) + 4 + bar (6) + 4 + caption (11) + tile pad (8) = 61,
-        // plus a trailing line (11). No header: the number is the page.
+        // One meter row (hero 28 + bar 6 + caption 9 + tile pad 16 ≈ 69), plus
+        // snug spacing and a trailing detail line (extra spend, credits, or
+        // usage counts). Token lines stack below.
         case .claudeQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
         case .codexQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
         case .cursorQuota: return quotaCard
@@ -868,8 +936,10 @@ enum NotchContentLayout {
         }
     }
 
-    /// See `.claudeQuota` above.
-    static let quotaCard: CGFloat = 80
+    /// Provider header (title + mark) plus one meter row and a trailing detail
+    /// line. Was 80, then 96 without the header — both clipped once the Fetch
+    /// tab bar and token lines shared the same page.
+    static let quotaCard: CGFloat = 114
 
     private static func expandedCardBaseWidth(_ activity: ExpandedActivity) -> CGFloat {
         switch activity {

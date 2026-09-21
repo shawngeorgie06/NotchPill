@@ -2363,10 +2363,12 @@ struct TranscriptTurnTests {
 
     @Test("Codex local rate-limit record exposes a real quota and reset")
     func codexQuota() {
-        let transcript = #"{"timestamp":"2026-07-31T17:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{},"rate_limits":{"primary":{"used_percent":42.4,"resets_at":1786130351},"credits":{"balance":"123.45"}}}}"#
+        let transcript = #"{"timestamp":"2026-07-31T17:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{},"rate_limits":{"primary":{"used_percent":42.4,"resets_at":1786130351},"secondary":{"used_percent":9.2,"resets_at":1783357722},"credits":{"balance":"123.45"}}}}"#
         let quota = AgentSessionScanner.codexQuota(in: transcript)
         #expect(quota?.usedPercent == 42)
         #expect(quota?.resetsAt == Date(timeIntervalSince1970: 1_786_130_351))
+        #expect(quota?.weeklyPercent == 9)
+        #expect(quota?.weeklyResetsAt == Date(timeIntervalSince1970: 1_783_357_722))
         #expect(quota?.creditsLabel == "123.45 credits balance")
         #expect(quota?.updatedAt == ISO8601DateFormatter().date(from: "2026-07-31T17:00:00Z"))
     }
@@ -2890,6 +2892,22 @@ struct AgentTaskTests {
         #expect(s("cursor").agentName == "Cursor")
         #expect(s("some-new-tool").agentName == "some-new-tool")
         #expect(s("").agentName == "Agent")
+    }
+
+    @Test("Sessions list uses Fetch-style activity copy")
+    func glanceActivity() {
+        var waiting = s("claude-code")
+        waiting.state = .waiting(since: Date())
+        #expect(waiting.glanceActivityLabel == "Waiting for you")
+        #expect(waiting.sessionsGroupTitle == "CLAUDE CODE")
+
+        var working = s("codex")
+        working.state = .working
+        working.task = "Wire the overlay"
+        #expect(working.glanceActivityLabel == "Wire the overlay")
+        #expect(working.sessionsGroupTitle == "CODEX")
+        working.startedAt = Date().addingTimeInterval(-367)
+        #expect(working.glanceElapsedLabel == "6:07")
     }
 
     @Test("a short prompt is shown whole")
@@ -6359,10 +6377,26 @@ struct CodexUsageFetcherTests {
         let quota = CodexUsageFetcher.quota(in: json(live), now: now)
         #expect(quota?.usedPercent == 100)
         #expect(quota?.resetsAt == Date(timeIntervalSince1970: 1_786_130_351))
+        #expect(quota?.weeklyPercent == nil)
         #expect(quota?.updatedAt == now)
         // The balance is $298.43 — not the 0 the old source reported by reading
         // `rate_limit_reset_credits.available_count` instead.
         #expect(quota?.creditBalance == Decimal(string: "298.4291950000"))
+    }
+
+    @Test("reads session and weekly windows when both are present")
+    func parsesDualWindows() {
+        let body = """
+        {"rate_limit":{"primary_window":{"used_percent":27,"limit_window_seconds":18000,
+                                          "reset_at":1782770922},
+                      "secondary_window":{"used_percent":4,"limit_window_seconds":604800,
+                                            "reset_at":1783357722}}}
+        """
+        let quota = CodexUsageFetcher.quota(in: json(body))
+        #expect(quota?.usedPercent == 27)
+        #expect(quota?.resetsAt == Date(timeIntervalSince1970: 1_782_770_922))
+        #expect(quota?.weeklyPercent == 4)
+        #expect(quota?.weeklyResetsAt == Date(timeIntervalSince1970: 1_783_357_722))
     }
 
     @Test("a decimal balance is not read through a Double, nor through the locale")
@@ -6980,6 +7014,31 @@ struct UsageBackoffTests {
         #expect(calls == 1)
         _ = await service.quota(now: start.addingTimeInterval(700))
         #expect(calls == 2)
+    }
+
+    /// Live polling must not turn the Claude Keychain read into a prompt on
+    /// every refresh. The token is reused until the API rejects it, at which
+    /// point the service clears it and reads Claude Code's rotated token next.
+    @Test func reusesKeychainCredentialAcrossLiveRefreshes() async throws {
+        var reads = 0
+        var calls = 0
+        let service = ClaudeUsageService(
+            transport: { request in
+                calls += 1
+                let body = Data(#"{"five_hour":{"utilization":11},"seven_day":{"utilization":22}}"#.utf8)
+                return (body, HTTPURLResponse(url: request.url!, statusCode: 200,
+                                              httpVersion: nil, headerFields: nil)!)
+            },
+            readKeychain: {
+                reads += 1
+                return .blob(Data(#"{"claudeAiOauth":{"accessToken":"t","scopes":["user:profile"]}}"#.utf8))
+            },
+            store: nil)
+        let start = Date()
+        _ = await service.quota(now: start)
+        _ = await service.quota(now: start.addingTimeInterval(61))
+        #expect(calls == 2)
+        #expect(reads == 1)
     }
 
     /// A Keychain that cannot answer right now is not a signed-out user.
@@ -8336,16 +8395,33 @@ struct DeckChromeTests {
                                  cycleEnd: Date().addingTimeInterval(27 * 86_400),
                                  membership: "pro_student", isUnlimited: false,
                                  onDemandEnabled: false, updatedAt: Date())
-        // header 13 + 3 + meter 37 + 3 + trailing line 13
-        let drawn: CGFloat = 69
+        // Provider header (~17) plus one meter row (~69) and a detail line (~13).
+        let drawn: CGFloat = 99
         for activity in [ExpandedActivity.claudeQuota(quota), .cursorQuota(cursor)] {
+            let activities = [activity, .clock]
             let deck = NotchContentLayout.expandedDeckLayout(
-                metrics: metrics, activities: [activity, .clock], page: 0)
+                metrics: metrics, activities: activities, page: 0)
+            let footer = NotchContentLayout.showsFetchTabBar(for: activities, page: 0)
+                ? NotchContentLayout.fetchTabBarHeight
+                : NotchContentLayout.deckChromeHeight
             let contentRoom = deck.size.height - metrics.notchHeight - metrics.topGap
-                - NotchContentLayout.deckChromeHeight - NotchContentLayout.expandedTrayInset
+                - footer - NotchContentLayout.expandedTrayInset
             #expect(contentRoom >= drawn,
                     "\(activity.kind) gets \(contentRoom)pt for \(drawn)pt of content")
         }
+    }
+
+    @Test("Fetch tab bar replaces page dots in the height budget")
+    func tabBarReplacesDots() {
+        let deck: [ExpandedActivity] = [
+            .agents(AgentHomeTray([])),
+            .claudeQuota(ClaudeQuota(sessionPercent: 12, weeklyPercent: 34)),
+        ]
+        let withTab = NotchContentLayout.expandedDeckLayout(metrics: metrics, activities: deck, page: 1)
+        let dotsOnly = NotchContentLayout.expandedDeckLayout(
+            metrics: metrics, activities: [.clock], page: 0)
+        #expect(NotchContentLayout.showsFetchTabBar(for: deck, page: 1))
+        #expect(withTab.size.height > dotsOnly.size.height)
     }
 }
 
@@ -10003,5 +10079,179 @@ struct AgentShelfTests {
         #expect(AgentShelf([idle, working, waiting]).jumpTarget?.id == "x")
         #expect(AgentShelf([idle, working]).jumpTarget?.id == "w")
         #expect(AgentShelf([idle]).jumpTarget?.id == "i")
+    }
+}
+
+@Suite("Fetch Question Parser Tests")
+struct FetchQuestionParserTests {
+    @Test("parses multi-choice numbered question matching Fetch f140")
+    func parsesNumberedChoices() {
+        let text = """
+        Which approach should we take for the caching layer?
+        1. In-memory LRU cache (Recommended)
+           Fastest read latency, resets on restart
+        2. Redis-backed cache
+           Shared across worker nodes
+        3. SQLite on disk
+           Persistent, slightly higher latency
+        """
+        let alert = DevReadyAlert(
+            title: "demo",
+            bundleId: "com.apple.Terminal",
+            kind: .waiting,
+            message: text,
+            deliverySpec: "decision",
+            requestId: "req-1"
+        )
+        let parsed = QuestionParser.parse(alert: alert)
+        #expect(parsed != nil)
+        guard let p = parsed else { return }
+        #expect(p.headline == "Which approach should we take for the caching layer?")
+        #expect(p.options.count == 3)
+        #expect(p.options[0].keycap == "1")
+        #expect(p.options[0].label == "In-memory LRU cache")
+        #expect(p.options[0].isRecommended == true)
+        #expect(p.options[0].description == "Fastest read latency, resets on restart")
+
+        #expect(p.options[1].keycap == "2")
+        #expect(p.options[1].label == "Redis-backed cache")
+        #expect(p.options[1].isRecommended == false)
+        #expect(p.options[1].description == "Shared across worker nodes")
+
+        #expect(p.options[2].keycap == "3")
+        #expect(p.options[2].label == "SQLite on disk")
+        #expect(p.options[2].isRecommended == false)
+        #expect(p.options[2].description == "Persistent, slightly higher latency")
+        #expect(p.hasOther == true)
+    }
+
+    @Test("parses permission plans into Approve and Revise")
+    func parsesPermissionPlan() {
+        let alert = DevReadyAlert(
+            title: "demo",
+            bundleId: "com.apple.Terminal",
+            kind: .waiting,
+            message: "Review execution plan",
+            deliverySpec: "decision",
+            requestId: "req-2",
+            permissionPayload: #"{"tool_name":"ExitPlanMode","tool_input":{"plan":"1. Update database\n2. Migrate assets"}}"#
+        )
+        let parsed = QuestionParser.parse(alert: alert)
+        #expect(parsed != nil)
+        guard let p = parsed else { return }
+        #expect(p.options.count == 2)
+        #expect(p.options[0].label == "Approve")
+        #expect(p.options[0].keycap == "1")
+        #expect(p.options[1].label == "Revise")
+        #expect(p.options[1].keycap == "2")
+    }
+
+    @Test("parses permission action into Allow and Deny")
+    func parsesPermissionAction() {
+        let alert = DevReadyAlert(
+            title: "demo",
+            bundleId: "com.apple.Terminal",
+            kind: .waiting,
+            message: "Allow terminal execution",
+            deliverySpec: "decision",
+            requestId: "req-3",
+            permissionPayload: #"{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/cache"}}"#
+        )
+        let parsed = QuestionParser.parse(alert: alert)
+        #expect(parsed != nil)
+        guard let p = parsed else { return }
+        #expect(p.options.count == 2)
+        #expect(p.options[0].label == "Allow")
+        #expect(p.options[0].keycap == "1")
+        #expect(p.options[1].label == "Deny")
+        #expect(p.options[1].keycap == "2")
+    }
+
+    @Test("vendorDisplayName maps known agent binaries")
+    func vendorDisplayNames() {
+        let claude = AgentSession(id: "1", agent: "claude-code", project: "proj", state: .working, lastActivity: Date())
+        #expect(claude.vendorDisplayName == "Claude Code")
+
+        let codex = AgentSession(id: "2", agent: "codex", project: "proj", state: .working, lastActivity: Date())
+        #expect(codex.vendorDisplayName == "Codex")
+
+        let cursor = AgentSession(id: "3", agent: "cursor", project: "proj", state: .working, lastActivity: Date())
+        #expect(cursor.vendorDisplayName == "Cursor")
+
+        let opencode = AgentSession(id: "4", agent: "opencode", project: "proj", state: .working, lastActivity: Date())
+        #expect(opencode.vendorDisplayName == "OpenCode")
+    }
+
+    @Test("glanceSecondaryText reflects state and file context")
+    func glanceSecondaryTexts() {
+        let waiting = AgentSession(id: "1", agent: "claude-code", project: "proj", state: .waiting(since: Date()), lastActivity: Date())
+        #expect(waiting.glanceSecondaryText == "Waiting for you")
+
+        var working = AgentSession(id: "2", agent: "claude-code", project: "proj", state: .working, lastActivity: Date())
+        working.task = "Refactor models"
+        // Task is already the row title; secondary shows project instead.
+        #expect(working.glanceSecondaryText == "proj")
+
+        let idle = AgentSession(id: "3", agent: "claude-code", project: "proj", state: .idle(since: Date()), lastActivity: Date())
+        #expect(idle.glanceSecondaryText == "proj")
+    }
+
+    @Test("plan Revise is a composer, not a verdict keystroke")
+    func planReviseOpensComposer() throws {
+        let alert = DevReadyAlert(
+            title: "demo",
+            bundleId: "com.apple.Terminal",
+            kind: .waiting,
+            message: "Review execution plan",
+            deliverySpec: "decision",
+            requestId: "req-2",
+            permissionPayload: #"{"tool_name":"ExitPlanMode","tool_input":{"plan":"1. Update database\n2. Migrate assets"}}"#
+        )
+        let parsed = try #require(QuestionParser.parse(alert: alert))
+        #expect(parsed.options[0].opensPlanRevision == false)
+        #expect(parsed.options[1].opensPlanRevision == true)
+        #expect(PermissionDecision.Verdict(parsed.options[1].keystroke) == .ask)
+    }
+}
+
+@MainActor
+@Suite("Fetch Question Answerability Tests")
+struct FetchQuestionAnswerabilityTests {
+    private func numberedWaitingAlert(bundleId: String?) -> DevReadyAlert {
+        DevReadyAlert(
+            title: "demo",
+            agent: "claude-code",
+            bundleId: bundleId,
+            kind: .waiting,
+            message: """
+            Which approach should we take for the caching layer?
+            1. In-memory LRU cache (Recommended)
+               Fastest read latency, resets on restart
+            2. Redis-backed cache
+               Shared across worker nodes
+            3. SQLite on disk
+               Persistent, slightly higher latency
+            """
+        )
+    }
+
+    @Test("numbered AskUser menus are answerable when a terminal can be targeted")
+    func numberedMenuIsAnswerable() {
+        let targeted = numberedWaitingAlert(bundleId: "com.apple.Terminal")
+        #expect(targeted.canAnswerFromNotch(replyEnabled: true))
+        #expect(!numberedWaitingAlert(bundleId: nil).canAnswerFromNotch(replyEnabled: true))
+        #expect(!targeted.canAnswerFromNotch(replyEnabled: false))
+    }
+
+    @Test("waiting height budgets Fetch option rows, not the old capsules")
+    func numberedMenuHeightMatchesRows() throws {
+        let alert = numberedWaitingAlert(bundleId: "com.apple.Terminal")
+        let parsed = try #require(QuestionParser.parse(alert: alert))
+        let extra = NotchContentLayout.waitingExtraHeight(alerts: [alert], answerEnabled: true)
+        let expected = 6
+            + NotchContentLayout.fetchQuestionHeadlineHeight
+            + NotchContentLayout.fetchOptionsHeight(parsed, includeOther: true)
+        #expect(extra == expected)
+        #expect(extra > WaitingLayoutTests.withButtonsExtra)
     }
 }

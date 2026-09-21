@@ -8,7 +8,9 @@ import SQLite3
 /// and unlike Codex there is no refresh to attempt. Cursor's app owns the token
 /// and rewrites it on sign-in; we only ever read.
 actor CursorUsageService {
-    static let refreshInterval: TimeInterval = 300
+    /// Cursor usage changes when a request completes. A one-minute poll keeps
+    /// the card current without tying it to the provider's three-second scan.
+    static let refreshInterval: TimeInterval = 60
     static let staleAfter: TimeInterval = 3600
 
     private var cached: CursorQuota?

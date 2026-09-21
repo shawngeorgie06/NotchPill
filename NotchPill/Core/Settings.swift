@@ -521,6 +521,7 @@ final class AppSettings: ObservableObject {
         static let autoCheckUpdates = "autoCheckUpdates"
         static let agentReplyEnabled = "agentReplyEnabled"
         static let watchAgentTranscripts = "watchAgentTranscripts"
+        static let didMigrateBlankCollapsedRest = "didMigrateBlankCollapsedRest"
     }
 
     private init() {
@@ -574,6 +575,14 @@ final class AppSettings: ObservableObject {
             Keys.autoCheckUpdates: true,
             Keys.agentReplyEnabled: true,
         ])
+
+        // Fetch-style blank rest: existing installs may still have chips on
+        // from when that was the default. Flip once so the notch stays empty
+        // until hover; Settings can turn chips back on afterward.
+        if !defaults.bool(forKey: Keys.didMigrateBlankCollapsedRest) {
+            defaults.set(false, forKey: Keys.showCollapsedActivity)
+            defaults.set(true, forKey: Keys.didMigrateBlankCollapsedRest)
+        }
 
         showCollapsedActivity = defaults.bool(forKey: Keys.showCollapsedActivity)
         showCollapsedMedia = defaults.bool(forKey: Keys.showCollapsedMedia)
