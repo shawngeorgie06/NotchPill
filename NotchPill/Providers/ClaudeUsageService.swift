@@ -9,16 +9,19 @@ import Security
 /// the user has switched the card on. An app that asks for Keychain access for
 /// a card you never requested has earned the suspicion that gets it.
 actor ClaudeUsageService {
-    /// Five minutes, not one.
-    ///
-    /// A minute was measured earning a sustained 429 from Anthropic: the app
-    /// asked, was refused, backed off, asked again, and the card stayed blank
-    /// because a fresh launch has no cached number to fall back on. Usage
-    /// percentages do not move fast enough to be worth a per-minute request.
-    static let refreshInterval: TimeInterval = 300
+    /// Refresh often enough for the card to follow active work without asking
+    /// on every three-second session scan. Backoff still takes over whenever
+    /// Anthropic rate-limits the endpoint.
+    static let refreshInterval: TimeInterval = 60
     static let staleAfter: TimeInterval = 3600
 
     private var cached: ClaudeQuota?
+    /// Reuse the token after the first successful Keychain read. The usage
+    /// endpoint does not need the Keychain on every poll, and retaining the
+    /// credential here prevents a broken Keychain ACL from producing a new
+    /// macOS prompt once per refresh. A 401 clears it so Claude Code's rotated
+    /// token is picked up on the next attempt.
+    private var credentials: ClaudeUsageFetcher.Credentials?
     /// The fetch currently running, so concurrent callers share it rather than
     /// each starting their own.
     private var inFlight: Task<ClaudeQuota?, Never>?
@@ -230,14 +233,21 @@ actor ClaudeUsageService {
     }
 
     private func fetch(now: Date) async throws -> ClaudeQuota {
-        let read = readKeychain()
-        guard case .blob(let blob) = read else {
-            throw read == .unavailable
-                ? ClaudeUsageFetcher.FetchError.keychainUnavailable
-                : ClaudeUsageFetcher.FetchError.noCredentials
-        }
-        guard let creds = ClaudeUsageFetcher.credentials(in: blob) else {
-            throw ClaudeUsageFetcher.FetchError.noCredentials
+        let creds: ClaudeUsageFetcher.Credentials
+        if let cachedCredentials = credentials {
+            creds = cachedCredentials
+        } else {
+            let read = readKeychain()
+            guard case .blob(let blob) = read else {
+                throw read == .unavailable
+                    ? ClaudeUsageFetcher.FetchError.keychainUnavailable
+                    : ClaudeUsageFetcher.FetchError.noCredentials
+            }
+            guard let parsed = ClaudeUsageFetcher.credentials(in: blob) else {
+                throw ClaudeUsageFetcher.FetchError.noCredentials
+            }
+            credentials = parsed
+            creds = parsed
         }
         // Checked before spending a request: a CLI token can hold only
         // `user:inference`, which talks to the model but cannot read the
@@ -249,7 +259,10 @@ actor ClaudeUsageService {
         // No refresh is attempted. Claude Code owns this token and rotates it
         // itself; racing it would be the auth.json mistake with a Keychain
         // prompt attached. An expired token means "use Claude Code once".
-        guard status != 401 else { throw ClaudeUsageFetcher.FetchError.unauthorized }
+        guard status != 401 else {
+            credentials = nil
+            throw ClaudeUsageFetcher.FetchError.unauthorized
+        }
         guard status != 403 else { throw ClaudeUsageFetcher.FetchError.missingScope }
         guard status != 429 else {
             throw ClaudeUsageFetcher.FetchError.rateLimited(

@@ -28,8 +28,8 @@ final class AgentSessionsProvider {
     private var lastClaudeQuota: ClaudeQuota?
     private var lastCursorQuota: CursorQuota?
     private let scanner = AgentSessionScanner()
-    /// Rate-limits itself to one request a minute, so this is safe to consult
-    /// on every scan.
+    /// Rate-limits itself internally, so this is safe to consult on every
+    /// three-second scan.
     private let codexUsage = CodexUsageService()
     /// Only ever consulted when the setting is on: the first read raises a
     /// Keychain consent prompt.
@@ -110,6 +110,11 @@ final class AgentSessionsProvider {
             return
         }
         let wantsAgents = AppSettings.shared.showExpandedAgents
+        if AppSettings.shared.showTokenUsage {
+            // Keep the local Codex/Claude token lines current while the app is
+            // running. TokenUsageStore performs its own incremental rate limit.
+            TokenUsageStore.shared.refresh(period: AppSettings.shared.resolvedTokenPeriod)
+        }
         // One scan at a time. A slow disk must not queue up overlapping walks
         // that all publish the same answer.
         guard !scanning else { return }
@@ -190,6 +195,12 @@ final class AgentSessionsProvider {
             onOpenCodeUsageUpdate?(usage)
         }
         if quota != lastCodexQuota {
+            LogStore.log("codex", quota.map {
+                if let weekly = $0.weeklyPercent {
+                    return "card shown: \($0.usedPercent)% session, \(weekly)% week"
+                }
+                return "card shown: \($0.usedPercent)% session"
+            } ?? "card hidden (no quota)")
             lastCodexQuota = quota
             onCodexQuotaUpdate?(quota)
         }

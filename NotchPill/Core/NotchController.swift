@@ -172,6 +172,7 @@ final class NotchController {
         relayoutTriggers.append(state.$codexQuota.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(state.$claudeQuota.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(state.$cursorQuota.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(TokenUsageStore.shared.$summary.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(ClipboardStore.shared.$entries.map { _ in () }.eraseToAnyPublisher())
         // The query narrows the list and the flag reserves the field's row, so
         // both change the card's height and both have to relayout.
@@ -1783,6 +1784,34 @@ final class NotchController {
         waitingStaleTimer = timer
     }
 
+    private func handleWaitingQuestionKey(_ event: NSEvent) -> Bool {
+        guard state.replyCompose == nil else { return false }
+        // Cmd/Ctrl shortcuts belong to the frontmost app; Option is used by
+        // the dictation hotkey. Don't steal those for 1/2/3/o.
+        if !event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            return false
+        }
+        guard let alert = state.devReadyAlerts.first(where: { $0.kind == .waiting }),
+              let parsed = alert.parsedQuestion else { return false }
+
+        if let chars = event.charactersIgnoringModifiers?.lowercased(), !chars.isEmpty {
+            if let matched = parsed.options.first(where: { $0.keycap.lowercased() == chars }) {
+                if matched.opensPlanRevision {
+                    state.beginPlanRevision(for: alert)
+                } else {
+                    performAnswer(alert: alert, answer: matched.answer)
+                }
+                return true
+            }
+            if chars == "o", parsed.hasOther,
+               alert.canReplyFromNotch(replyEnabled: AppSettings.shared.agentReplyEnabled) {
+                state.beginReply(to: alert)
+                return true
+            }
+        }
+        return false
+    }
+
     private func syncPeekEscapeMonitors() {
         // `window == nil` on an external-only/clamshell setup: the peek is
         // enqueued but never rendered and never fades, so without this the
@@ -1816,15 +1845,18 @@ final class NotchController {
             peekEscapeMonitors.append(global)
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
-            guard event.keyCode == 53, let self,
+            guard let self,
                   self.state.replyCompose == nil,
                   !self.state.devReadyAlerts.isEmpty else { return event }
-            // Local monitors are app-wide, not window-scoped: without this,
-            // Escape in the Preferences window (or a sheet it opens) would be
-            // consumed here instead of closing it.
             guard event.window === self.window else { return event }
-            self.dismissAllDevReady()
-            return nil
+            if event.keyCode == 53 {
+                self.dismissAllDevReady()
+                return nil
+            }
+            if self.handleWaitingQuestionKey(event) {
+                return nil
+            }
+            return event
         }) {
             peekEscapeMonitors.append(local)
         }

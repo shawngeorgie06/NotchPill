@@ -74,7 +74,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         addToggle(to: menu, title: "File Shelf", isOn: settings.showFileShelf) { [weak self] in
             self?.settings.showFileShelf.toggle()
         }
-        addToggle(to: menu, title: "Collapsed Preview", isOn: settings.showCollapsedActivity) { [weak self] in
+        addToggle(to: menu, title: "Chips While Collapsed", isOn: settings.showCollapsedActivity) { [weak self] in
             self?.settings.showCollapsedActivity.toggle()
         }
         menu.addItem(.separator())

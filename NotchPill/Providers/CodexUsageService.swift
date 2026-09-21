@@ -12,8 +12,9 @@ import Foundation
 /// blank the card no sooner than the number actually going unknown.
 actor CodexUsageService {
     /// How often the provider is actually asked. Usage moves when you send a
-    /// message, and no faster.
-    static let refreshInterval: TimeInterval = 60
+    /// message, and no faster; thirty seconds keeps the card effectively live
+    /// without turning the usage endpoint into a per-scan request.
+    static let refreshInterval: TimeInterval = 30
     /// How long a cached answer stays worth showing once fetching starts
     /// failing. Beyond this the number is old enough that showing it is worse
     /// than showing nothing.

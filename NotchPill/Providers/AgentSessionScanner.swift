@@ -987,10 +987,9 @@ actor AgentSessionScanner {
                   let payload = object["payload"] as? [String: Any],
                   payload["type"] as? String == "token_count",
                   let limits = payload["rate_limits"] as? [String: Any],
-                  let primary = limits["primary"] as? [String: Any],
-                  let used = primary["used_percent"] as? Double else { continue }
-            let resetSeconds = (primary["resets_at"] as? Double)
-                ?? (primary["resets_at"] as? NSNumber)?.doubleValue
+                  let primary = CodexUsageFetcher.window(in: limits["primary"] as? [String: Any])
+            else { continue }
+            let secondary = CodexUsageFetcher.window(in: limits["secondary"] as? [String: Any])
             let credits = limits["credits"] as? [String: Any]
             let balanceText = credits?["balance"] as? String
             let balance = balanceText.flatMap {
@@ -999,8 +998,10 @@ actor AgentSessionScanner {
             let updatedAt = (object["timestamp"] as? String).flatMap {
                 ISO8601DateFormatter().date(from: $0)
             }
-            return CodexQuota(usedPercent: min(100, max(0, Int(used.rounded()))),
-                              resetsAt: resetSeconds.map(Date.init(timeIntervalSince1970:)),
+            return CodexQuota(usedPercent: primary.usedPercent,
+                              resetsAt: primary.resetsAt,
+                              weeklyPercent: secondary?.usedPercent,
+                              weeklyResetsAt: secondary?.resetsAt,
                               creditBalance: balance,
                               updatedAt: updatedAt)
         }

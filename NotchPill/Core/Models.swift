@@ -174,6 +174,11 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         return SecretRedactor.redact(agentMessage)
     }
 
+    /// Structured question and option choices when this alert is waiting.
+    var parsedQuestion: ParsedQuestion? {
+        QuestionParser.parse(alert: self)
+    }
+
     /// The change or command this alert is asking permission for, ready to draw.
     ///
     /// Nil unless the alert came from the `PreToolUse` hook *and* names a live
@@ -505,6 +510,12 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
         // removal below was never aimed at: nothing is being guessed, the
         // signal said `answers=Yes:y|No:n` and those are its keys.
         if AgentAnswer.parse(answerSpec) != nil { return true }
+        // Numbered AskUser menus (Fetch's mid-plan question peek): the
+        // keycaps *are* the keystrokes, parsed from the question text rather
+        // than guessed. Same "don't fire into nowhere" rule as a typed reply.
+        if let parsed = parsedQuestion, !parsed.options.isEmpty {
+            return TerminalReplyInjector.canTarget(self)
+        }
         // The generic capsules — Yes / No / 1 / 2 / 3 — are gone by request.
         // Those were inferred from nothing but the agent's name, and guessing
         // wrong put a wrong keystroke into someone's terminal. The ↰ composer
@@ -835,7 +846,8 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .agents(let tray):
             return "agents-" + tray.sessions.map(\.id).joined(separator: ",")
         case .openCodeUsage(let usage): return "opencode-\(usage.totalTokens)-\(usage.cost)"
-        case .codexQuota(let quota): return "codex-quota-\(quota.usedPercent)"
+        case .codexQuota(let quota):
+            return "codex-quota-\(quota.usedPercent)-\(quota.weeklyPercent ?? -1)"
         case .claudeQuota(let quota):
             return "claude-quota-\(quota.sessionPercent)-\(quota.weeklyPercent)"
         case .cursorQuota(let quota): return "cursor-quota-\(quota.used)-\(quota.limit)"

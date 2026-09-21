@@ -579,10 +579,79 @@ struct ExpandedView: View {
         .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
     }
 
+    private var sessionsPageIndex: Int? {
+        activities.firstIndex(where: { $0.kind == "agents" })
+    }
+    private var trayPageIndex: Int? {
+        activities.firstIndex(where: { $0.kind == "shelf" })
+    }
+    private var usagePageIndex: Int? {
+        activities.firstIndex(where: {
+            $0.kind == "codexQuota" || $0.kind == "claudeQuota" ||
+            $0.kind == "cursorQuota" || $0.kind == "openCodeUsage"
+        })
+    }
+    private var showsFetchTabBar: Bool {
+        NotchContentLayout.showsFetchTabBar(for: activities, page: clampedPage)
+    }
+
+    private var fetchTopTabBar: some View {
+        HStack(spacing: NotchSpace.base * readability) {
+            if let sIndex = sessionsPageIndex {
+                fetchTabButton(title: "Sessions", isSelected: clampedPage == sIndex) {
+                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
+                        state.selectExpandedDeckPage(sIndex, kinds: activityKinds)
+                    }
+                }
+            }
+            if let tIndex = trayPageIndex {
+                fetchTabButton(title: "Tray", isSelected: clampedPage == tIndex) {
+                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
+                        state.selectExpandedDeckPage(tIndex, kinds: activityKinds)
+                    }
+                }
+            }
+            if let uIndex = usagePageIndex {
+                let isUsage = activities.indices.contains(clampedPage) && (
+                    activities[clampedPage].kind == "codexQuota" ||
+                    activities[clampedPage].kind == "claudeQuota" ||
+                    activities[clampedPage].kind == "cursorQuota" ||
+                    activities[clampedPage].kind == "openCodeUsage"
+                )
+                fetchTabButton(title: "Usage", isSelected: isUsage) {
+                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
+                        state.selectExpandedDeckPage(uIndex, kinds: activityKinds)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, NotchSpace.tight * readability)
+        .padding(.top, 2)
+    }
+
+    private func fetchTabButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5 * readability) {
+                Circle()
+                    .fill(isSelected ? Color.white : Color.white.opacity(0.35))
+                    .frame(width: 4 * readability, height: 4 * readability)
+                Text(title)
+                    .font(.system(size: NotchType.caption * textScale, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? .white : .white.opacity(0.45))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     /// Agents, quota, CI, shelf — objects sitting in a tray with room for the
     /// silhouette curve and a chrome strip below.
     private var trayDeck: some View {
         VStack(spacing: NotchSpace.snug * readability) {
+            if showsFetchTabBar {
+                fetchTopTabBar
+            }
             pageCard
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .clipped()
@@ -590,7 +659,7 @@ struct ExpandedView: View {
                 .gesture(pageSwipeGesture)
                 .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
 
-            if NotchContentLayout.showsDeckChrome(for: activities) {
+            if NotchContentLayout.showsDeckChrome(for: activities) && !showsFetchTabBar {
                 deckChrome
             }
         }
