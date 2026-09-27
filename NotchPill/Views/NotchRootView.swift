@@ -26,6 +26,12 @@ struct NotchRootView: View {
     }
 
     private var selectedMedia: NowPlaying? {
+        // Peeks and reply/update overlays borrow the same root surface. Keep
+        // their background black even when media remains the selected deck page.
+        guard (state.isExpanded || state.isCollapsing),
+              state.renderedDevReadyAlerts.isEmpty,
+              state.replyCompose == nil,
+              state.updateProgress == nil else { return nil }
         let activities = expandedActivities
         let page = state.resolvedExpandedDeckPage(for: activities.map(\.kind))
         guard activities.indices.contains(page),
