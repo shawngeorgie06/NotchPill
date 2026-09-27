@@ -2098,9 +2098,8 @@ struct ExpandedActivityCard: View {
         }
     }
 
-    /// The island body for Now Playing. Wash and glow fill edge to edge;
-    /// artwork / title / transport / progress are laid out inside a content
-    /// inset so they clear the silhouette curve and the overlaid dots.
+    /// The island body for Now Playing. Its artwork wash is painted by the
+    /// enclosing deck; content stays inset from the silhouette and page dots.
     private func mediaCard(_ np: NowPlaying) -> some View {
         GeometryReader { geo in
             let inset = s(NotchSpace.base)
@@ -2157,43 +2156,7 @@ struct ExpandedActivityCard: View {
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background {
-            ZStack {
-                // Radius 0: NotchShape is the only silhouette.
-                NotchPaintedFill(tint: .white.opacity(0.14), lit: false, cornerRadius: 0)
-                mediaGlow(np)
-            }
-        }
         .clipped()
-    }
-
-    /// The artwork's light. Blurred past recognition, at glow opacity, and
-    /// masked with an elliptical falloff centred where the cover sits, so
-    /// there is no edge to see — which is what lets it live inside the card
-    /// without the pill's clip. Bleeds `base` into the insets so the falloff
-    /// is not visibly boxed by the content rect.
-    @ViewBuilder
-    private func mediaGlow(_ np: NowPlaying) -> some View {
-        if let image = np.artwork {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .blur(radius: s(NotchSpace.section))
-                // A blur paints past its bounds, and the content layer is not
-                // clipped to the pill; unclipped, the glow leaked onto the
-                // desktop beside the island.
-                .clipped()
-                .opacity(NotchOpacity.glow)
-                .mask(
-                    EllipticalGradient(colors: [.white, .clear],
-                                       center: UnitPoint(x: 0.22, y: 0.3),
-                                       startRadiusFraction: 0, endRadiusFraction: 0.8)
-                )
-                .padding(-s(NotchSpace.base))
-                .allowsHitTesting(false)
-                .id(ObjectIdentifier(image))
-                .transition(.opacity)
-        }
     }
 
     private func mediaArtwork(_ np: NowPlaying, size: CGFloat? = nil) -> some View {

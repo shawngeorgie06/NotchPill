@@ -6552,6 +6552,27 @@ struct AgentFallbackTargetTests {
 /// from this machine.
 @Suite("Claude usage over OAuth")
 struct ClaudeUsageFetcherTests {
+    @Test func parsesLocalClaudeUsageWithoutConfusingActivityPercentages() throws {
+        let now = ISO8601DateFormatter().date(from: "2026-09-27T16:00:00Z")!
+        let output = #"{"type":"result","subtype":"success","is_error":false,"result":"Current session: 16% used · resets Sep 27 at 4:49pm (America/New_York)\nCurrent week (all models): 43% used · resets Sep 28 at 6:59pm (America/New_York)\nLocal session attribution: 92%"}"#
+        let quota = try #require(ClaudeUsageFetcher.cliQuota(in: Data(output.utf8), now: now))
+        #expect(quota.sessionPercent == 16)
+        #expect(quota.weeklyPercent == 43)
+        #expect(quota.sessionResetsAt != nil)
+        #expect(quota.weeklyResetsAt != nil)
+        #expect(ClaudeUsageFetcher.cliQuota(in: Data(#"{"result":"Local session attribution: 92%"}"#.utf8)) == nil)
+    }
+
+    @Test func usageServiceUsesClaudeCLIByDefault() async throws {
+        let output = Data(#"{"type":"result","is_error":false,"result":"Current session: 16% used\nCurrent week (all models): 43% used"}"#.utf8)
+        let service = ClaudeUsageService(
+            transport: { _ in Issue.record("OAuth transport must not run"); throw URLError(.badURL) },
+            readCLI: { output }, store: nil)
+        let quota = try #require(await service.quota())
+        #expect(quota.sessionPercent == 16)
+        #expect(quota.weeklyPercent == 43)
+    }
+
     private func json(_ s: String) -> Data { Data(s.utf8) }
 
     private let live = """

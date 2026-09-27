@@ -31,8 +31,8 @@ final class AgentSessionsProvider {
     /// Rate-limits itself internally, so this is safe to consult on every
     /// three-second scan.
     private let codexUsage = CodexUsageService()
-    /// Only ever consulted when the setting is on: the first read raises a
-    /// Keychain consent prompt.
+    /// Only consulted when the setting is on. Uses Claude Code's local
+    /// `/usage` command, so NotchPill does not request Keychain access.
     private let claudeUsage = ClaudeUsageService()
     /// Reads a token from a file rather than the Keychain, so this costs no
     /// prompt — but it is still only consulted when asked for.
@@ -140,7 +140,7 @@ final class AgentSessionsProvider {
             // while the account was actually at 100% with a $298 balance.
             var quota = wantsAgents ? await self.codexUsage.quota(now: now) : nil
             if wantsAgents, quota == nil { quota = await scanner.codexQuota(now: now) }
-            // Never touched unless asked for — the first read prompts.
+            // Ask Claude Code for its own usage only when this card is enabled.
             let claude = wantsClaude ? await self.claudeUsage.quota(now: now) : nil
             let cursor = wantsCursor ? await self.cursorUsage.quota(now: now) : nil
             await MainActor.run {

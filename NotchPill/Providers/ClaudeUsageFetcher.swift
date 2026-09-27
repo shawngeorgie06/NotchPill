@@ -171,6 +171,54 @@ enum ClaudeUsageFetcher {
             subscriptionType: oauth["subscriptionType"] as? String)
     }
 
+    /// `claude -p /usage --output-format json` wraps the local command's text
+    /// in a result object. Match the named quota lines: the same text also
+    /// contains local activity percentages that are not account limits.
+    static func cliQuota(in data: Data, now: Date = Date()) -> ClaudeQuota? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              json["is_error"] as? Bool != true,
+              let result = json["result"] as? String else { return nil }
+        let lines = result.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        func window(_ label: String) -> (Int, Date?)? {
+            guard let line = lines.first(where: { $0.hasPrefix(label) }),
+                  let range = line.range(of: #"\d+(?:\.\d+)?% used"#,
+                                         options: .regularExpression),
+                  let raw = Double(line[range].split(separator: "%")[0]) else { return nil }
+            let reset = line.range(of: "resets ").flatMap { resetRange in
+                cliResetDate(String(line[resetRange.upperBound...]), now: now)
+            }
+            return (min(100, max(0, Int(raw.rounded()))), reset)
+        }
+        let session = window("Current session:")
+        let weekly = window("Current week (all models):")
+        guard session != nil || weekly != nil else { return nil }
+        return ClaudeQuota(sessionPercent: session?.0 ?? 0,
+                           sessionResetsAt: session?.1,
+                           weeklyPercent: weekly?.0 ?? 0,
+                           weeklyResetsAt: weekly?.1,
+                           updatedAt: now)
+    }
+
+    /// Example: `Sep 27 at 4:49pm (America/New_York)`.
+    private static func cliResetDate(_ text: String, now: Date) -> Date? {
+        let parts = text.components(separatedBy: " (")
+        let clock = parts[0].trimmingCharacters(in: .whitespaces)
+        let zone = parts.count > 1
+            ? TimeZone(identifier: parts[1].replacingOccurrences(of: ")", with: ""))
+            : nil
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = zone ?? .current
+        formatter.dateFormat = "MMM d 'at' h:mma yyyy"
+        let year = Calendar.current.component(.year, from: now)
+        guard let date = formatter.date(from: "\(clock) \(year)") else { return nil }
+        if date < now.addingTimeInterval(-86_400) {
+            return formatter.date(from: "\(clock) \(year + 1)")
+        }
+        return date
+    }
+
     // MARK: - Response
 
     static func quota(in data: Data, now: Date = Date()) -> ClaudeQuota? {

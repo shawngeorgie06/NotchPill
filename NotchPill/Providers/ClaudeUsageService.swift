@@ -3,11 +3,8 @@ import Security
 
 /// Keeps a current Claude quota, fetched from Anthropic and cached.
 ///
-/// Mirrors `CodexUsageService`, with one difference that shapes the whole
-/// design: the token lives in the **login Keychain**, not a file. Reading it
-/// raises a macOS consent prompt the first time, so nothing here runs unless
-/// the user has switched the card on. An app that asks for Keychain access for
-/// a card you never requested has earned the suspicion that gets it.
+/// The app asks Claude Code itself for `/usage`. Claude Code owns its login;
+/// NotchPill never needs to read its Keychain item for the live card.
 actor ClaudeUsageService {
     /// Refresh often enough for the card to follow active work without asking
     /// on every three-second session scan. Backoff still takes over whenever
@@ -16,11 +13,8 @@ actor ClaudeUsageService {
     static let staleAfter: TimeInterval = 3600
 
     private var cached: ClaudeQuota?
-    /// Reuse the token after the first successful Keychain read. The usage
-    /// endpoint does not need the Keychain on every poll, and retaining the
-    /// credential here prevents a broken Keychain ACL from producing a new
-    /// macOS prompt once per refresh. A 401 clears it so Claude Code's rotated
-    /// token is picked up on the next attempt.
+    /// Retained only for the injected OAuth path exercised by legacy tests.
+    /// Normal app usage goes through `cliUsage` and never populates this.
     private var credentials: ClaudeUsageFetcher.Credentials?
     /// The fetch currently running, so concurrent callers share it rather than
     /// each starting their own.
@@ -34,9 +28,7 @@ actor ClaudeUsageService {
     /// A number from twenty minutes ago is far better than no card at all,
     /// provided it is not passed off as current.
     static let cacheKey = "claudeUsageCache"
-    /// Set once the Keychain has refused or the token cannot read usage.
-    /// Retrying either on a timer would re-prompt, or hammer a 403 that only a
-    /// re-login can fix.
+    /// Terminal OAuth failure for the injected legacy path.
     private var givenUp: ClaudeUsageFetcher.FetchError?
     /// Nothing is asked before this. A 429 answered every 60s for as long as
     /// the app is open is not a retry, it is the reason for the 429.
@@ -47,7 +39,8 @@ actor ClaudeUsageService {
     static let maxBackoff: TimeInterval = 1800
 
     private let transport: (URLRequest) async throws -> (Data, URLResponse)
-    private let readKeychain: () -> KeychainRead
+    private let readKeychain: (() -> KeychainRead)?
+    private let readCLI: () async throws -> Data
 
     /// What the Keychain had to say. `absent` and `unavailable` both mean "no
     /// token in hand", and collapsing them into one `nil` is what let a dark
@@ -63,10 +56,12 @@ actor ClaudeUsageService {
     init(transport: @escaping (URLRequest) async throws -> (Data, URLResponse) = {
              try await URLSession.shared.data(for: $0)
          },
-         readKeychain: @escaping () -> KeychainRead = ClaudeUsageService.keychainBlob,
+         readKeychain: (() -> KeychainRead)? = nil,
+         readCLI: @escaping () async throws -> Data = ClaudeUsageService.cliUsage,
          store: UserDefaults? = .standard) {
         self.transport = transport
         self.readKeychain = readKeychain
+        self.readCLI = readCLI
         self.store = store
         self.cached = Self.restore(from: store)
     }
@@ -91,9 +86,7 @@ actor ClaudeUsageService {
                    forKey: Self.cacheKey)
     }
 
-    /// Reads the credential Claude Code stored. Returns nil when the item is
-    /// missing or access was declined — both are "no usage card", neither is an
-    /// error worth surfacing twice.
+    /// Legacy OAuth reader retained for tests, never the app's default source.
     nonisolated static func keychainBlob() -> KeychainRead {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -117,6 +110,43 @@ actor ClaudeUsageService {
             LogStore.log("claude", "keychain unavailable (OSStatus \(status)) — will retry")
             return .unavailable
         }
+    }
+
+    /// The local `/usage` command makes no model request. Run outside the
+    /// project directory so project hooks and instructions cannot affect it.
+    nonisolated static func cliUsage() async throws -> Data {
+        try await Task.detached(priority: .utility) {
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let candidates = [
+                home.appendingPathComponent(".local/bin/claude").path,
+                "/opt/homebrew/bin/claude", "/usr/local/bin/claude",
+            ] + (ProcessInfo.processInfo.environment["PATH"] ?? "")
+                .split(separator: ":").map { "\($0)/claude" }
+            guard let path = candidates.first(where: FileManager.default.isExecutableFile(atPath:)) else {
+                throw ClaudeCLIError.notInstalled
+            }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: path)
+            process.arguments = ["-p", "/usage", "--output-format", "json", "--no-session-persistence"]
+            process.currentDirectoryURL = home
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 20) {
+                if process.isRunning { process.terminate() }
+            }
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                throw ClaudeCLIError.failed(process.terminationStatus)
+            }
+            return output.fileHandleForReading.readDataToEndOfFile()
+        }.value
+    }
+
+    private enum ClaudeCLIError: Error {
+        case notInstalled
+        case failed(Int32)
     }
 
     /// One request at a time, whoever asks.
@@ -233,6 +263,15 @@ actor ClaudeUsageService {
     }
 
     private func fetch(now: Date) async throws -> ClaudeQuota {
+        // Production uses Claude Code's own local command. The injected
+        // Keychain reader remains only for the legacy OAuth service tests.
+        guard let readKeychain else {
+            let data = try await readCLI()
+            guard let quota = ClaudeUsageFetcher.cliQuota(in: data, now: now) else {
+                throw ClaudeUsageFetcher.FetchError.malformedResponse
+            }
+            return quota
+        }
         let creds: ClaudeUsageFetcher.Credentials
         if let cachedCredentials = credentials {
             creds = cachedCredentials

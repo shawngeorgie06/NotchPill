@@ -25,6 +25,14 @@ struct NotchRootView: View {
         NotchContentSnapshot.expandedActivities(state: state, shelf: shelf, timer: timer, settings: settings)
     }
 
+    private var selectedMedia: NowPlaying? {
+        let activities = expandedActivities
+        let page = state.resolvedExpandedDeckPage(for: activities.map(\.kind))
+        guard activities.indices.contains(page),
+              case .media(let nowPlaying) = activities[page] else { return nil }
+        return nowPlaying
+    }
+
     private var contentLayout: NotchContentLayoutMetrics {
         if state.updateProgress != nil {
             return NotchContentLayout.updateLayout(metrics: metrics)
@@ -269,7 +277,16 @@ struct NotchRootView: View {
         // as an island rather than as something that failed to dock.
         let floating = !metrics.hasPhysicalNotch
         let inset = floating ? 4 * progress : 0
+        let shape = NotchShape(bottomRadius: 22, topRadius: floating ? 22 : 0)
         return PillSurface(bottomRadius: 22, topRadius: floating ? 22 : 0)
+            .overlay {
+                if let selectedMedia {
+                    MediaBackdrop(nowPlaying: selectedMedia,
+                                  size: CGSize(width: width, height: max(0, height - inset)))
+                        .clipShape(shape)
+                }
+            }
+            .overlay { shape.stroke(NotchIslandChrome.rim, lineWidth: 0.5) }
             .frame(width: width, height: max(0, height - inset))
             .padding(.top, inset)
             .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
@@ -487,6 +504,34 @@ struct UpdateProgressView: View {
 }
 
 /// Expanded pill: live status cards sized to how many are visible.
+/// One artwork wash for the entire expanded silhouette, including the space
+/// above the media controls. Painting this inside the card leaves a black band
+/// between the menu bar and the card's content origin.
+private struct MediaBackdrop: View {
+    let nowPlaying: NowPlaying
+    let size: CGSize
+
+    var body: some View {
+        ZStack {
+            Color.black
+            if let artwork = nowPlaying.artwork {
+                Image(nsImage: artwork)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: size.width, height: size.height)
+                    .blur(radius: NotchSpace.section)
+                    .clipped()
+                    .opacity(NotchOpacity.glow)
+            }
+            LinearGradient(colors: [.black.opacity(0.25), .black.opacity(0.48)],
+                           startPoint: .top, endPoint: .bottom)
+        }
+        .frame(width: size.width, height: size.height)
+        .clipped()
+        .allowsHitTesting(false)
+    }
+}
+
 struct ExpandedView: View {
     @ObservedObject var settings = AppSettings.shared
     @ObservedObject var state: NotchState
@@ -565,18 +610,25 @@ struct ExpandedView: View {
     /// Media owns the island body. The wash fills edge to edge; dots sit on
     /// top of it rather than in a black strip underneath.
     private var islandSurfaceDeck: some View {
-        ZStack(alignment: .bottom) {
-            pageCard
-            if NotchContentLayout.showsDeckChrome(for: activities) {
-                deckChrome
-                    .padding(.horizontal, NotchSpace.base * readability)
-                    .padding(.bottom, NotchSpace.base * readability)
+        GeometryReader { geo in
+            ZStack(alignment: .bottom) {
+                // Give the media card the deck's actual height. A flexible
+                // pageCard can otherwise settle at its content height, leaving
+                // the artwork wash ending above the page dots.
+                pageCard
+                    .frame(width: geo.size.width, height: geo.size.height)
+                if NotchContentLayout.showsDeckChrome(for: activities) {
+                    deckChrome
+                        .padding(.horizontal, NotchSpace.base * readability)
+                        .padding(.bottom, NotchSpace.base * readability)
+                }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .contentShape(Rectangle())
+            .gesture(pageSwipeGesture)
+            .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .gesture(pageSwipeGesture)
-        .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
     }
 
     private var sessionsPageIndex: Int? {
