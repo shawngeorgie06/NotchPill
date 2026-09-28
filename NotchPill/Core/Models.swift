@@ -728,6 +728,7 @@ extension Notification.Name {
 
 /// Compact chip shown in the collapsed pill preview.
 enum CollapsedChip: Equatable, Identifiable {
+    case command(title: String, state: DevCommand.State)
     case media(NowPlaying)
     case calendar(CalendarEvent)
     case shelf(count: Int)
@@ -740,6 +741,7 @@ enum CollapsedChip: Equatable, Identifiable {
 
     var id: String {
         switch self {
+        case .command(let title, let state): return "command-\(title)-\(state)"
         case .media(let np): return "media-\(np.title)-\(np.artist)"
         case .calendar(let e): return "cal-\(e.title)-\(e.start.timeIntervalSince1970)"
         case .shelf(let count): return "shelf-\(count)"
@@ -771,6 +773,7 @@ struct AgentHomeTray: Equatable {
 }
 
 enum ExpandedActivity: Equatable, Identifiable {
+    case commands([DevCommand])
     case media(NowPlaying)
     case appSwitch(String)
     case activeApp(name: String)
@@ -798,6 +801,7 @@ enum ExpandedActivity: Equatable, Identifiable {
     /// the content. Weights are stored against this.
     var kind: String {
         switch self {
+        case .commands: return "commands"
         case .media: return "media"
         case .appSwitch, .activeApp: return "activeApp"
         case .volume: return "volume"
@@ -832,6 +836,8 @@ enum ExpandedActivity: Equatable, Identifiable {
     /// transaction per poll to redraw an identical card.
     var contentKey: String {
         switch self {
+        case .commands(let commands):
+            return "commands-" + commands.map { "\($0.id):\($0.state)" }.joined(separator: ",")
         case .media(let np): return "media-\(np.title)-\(np.artist)-\(np.isPlaying)"
         case .appSwitch(let name): return "switch-\(name)"
         case .activeApp(let name): return "app-\(name)"
@@ -873,6 +879,7 @@ enum ExpandedActivity: Equatable, Identifiable {
     /// reordered before it has ever had content to show.
     static let allKinds: [(kind: String, label: String)] = [
         ("agents", "Live agents"),
+        ("commands", "Builds & tests"),
         ("shelf", "File shelf"),
         ("clipboard", "Clipboard"),
         ("terminal", "Terminal"),
@@ -895,6 +902,7 @@ enum ExpandedActivity: Equatable, Identifiable {
     /// Human label for the settings row.
     var kindLabel: String {
         switch self {
+        case .commands: return "Builds & tests"
         case .media: return "Now playing"
         case .appSwitch, .activeApp: return "Active app"
         case .volume: return "Volume"
@@ -936,6 +944,7 @@ enum ExpandedActivity: Equatable, Identifiable {
     /// Everything else is content, and content animates in place.
     var id: String {
         switch self {
+        case .commands: return "commands"
         case .media(let np): return "media-\(np.title)-\(np.artist)"
         case .appSwitch(let name): return "switch-\(name)"
         case .activeApp(let name): return "app-\(name)"

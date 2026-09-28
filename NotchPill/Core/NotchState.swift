@@ -86,6 +86,8 @@ final class NotchState: ObservableObject {
     @Published var cursorQuota: CursorQuota?
     /// GitHub Actions runs for the repos those sessions are in.
     @Published var ciRuns: [CIRun] = []
+    /// Commands explicitly wrapped by the developer's notchpill command helper.
+    @Published var devCommands: [DevCommand] = []
     /// Active reply composer, non-nil while the user is typing a reply to a
     /// finished agent. nil = not composing.
     @Published private(set) var replyCompose: ReplyComposeState?

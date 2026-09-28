@@ -23,9 +23,12 @@ now-playing controls, live status cards, and optional collapsed activity chips.
   repo, because the card follows whichever repos your agents are in. A pass
   drops off two minutes after it finishes and a failure after six hours;
   anything still running stays however long it takes. Needs `gh`.
-- **Card widths** — Settings → **Card Widths** divides the expanded row however
-  you like: live agents at 60% and now playing at 20%, say. Weights are
-  relative, so the split re-normalises as cards come and go.
+- **Builds & tests** — run a command through the opt-in wrapper to see it
+  running in the notch, then see whether it passed or failed and how long it
+  took. Concurrent commands get separate rows; a terminal shortcut opens the
+  host app. See [Builds and tests](#builds-and-tests).
+- **Card order** — Settings → **Card Order** chooses which full-width pages
+  appear first when you swipe through the expanded notch.
 - **Resizable** — Settings → Expanded Pill → **Size** (70–130%, default 75%). Shrinking is
   not a uniform scale: type is compensated so it stays readable, and the pill
   shows fewer cards rather than cramming them.
@@ -186,6 +189,41 @@ Accessibility grant to the bundle id, so the dev build asks for its own
 permission and cannot disturb the grant on your installed NotchPill. Both can
 run at once — quit the release one first unless you want two pills over the
 same notch.
+
+## Builds and tests
+
+Run a long command through the bundled wrapper to see its live status in the
+notch. It prints the command's output normally and returns the same exit code.
+The command runs only when you invoke it; no global shell hook is installed.
+
+```sh
+./Scripts/notchpill-command.sh --title "Unit tests" -- npm test
+./Scripts/notchpill-command.sh --title "Release build" -- xcodebuild -project NotchPill.xcodeproj -scheme NotchPill build
+```
+
+After installing NotchPill, the wrapper is also at
+`/Applications/NotchPill.app/Contents/Resources/Scripts/notchpill-command.sh`.
+Use `--project PATH`, `--source NAME`, or `--bundle-id ID` to set the project
+and host app shown in the card. The wrapper stores the executable name, never
+its arguments; choose a short `--title` that contains no secrets. The card
+shows running commands and keeps results for 30 minutes. A stopped wrapper is
+marked failed after a short grace period. Toggle the card in Settings.
+
+Scripts and other tools can also report their own activity to that card:
+
+```sh
+./Scripts/notchpill working --id deploy-42 --title "Deploy staging" --detail "Uploading build"
+./Scripts/notchpill waiting --id deploy-42 --detail "Needs approval"
+./Scripts/notchpill done --id deploy-42
+./Scripts/notchpill status
+```
+
+Use `error --id deploy-42` for a failure or `remove --id deploy-42` to clear
+the activity. `doctor` checks the local setup, and `demo` plays the states in
+the notch. Omit `--id` on `working` to generate one; the command prints it for
+later updates. Activities posted without a process ID stay active until you
+send `done`, `error`, or `remove`. The CLI is also bundled at
+`/Applications/NotchPill.app/Contents/Resources/Scripts/notchpill`.
 
 ## Dev ready pings
 

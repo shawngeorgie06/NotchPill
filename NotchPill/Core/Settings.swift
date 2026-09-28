@@ -112,10 +112,11 @@ final class AppSettings: ObservableObject {
     @Published var showExpandedAgents: Bool {
         didSet { defaults.set(showExpandedAgents, forKey: Keys.showExpandedAgents) }
     }
-    /// Claude usage card. **Off by default, deliberately.** Reading the token
-    /// means reading the login Keychain, which raises a macOS consent prompt —
-    /// an app that asks for that unbidden, for a card nobody requested, has
-    /// earned the suspicion it gets. Turning this on is the consent.
+    @Published var showExpandedCommands: Bool {
+        didSet { defaults.set(showExpandedCommands, forKey: Keys.showExpandedCommands) }
+    }
+    /// Claude usage card. Off by default: querying the installed Claude Code
+    /// CLI runs a local command using the user's existing sign-in.
     @Published var showClaudeUsage: Bool {
         didSet { defaults.set(showClaudeUsage, forKey: Keys.showClaudeUsage) }
     }
@@ -192,6 +193,7 @@ final class AppSettings: ObservableObject {
         // quota to show, so the honest answer is that they can.
         case "claudeQuota", "cursorQuota": return true
         case "ci": return showExpandedCI
+        case "commands": return showExpandedCommands
         case "recentAlerts": return showExpandedRecentActivity
         case "media": return showExpandedMedia
         case "shelf": return showExpandedShelf
@@ -491,6 +493,7 @@ final class AppSettings: ObservableObject {
         static let showTerminal = "showTerminal"
         static let terminalDirectory = "terminalDirectory"
         static let showExpandedAgents = "showExpandedAgents"
+        static let showExpandedCommands = "showExpandedCommands"
         static let showExpandedCI = "showExpandedCI"
         static let showClaudeUsage = "showClaudeUsage"
         static let showCursorUsage = "showCursorUsage"
@@ -549,6 +552,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedShelf: true,
             Keys.showClipboard: false,
             Keys.showExpandedAgents: true,
+            Keys.showExpandedCommands: true,
             Keys.showExpandedCI: true,
             Keys.showClaudeUsage: false,
             Keys.showCursorUsage: false,
@@ -607,6 +611,7 @@ final class AppSettings: ObservableObject {
         showTerminal = defaults.bool(forKey: Keys.showTerminal)
         terminalDirectory = defaults.string(forKey: Keys.terminalDirectory) ?? ""
         showExpandedAgents = defaults.bool(forKey: Keys.showExpandedAgents)
+        showExpandedCommands = defaults.bool(forKey: Keys.showExpandedCommands)
         showExpandedCI = defaults.bool(forKey: Keys.showExpandedCI)
         showClaudeUsage = defaults.bool(forKey: Keys.showClaudeUsage)
         showCursorUsage = defaults.bool(forKey: Keys.showCursorUsage)
@@ -684,6 +689,7 @@ final class AppSettings: ObservableObject {
             Keys.showExpandedShelf: true,
             Keys.showClipboard: false,
             Keys.showExpandedAgents: true,
+            Keys.showExpandedCommands: true,
             Keys.showExpandedCI: true,
             Keys.showExpandedRecentActivity: false,
             Keys.pinnedActivityKind: "",
@@ -728,6 +734,7 @@ final class AppSettings: ObservableObject {
         showExpandedBattery = false
         showExpandedShelf = true
         showExpandedAgents = true
+        showExpandedCommands = true
         showExpandedCI = true
         showExpandedRecentActivity = false
         // Both off on reset. These are the only cards that read an account over

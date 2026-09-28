@@ -17,7 +17,6 @@ struct PreferencesView: View {
                     cardOrderSection
                     shelfSection
                     tokenSection
-                    cardShareSection
                     audioSection
                     fullScreenSection
                     systemHUDSection
@@ -43,64 +42,24 @@ struct PreferencesView: View {
                 .help("Off by default. When on, compact chips sit under the notch "
                       + "even before you hover — useful as a glance strip, but "
                       + "not the usual Fetch-style blank rest state.")
-            settingsGroup {
-                Toggle("Media", isOn: $settings.showCollapsedMedia)
-                Toggle("Timer", isOn: $settings.showCollapsedTimer)
-                Toggle("Live clock", isOn: $settings.showCollapsedClock)
-                Toggle("Active agent", isOn: $settings.showCollapsedAgents)
-                Toggle("App switch banner", isOn: $settings.showCollapsedAppSwitch)
-                Toggle("Next calendar event", isOn: $settings.showCalendar)
-                Toggle("Dropped file count", isOn: $settings.showFileShelf)
-                    .help("A count only. The files themselves live on the "
-                          + "expanded pill's File shelf card.")
-                Toggle("CPU & memory", isOn: $settings.showCollapsedSystemStats)
-                Toggle("Battery", isOn: $settings.showCollapsedBattery)
+            if settings.showCollapsedActivity {
+                settingsGroup {
+                    Toggle("Media", isOn: $settings.showCollapsedMedia)
+                    Toggle("Timer", isOn: $settings.showCollapsedTimer)
+                    Toggle("Live clock", isOn: $settings.showCollapsedClock)
+                    Toggle("Active agent", isOn: $settings.showCollapsedAgents)
+                    Toggle("App switch banner", isOn: $settings.showCollapsedAppSwitch)
+                    Toggle("Next calendar event", isOn: $settings.showCalendar)
+                    Toggle("Dropped file count", isOn: $settings.showFileShelf)
+                        .help("A count only. The files themselves live on the "
+                              + "expanded pill's File shelf card.")
+                    Toggle("CPU & memory", isOn: $settings.showCollapsedSystemStats)
+                    Toggle("Battery", isOn: $settings.showCollapsedBattery)
+                }
             }
-            .disabled(!settings.showCollapsedActivity)
             Text("Browser tabs beside the notch stay clickable.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-        }
-    }
-
-    /// One slider per card that is currently switched on, labelled with the
-    /// share of the row it actually gets — the percentage moves as you drag
-    /// *other* sliders too, which is the only honest way to show a proportion.
-    private var cardShareSection: some View {
-        let kinds = enabledCardKinds
-        let shares = AppSettings.shares(for: kinds.map(\.0), weights: settings.cardWeights)
-        return SettingsPanel(title: "Card Widths",
-                             subtitle: "How the expanded row is divided") {
-            if kinds.isEmpty {
-                Text("No cards enabled.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(kinds, id: \.0) { kind, label in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(label)
-                            Spacer()
-                            Text("\(Int(((shares[kind] ?? 0) * 100).rounded()))%")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                        Slider(
-                            value: Binding(
-                                get: { settings.cardWeight(kind) },
-                                set: { settings.setCardWeight(kind, $0) }),
-                            in: AppSettings.cardWeightRange)
-                    }
-                }
-                HStack {
-                    Spacer()
-                    // Not "equal" any more: cards have per-kind starting
-                    // widths, so this restores those rather than a flat split.
-                    Button("Reset widths") { settings.cardWeights = [:] }
-                        .buttonStyle(.link)
-                        .disabled(settings.cardWeights.isEmpty)
-                }
-            }
         }
     }
 
@@ -153,29 +112,6 @@ struct PreferencesView: View {
                 .frame(height: min(CGFloat(destinations.pinned.count) * 30 + 8, 140))
             }
         }
-    }
-
-    /// Only cards that can actually appear — a slider for something switched
-    /// off would do nothing and read as broken.
-    private var enabledCardKinds: [(String, String)] {
-        var out: [(String, String)] = []
-        if settings.showExpandedAgents { out.append(("agents", "Live agents")) }
-        if settings.showClaudeUsage { out.append(("claudeQuota", "Claude usage limits")) }
-        if settings.showCursorUsage { out.append(("cursorQuota", "Cursor usage limits")) }
-        if settings.showExpandedCI { out.append(("ci", "CI status")) }
-        if settings.showExpandedRecentActivity { out.append(("recentAlerts", "Recent activity")) }
-        if settings.showExpandedMedia { out.append(("media", "Now playing")) }
-        if settings.showExpandedActiveApp { out.append(("activeApp", "Active app")) }
-        if settings.showExpandedCalendar { out.append(("calendar", "Calendar")) }
-        if settings.showExpandedTimer { out.append(("timer", "Timer")) }
-        if settings.showExpandedVolume { out.append(("volume", "Volume")) }
-        if settings.showExpandedSystemStats { out.append(("systemStats", "CPU & memory")) }
-        if settings.showExpandedBattery { out.append(("battery", "Battery")) }
-        if settings.showExpandedShelf { out.append(("shelf", "File shelf")) }
-        if settings.showClipboard { out.append(("clipboard", "Clipboard")) }
-        if settings.showTerminal { out.append(("terminal", "Terminal")) }
-        if settings.showExpandedClock { out.append(("clock", "Clock")) }
-        return out
     }
 
     private var sizeSlider: some View {
@@ -272,11 +208,12 @@ struct PreferencesView: View {
     }
 
     private var expandedSection: some View {
-        SettingsPanel(title: "Expanded Pill", subtitle: "Cards when you hover the notch") {
+        SettingsPanel(title: "Expanded Pill", subtitle: "Full-width pages when you hover the notch") {
             sizeSlider
             Picker("Keep in focus", selection: $settings.pinnedActivityKind) {
                 Text("Automatic").tag("")
                 Text("Live agents").tag("agents")
+                Text("Builds & tests").tag("commands")
                 Text("Recent activity").tag("recentAlerts")
                 Text("CI status").tag("ci")
                 Text("Now playing").tag("media")
@@ -284,13 +221,16 @@ struct PreferencesView: View {
             }
             .pickerStyle(.menu)
             Divider().padding(.vertical, 2)
+            settingsCategory("Developer")
             Toggle("Live agents", isOn: $settings.showExpandedAgents)
+            Toggle("Builds & tests", isOn: $settings.showExpandedCommands)
+            Text("Show builds and tests run with Scripts/notchpill-command.sh, plus activities posted by Scripts/notchpill. Command arguments are not saved.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
                 Toggle("Claude usage limits", isOn: $settings.showClaudeUsage)
-                Text("Reads the token Claude Code saved in your Keychain, so macOS "
-                     + "will ask for permission the first time. Nothing is sent "
-                     + "anywhere except Anthropic, and it stops working if you sign "
-                     + "out of Claude Code.")
+                Text("Runs the installed Claude Code CLI's /usage command using your "
+                     + "existing sign-in. It stops working if you sign out of Claude Code.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -306,23 +246,32 @@ struct PreferencesView: View {
             }
             Toggle("CI status", isOn: $settings.showExpandedCI)
             Toggle("Recent activity", isOn: $settings.showExpandedRecentActivity)
-            Toggle("Now playing", isOn: $settings.showExpandedMedia)
-            Toggle("Timer", isOn: $settings.showExpandedTimer)
-            Toggle("Active app", isOn: $settings.showExpandedActiveApp)
-            Toggle("Next calendar event", isOn: $settings.showExpandedCalendar)
-            Toggle("Volume", isOn: $settings.showExpandedVolume)
-            Toggle("Clock", isOn: $settings.showExpandedClock)
-            Toggle("CPU & memory", isOn: $settings.showExpandedSystemStats)
-            Toggle("Battery", isOn: $settings.showExpandedBattery)
+
+            Divider().padding(.vertical, 2)
+            settingsCategory("Everyday")
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())],
+                      alignment: .leading, spacing: 10) {
+                Toggle("Now playing", isOn: $settings.showExpandedMedia)
+                Toggle("Timer", isOn: $settings.showExpandedTimer)
+                Toggle("Active app", isOn: $settings.showExpandedActiveApp)
+                Toggle("Next calendar event", isOn: $settings.showExpandedCalendar)
+                Toggle("Volume", isOn: $settings.showExpandedVolume)
+                Toggle("Clock", isOn: $settings.showExpandedClock)
+                Toggle("CPU & memory", isOn: $settings.showExpandedSystemStats)
+                Toggle("Battery", isOn: $settings.showExpandedBattery)
+            }
+
+            Divider().padding(.vertical, 2)
+            settingsCategory("Tools")
             Toggle("File shelf — drop files here", isOn: $settings.showExpandedShelf)
+                .help("The card that holds dropped files and files them into folders. "
+                      + "Turn this on to use drag and drop.")
             Toggle("Clipboard — recent copies", isOn: $settings.showClipboard)
             Text("Kept in memory only and never written to disk. Passwords marked "
                  + "concealed by your password manager, and anything that looks "
                  + "like a key or token, are not remembered.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .help("The card that holds dropped files and files them into folders. "
-                      + "Turn this on to use drag and drop.")
 
             Toggle("Terminal — a live shell in the notch", isOn: $settings.showTerminal)
             Text("Runs your login shell on a real pseudo-terminal, so the prompt, "
@@ -660,6 +609,14 @@ struct PreferencesView: View {
         }
     }
 
+    private func settingsCategory(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(0.8)
+            .foregroundStyle(.secondary)
+            .padding(.top, 2)
+    }
+
     @ViewBuilder
     private func settingsGroup<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -676,16 +633,44 @@ private struct SettingsPanel<Content: View>: View {
     let subtitle: String?
     @ViewBuilder let content: Content
 
+    private var symbol: String {
+        switch title {
+        case "Display": return "display"
+        case "Collapsed Preview": return "rectangle.topthird.inset.filled"
+        case "Expanded Pill": return "rectangle.expand.vertical"
+        case "Card Order": return "square.stack"
+        case "Shelf": return "folder"
+        case "Token Usage": return "number"
+        case "Audio": return "speaker.wave.2"
+        case "Full Screen": return "arrow.up.left.and.arrow.down.right"
+        case "System HUDs": return "slider.horizontal.3"
+        case "Focus & Timer": return "timer"
+        case "Dev Ready Pings": return "bell"
+        case "Keyboard Shortcuts": return "keyboard"
+        case "Updates": return "arrow.down.circle"
+        default: return "gearshape"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.headline)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color.primary.opacity(0.72))
+                    .frame(width: 30, height: 30)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.primary.opacity(0.06)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.headline)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .padding(.top, 1)
             }
             VStack(alignment: .leading, spacing: 10) {
                 content

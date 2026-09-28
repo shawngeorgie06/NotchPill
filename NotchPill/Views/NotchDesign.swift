@@ -17,8 +17,8 @@ enum NotchDesign {
 
     static let settingsHeader = LinearGradient(
         colors: [
-            Color(red: 0.18, green: 0.20, blue: 0.32),
-            Color(red: 0.10, green: 0.11, blue: 0.16),
+            Color(red: 0.20, green: 0.20, blue: 0.22),
+            Color(red: 0.10, green: 0.10, blue: 0.11),
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing

@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""Post and inspect local developer activities shown in NotchPill.
+
+Examples:
+    notchpill working --id build-42 --title 'Release build' --detail 'xcodebuild'
+    notchpill waiting --id build-42 --detail 'Approve deployment'
+    notchpill done --id build-42
+    notchpill status
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+
+
+ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
+APP_EXECUTABLE = "/Applications/NotchPill.app/Contents/MacOS/NotchPill"
+BUNDLE_IDS = {
+    "Apple_Terminal": "com.apple.Terminal",
+    "Terminal": "com.apple.Terminal",
+    "iTerm.app": "com.googlecode.iterm2",
+    "iTerm2": "com.googlecode.iterm2",
+    "WarpTerminal": "dev.warp.Warp-Stable",
+    "WezTerm": "com.github.wez.wezterm",
+    "ghostty": "com.mitchellh.ghostty",
+    "kitty": "net.kovidgoyal.kitty",
+    "cmux": "com.cmuxterm.app",
+}
+
+
+def directory() -> Path:
+    return Path(os.environ.get("NOTCHPILL_COMMAND_DIR", "~/.notchpill/commands")).expanduser()
+
+
+def ensure_directory() -> Path:
+    target = directory()
+    target.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target.chmod(0o700)
+    return target
+
+
+def valid_id(value: str) -> str:
+    if not ID_PATTERN.fullmatch(value) or value in {".", ".."}:
+        raise ValueError("id must contain 1–80 letters, digits, dots, dashes, or underscores")
+    return value
+
+
+def path_for(activity_id: str) -> Path:
+    return directory() / (valid_id(activity_id) + ".json")
+
+
+def compact_text(value: str, length: int) -> str:
+    return " ".join(value.split())[:length]
+
+
+def read(activity_id: str) -> dict | None:
+    try:
+        with path_for(activity_id).open(encoding="utf-8") as stream:
+            value = json.load(stream)
+        return value if value.get("id") == activity_id else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def write(snapshot: dict) -> None:
+    target = path_for(snapshot["id"])
+    parent = ensure_directory()
+    fd, temporary = tempfile.mkstemp(prefix="." + target.name + ".", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(snapshot, stream, separators=(",", ":"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def app_running() -> bool:
+    try:
+        result = subprocess.run(
+            ["/usr/bin/pgrep", "-f", "^" + re.escape(APP_EXECUTABLE) + "$"],
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return result.returncode == 0
+    except OSError:
+        return False
+
+
+def list_snapshots() -> list[dict]:
+    items = []
+    for file in directory().glob("*.json"):
+        try:
+            with file.open(encoding="utf-8") as stream:
+                value = json.load(stream)
+            if isinstance(value, dict) and value.get("id") == file.stem:
+                # The app marks a vanished wrapper as failed in memory. Match
+                # that view here without racing the wrapper to rewrite its file.
+                pid = value.get("processId")
+                updated = value.get("updatedAt")
+                if value.get("state") in {"running", "waiting"} \
+                        and isinstance(pid, int) and pid > 1 \
+                        and isinstance(updated, (int, float)) and time.time() - updated > 10:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        value["state"] = "failed"
+                        value["abandoned"] = True
+                    except PermissionError:
+                        pass
+                items.append(value)
+        except (OSError, ValueError):
+            continue
+    items.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
+    return items
+
+
+def post(args: argparse.Namespace) -> int:
+    activity_id = valid_id(args.id or str(uuid.uuid4()))
+    now = time.time()
+    snapshot = read(activity_id)
+    if args.action != "working" and snapshot is None:
+        print(f"notchpill: unknown activity {activity_id!r}; post working first", file=sys.stderr)
+        return 2
+    if snapshot is None:
+        title = compact_text(args.title or "", 100)
+        if not title:
+            print("notchpill: working needs --title", file=sys.stderr)
+            return 2
+        source = compact_text(args.source or os.environ.get("TERM_PROGRAM", "Shell"), 80)
+        snapshot = {
+            "id": activity_id, "title": title, "command": "script",
+            "projectPath": args.project or os.getcwd(), "source": source,
+            "bundleId": args.bundle_id or BUNDLE_IDS.get(source, ""),
+            "state": "running", "startedAt": now, "updatedAt": now,
+        }
+    if args.title is not None:
+        title = compact_text(args.title, 100)
+        if not title:
+            print("notchpill: --title cannot be empty", file=sys.stderr)
+            return 2
+        snapshot["title"] = title
+    if args.detail is not None:
+        snapshot["detail"] = compact_text(args.detail, 140)
+    if args.project is not None:
+        snapshot["projectPath"] = args.project
+    if args.source is not None:
+        snapshot["source"] = compact_text(args.source, 80)
+    if args.bundle_id is not None:
+        snapshot["bundleId"] = args.bundle_id
+    snapshot["state"] = {
+        "working": "running", "waiting": "waiting",
+        "done": "passed", "error": "failed",
+    }[args.action]
+    snapshot["updatedAt"] = now
+    if args.action in {"done", "error"}:
+        snapshot["endedAt"] = now
+        snapshot.pop("processId", None)
+        if args.exit_code is not None:
+            snapshot["exitCode"] = args.exit_code
+    else:
+        snapshot.pop("endedAt", None)
+        snapshot.pop("exitCode", None)
+        snapshot.pop("processId", None)
+    write(snapshot)
+    if args.action == "working" and args.id is None:
+        print(activity_id)
+    return 0
+
+
+def status(args: argparse.Namespace) -> int:
+    items = list_snapshots()
+    if args.json:
+        print(json.dumps(items, indent=2))
+    elif not items:
+        print("No recent developer activities.")
+    else:
+        for item in items:
+            detail = item.get("detail")
+            suffix = f" · {detail}" if isinstance(detail, str) and detail else ""
+            print(f"{item.get('id', '?'):<28} {item.get('state', '?'):<8} "
+                  f"{item.get('title', '?')}{suffix}")
+    return 0
+
+
+def remove(args: argparse.Namespace) -> int:
+    path_for(args.id).unlink(missing_ok=True)
+    return 0
+
+
+def doctor(_args: argparse.Namespace) -> int:
+    target = ensure_directory()
+    print(f"App process: {'running' if app_running() else 'not running'}")
+    print(f"Activity directory: {target}")
+    print(f"Snapshots: {len(list_snapshots())}")
+    print(f"Command wrapper: {Path(__file__).with_name('notchpill-command.sh')}")
+    return 0
+
+
+def demo(_args: argparse.Namespace) -> int:
+    activity_id = "demo-" + uuid.uuid4().hex[:12]
+    sample = argparse.Namespace(id=activity_id, title="Developer activity demo",
+                                detail="Running a build", project=None, source=None,
+                                bundle_id=None, exit_code=None, action="working")
+    post(sample)
+    time.sleep(2)
+    sample.action, sample.title, sample.detail = "waiting", None, "Needs your input"
+    post(sample)
+    time.sleep(2)
+    sample.action, sample.detail = "done", "Completed"
+    post(sample)
+    print(f"Demo complete: {activity_id}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="action", required=True)
+    for name in ("working", "waiting", "done", "error"):
+        item = commands.add_parser(name, help=f"Post a {name} activity state")
+        item.add_argument("--id", required=name != "working")
+        item.add_argument("--title")
+        item.add_argument("--detail")
+        item.add_argument("--project")
+        item.add_argument("--source")
+        item.add_argument("--bundle-id")
+        item.add_argument("--exit-code", type=int)
+        item.set_defaults(handler=post)
+    remove_command = commands.add_parser("remove", help="Remove an activity")
+    remove_command.add_argument("--id", required=True)
+    remove_command.set_defaults(handler=remove)
+    show = commands.add_parser("status", help="List current activities")
+    show.add_argument("--json", action="store_true")
+    show.set_defaults(handler=status)
+    commands.add_parser("doctor", help="Check the local setup").set_defaults(handler=doctor)
+    commands.add_parser("demo", help="Play running, waiting, and done states").set_defaults(handler=demo)
+    commands.add_parser("ping", help="Check if the installed app process is running").set_defaults(
+        handler=lambda _args: 0 if app_running() else 1)
+    args = parser.parse_args()
+    try:
+        return args.handler(args)
+    except (OSError, ValueError) as error:
+        print(f"notchpill: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

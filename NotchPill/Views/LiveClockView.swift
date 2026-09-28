@@ -53,19 +53,32 @@ struct LiveClockView: View {
                     .contentTransition(.numericText())
                     .animation(.linear(duration: 0.18), value: time)
             case .expanded:
-                VStack(alignment: .leading, spacing: s(4)) {
+                VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+                    HStack(spacing: s(NotchSpace.snug)) {
+                        Image(systemName: "clock")
+                            .font(.system(size: textSize(NotchType.caption), weight: .bold))
+                            .frame(width: s(NotchSpace.mark), height: s(NotchSpace.mark))
+                            .background(RoundedRectangle(cornerRadius: s(NotchRadius.well), style: .continuous)
+                                .fill(.white.opacity(NotchOpacity.wellFill)))
+                        Text("Local time")
+                            .font(.system(size: textSize(NotchType.title), weight: .semibold))
+                            .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+                    }
+                    .padding(.bottom, s(NotchSpace.snug))
                     Text(time)
-                        .font(.system(size: textSize(20), weight: .semibold, design: .rounded))
+                        .font(.system(size: textSize(NotchType.hero), weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .contentTransition(.numericText())
                         .animation(.linear(duration: 0.18), value: time)
                     Text(LiveClockFormatting.date(context.date))
-                        .font(.system(size: textSize(11), weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .font(.system(size: textSize(NotchType.body), weight: .medium))
+                        .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
                         .lineLimit(1)
                 }
-                .frame(minWidth: s(88), alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
     }

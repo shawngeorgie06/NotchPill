@@ -59,10 +59,6 @@ enum NotchMotion {
     /// mirror of `bump`: the same distance, the other way.
     static let press: CGFloat = 0.96
 
-    /// How long a transient label stays after the thing it names changes —
-    /// the page's name after a swipe. Long enough to read once.
-    static let linger: TimeInterval = 1.4
-
     /// How far a page sits under its neighbours while sliding in, so the
     /// swap reads as depth rather than a hard cut.
     static let pageScale: CGFloat = 0.985
@@ -304,8 +300,9 @@ enum NotchOpacity {
     static let primary: Double = 1.0
     /// Supporting text you read second.
     static let secondary: Double = 0.60
-    /// Facts you consult rather than read — runtime, context, model.
-    static let tertiary: Double = 0.38
+    /// Facts you consult rather than read — runtime, context, model. Keep
+    /// these legible at the notch's small caption size.
+    static let tertiary: Double = 0.48
     /// Separators and card strokes.
     static let hairline: Double = 0.08
 

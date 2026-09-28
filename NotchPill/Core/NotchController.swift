@@ -33,6 +33,7 @@ final class NotchController {
     private let cursorActivity = CursorActivityProvider()
     private let agentSessions = AgentSessionsProvider()
     private let ciStatus = CIStatusProvider()
+    private let devCommands = DevCommandProvider()
     private var ciTimer: Timer?
     private let replyHotKey = GlobalHotKey()
     /// Most-recent finished-agent alert, kept so the reply hotkey can target it
@@ -163,6 +164,7 @@ final class NotchController {
         relayoutTriggers.append(state.$agentSessions.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(state.$openCodeUsage.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(state.$ciRuns.map { _ in () }.eraseToAnyPublisher())
+        relayoutTriggers.append(state.$devCommands.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(state.$updateProgress.map { _ in () }.eraseToAnyPublisher())
         relayoutTriggers.append(state.$replyCompose.map { _ in () }.eraseToAnyPublisher())
         // Turning a page changes which card is on screen, and the pill is
@@ -334,6 +336,7 @@ final class NotchController {
         hotZoneKeys.stop()
         nowPlaying.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
         systemStats.stop(); battery.stop(); devReady.stop(); brightness.stop(); microphone.stop()
+        devCommands.stop()
         AudioOutputStore.shared.stop()
         replyHotKey.unregister()
         peekEscapeMonitors.forEach(NSEvent.removeMonitor)
@@ -356,6 +359,8 @@ final class NotchController {
     // MARK: - Providers
 
     private func wireProviders() {
+        devCommands.onUpdate = { [weak self] commands in self?.state.devCommands = commands }
+        devCommands.start()
         nowPlaying.onUpdate = { [weak self] np in self?.state.notifyMediaChanged(np) }
         calendar.onUpdate = { [weak self] event in self?.state.nextEvent = event }
         airDrop.onUpdate = { [weak self] status in self?.state.airDrop = status }

@@ -19,6 +19,7 @@ enum NotchContentSnapshot {
             systemStats: state.systemStats,
             battery: state.battery,
             agentSessions: state.agentSessions,
+            devCommands: state.devCommands,
             showMedia: settings.showCollapsedMedia,
             showCalendar: settings.showCalendar,
             showShelf: settings.showFileShelf,
@@ -27,6 +28,7 @@ enum NotchContentSnapshot {
             showSystemStats: settings.showCollapsedSystemStats,
             showBattery: settings.showCollapsedBattery,
             showAgents: settings.showCollapsedAgents,
+            showCommands: settings.showExpandedCommands,
             showClock: settings.showCollapsedClock
         )
     }
@@ -55,6 +57,7 @@ enum NotchContentSnapshot {
             systemStats: state.systemStats,
             battery: state.battery,
             agentSessions: agentSessions,
+            devCommands: state.devCommands,
             openCodeUsage: state.openCodeUsage,
             codexQuota: state.codexQuota,
             claudeQuota: state.claudeQuota,
@@ -71,6 +74,7 @@ enum NotchContentSnapshot {
             showBattery: settings.showExpandedBattery,
             showShelf: settings.showExpandedShelf,
             showAgents: settings.showExpandedAgents,
+            showCommands: settings.showExpandedCommands,
             showCI: settings.showExpandedCI,
             showRecentAlerts: settings.showExpandedRecentActivity,
             shelfItems: shelf.items.map { ShelfCardItem(id: $0.id, name: $0.name, url: $0.url) },

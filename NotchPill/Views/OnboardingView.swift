@@ -23,7 +23,7 @@ struct OnboardingView: View {
             header
             ScrollView {
                 stepBody
-                    .padding(24)
+                    .padding(20)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             footer
@@ -40,32 +40,42 @@ struct OnboardingView: View {
 
     @ViewBuilder
     private var stepBody: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 14) {
             Text(flow.current.title)
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(size: 22, weight: .semibold))
             Text(flow.current.detail)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            stepContent
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 0.5))
+        }
+    }
 
-            switch flow.current {
-            case .welcome: welcomeStep
-            case .accessibility: accessibilityStep
-            case .agentHooks: agentHooksStep
-            case .cards: cardsStep
-            case .finish: finishStep
-            }
+    @ViewBuilder
+    private var stepContent: some View {
+        switch flow.current {
+        case .welcome: welcomeStep
+        case .accessibility: accessibilityStep
+        case .agentHooks: agentHooksStep
+        case .cards: cardsStep
+        case .finish: finishStep
         }
     }
 
     private var welcomeStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             bullet("hand.point.up.left", "Hover the notch",
-                   "It expands into a row of cards.")
+                   "It expands into a deck of full-width cards.")
             bullet("bell.badge", "It taps you when something needs you",
                    "A finished build, or an agent waiting on an answer.")
             bullet("slider.horizontal.3", "Everything is optional",
-                   "Turn cards off, resize them, or shrink the whole pill.")
+                   "Turn cards off, change their order, or resize the pill.")
         }
     }
 
@@ -127,11 +137,15 @@ struct OnboardingView: View {
 
     private var cardsStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Toggle("Live agents", isOn: $settings.showExpandedAgents)
-            Toggle("CI status", isOn: $settings.showExpandedCI)
-            Toggle("Now playing", isOn: $settings.showExpandedMedia)
-            Toggle("Active app", isOn: $settings.showExpandedActiveApp)
-            Toggle("Clock", isOn: $settings.showExpandedClock)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())],
+                      alignment: .leading, spacing: 12) {
+                Toggle("Live agents", isOn: $settings.showExpandedAgents)
+                Toggle("Builds & tests", isOn: $settings.showExpandedCommands)
+                Toggle("CI status", isOn: $settings.showExpandedCI)
+                Toggle("Now playing", isOn: $settings.showExpandedMedia)
+                Toggle("Active app", isOn: $settings.showExpandedActiveApp)
+                Toggle("Clock", isOn: $settings.showExpandedClock)
+            }
             Divider()
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -152,9 +166,9 @@ struct OnboardingView: View {
     private var finishStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             bullet("menubar.arrow.up.rectangle", "The menu bar icon",
-                   "Cards, widths, updates and this guide all live there.")
-            bullet("arrow.left.and.right", "Card widths",
-                   "Settings → Card Widths divides the row however you like.")
+                   "Cards, settings, updates and this guide all live there.")
+            bullet("square.stack", "Card order",
+                   "Settings → Card Order chooses which pages appear first.")
             Button("Open Settings") { PreferencesController.shared.show() }
                 .buttonStyle(.bordered)
         }
@@ -165,9 +179,11 @@ struct OnboardingView: View {
     private func bullet(_ symbol: String, _ title: String, _ detail: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
-                .font(.system(size: 15))
-                .foregroundStyle(NotchDesign.accent)
-                .frame(width: 22)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.primary.opacity(0.72))
+                .frame(width: 30, height: 30)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.primary.opacity(0.06)))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.subheadline.weight(.semibold))
                 Text(detail).font(.caption).foregroundStyle(.secondary)
@@ -177,9 +193,12 @@ struct OnboardingView: View {
     }
 
     private func statusRow(done: Bool, doneText: String, todoText: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: done ? "checkmark.circle.fill" : "circle.dashed")
-                .foregroundStyle(done ? Color.green : Color.secondary)
+                .foregroundStyle(done ? NotchDesign.devReadyGreen : Color.secondary)
+                .frame(width: 30, height: 30)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.primary.opacity(0.06)))
             Text(done ? doneText : todoText)
                 .font(.subheadline.weight(.medium))
         }
@@ -195,18 +214,24 @@ struct OnboardingView: View {
     private var header: some View {
         ZStack(alignment: .bottomLeading) {
             NotchDesign.settingsHeader
-            VStack(alignment: .leading, spacing: 10) {
-                Text("NotchPill")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("NotchPill")
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Text("STEP \(flow.index + 1) OF \(flow.steps.count)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
                 ProgressView(value: flow.progress)
                     .tint(.white)
-                    .frame(maxWidth: 220)
             }
             .padding(.horizontal, 22)
-            .padding(.bottom, 16)
+            .padding(.bottom, 20)
         }
-        .frame(height: 84)
+        .frame(height: 94)
     }
 
     private var footer: some View {
@@ -229,9 +254,11 @@ struct OnboardingView: View {
                 if flow.isLast { onFinish() } else { flow.next() }
             }
             .buttonStyle(.borderedProminent)
+            .tint(NotchDesign.accent)
         }
         .padding(16)
-        .background(.bar)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .overlay(alignment: .top) { Divider() }
     }
 
     private func refreshStatus() {

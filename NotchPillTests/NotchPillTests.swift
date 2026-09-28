@@ -8372,7 +8372,7 @@ struct ActivityKindLabelTests {
     }
 }
 
-@Suite("The deck's page dots are never clipped")
+@Suite("The deck's page controls fit their layout")
 struct DeckChromeTests {
     private var metrics: NotchMetrics {
         NotchMetrics(notchWidth: 179, notchHeight: 32,
@@ -8388,14 +8388,14 @@ struct DeckChromeTests {
         #expect(NotchContentLayout.deckChromeHeight >= NotchSpace.mark + NotchSpace.snug)
     }
 
-    @Test("Every enabled deck page gets a footer, even when it is the only page")
-    func singlePageAlsoReservesTheDot() {
+    @Test("A single page has no redundant navigation footer")
+    func singlePageHasNoFooter() {
         let onePage = [ExpandedActivity.clock]
-        #expect(NotchContentLayout.showsDeckChrome(for: onePage))
+        #expect(!NotchContentLayout.showsDeckChrome(for: onePage))
         let deck = NotchContentLayout.expandedDeckLayout(metrics: metrics, activities: onePage)
         let expectedHeight = metrics.notchHeight + metrics.topGap
             + max(CGFloat(56), NotchContentLayout.expandedContentBaseHeight(onePage))
-            + NotchContentLayout.deckChromeHeight + NotchContentLayout.expandedTrayInset
+            + NotchContentLayout.expandedTrayInset
         #expect(deck.size.height == expectedHeight)
     }
 
@@ -8422,9 +8422,7 @@ struct DeckChromeTests {
             let activities = [activity, .clock]
             let deck = NotchContentLayout.expandedDeckLayout(
                 metrics: metrics, activities: activities, page: 0)
-            let footer = NotchContentLayout.showsFetchTabBar(for: activities, page: 0)
-                ? NotchContentLayout.fetchTabBarHeight
-                : NotchContentLayout.deckChromeHeight
+            let footer = NotchContentLayout.deckChromeHeight
             let contentRoom = deck.size.height - metrics.notchHeight - metrics.topGap
                 - footer - NotchContentLayout.expandedTrayInset
             #expect(contentRoom >= drawn,
@@ -8432,17 +8430,17 @@ struct DeckChromeTests {
         }
     }
 
-    @Test("Fetch tab bar replaces page dots in the height budget")
-    func tabBarReplacesDots() {
+    @Test("A mixed deck reserves one shared page control")
+    func mixedDeckReservesDots() {
         let deck: [ExpandedActivity] = [
             .agents(AgentHomeTray([])),
             .claudeQuota(ClaudeQuota(sessionPercent: 12, weeklyPercent: 34)),
         ]
         let withTab = NotchContentLayout.expandedDeckLayout(metrics: metrics, activities: deck, page: 1)
-        let dotsOnly = NotchContentLayout.expandedDeckLayout(
-            metrics: metrics, activities: [.clock], page: 0)
-        #expect(NotchContentLayout.showsFetchTabBar(for: deck, page: 1))
-        #expect(withTab.size.height > dotsOnly.size.height)
+        let cardHeight = max(CGFloat(56), NotchContentLayout.expandedContentBaseHeight(deck, page: 1))
+        #expect(NotchContentLayout.showsDeckChrome(for: deck))
+        #expect(withTab.size.height == metrics.notchHeight + metrics.topGap + cardHeight
+                + NotchContentLayout.deckChromeHeight + NotchContentLayout.expandedTrayInset)
     }
 }
 
@@ -8945,7 +8943,7 @@ struct CodexUsageResilienceTests {
         _ = await service.quota(now: start)
         #expect(await calls.value == 1)
         // Inside the backoff window: no second request.
-        _ = await service.quota(now: start.addingTimeInterval(90))
+        _ = await service.quota(now: start.addingTimeInterval(45))
         #expect(await calls.value == 1)
         // Past it: tries again, because this failure could have cleared.
         _ = await service.quota(now: start.addingTimeInterval(4000))

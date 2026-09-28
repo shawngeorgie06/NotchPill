@@ -23,7 +23,8 @@ enum NotchContentLayout {
             return NotchContentLayoutMetrics(size: metrics.collapsedSize, readability: 1, textScale: 1)
         }
 
-        let spacing: CGFloat = 8
+        // Two 4pt gaps around each 2pt separator in CollapsedIndicatorsRow.
+        let spacing: CGFloat = 10
         let padding: CGFloat = 20
         let maxW = min(metrics.maxExpandedRenderedWidth, metrics.notchWidth + 280)
         let minW = metrics.notchWidth + 16
@@ -112,20 +113,9 @@ enum NotchContentLayout {
         let cardHeight = min(expandedContentCeiling,
                              max(56, expandedContentBaseHeight(activities, page: page,
                                                               tokenRows: tokenRows)))
-        // The page dot is part of the deck's frame of reference, even when
-        // there is only one card. A consistent footer says "this is page 1"
-        // rather than making media, active app, or any other one-page setup
-        // look like a different kind of notch. Its space is reserved here,
-        // alongside the card, so it cannot hang below the pill.
-        //
-        // Fetch-style Sessions · Tray · Usage tabs replace the dot strip on
-        // tray pages. Budget the tab row instead of the dots when it shows,
-        // or the meters and token lines clip against the pill rim.
-        let footerChrome: CGFloat = {
-            guard showsDeckChrome(for: activities) else { return 0 }
-            return showsFetchTabBar(for: activities, page: page)
-                ? fetchTabBarHeight : deckChromeHeight
-        }()
+        // Reserve navigation space only when there is another page to reach.
+        // A single card gets the room back instead of showing a lone dot.
+        let footerChrome = showsDeckChrome(for: activities) ? deckChromeHeight : 0
         return NotchContentLayoutMetrics(
             size: CGSize(width: width,
                          height: metrics.notchHeight + metrics.topGap + cardHeight
@@ -146,34 +136,11 @@ enum NotchContentLayout {
                            page: page, tokenRows: tokenRows).size
     }
 
-    /// Every nonempty deck gets its footer, including a single-page deck. This
-    /// is shared by the SwiftUI view and the sizing code: splitting the rule is
-    /// how the dots once rendered outside the window reserved for them.
+    /// The footer is a navigation control, so one-page decks do not need it.
+    /// Shared by layout and the view so its space is always budgeted correctly.
     static func showsDeckChrome(for activities: [ExpandedActivity]) -> Bool {
-        !activities.isEmpty
+        activities.count > 1
     }
-
-    /// Fetch-style Sessions · Tray · Usage tabs. Mirrors `ExpandedView` so the
-    /// layout budget reserves the tab row instead of the page dots when visible.
-    static func showsFetchTabBar(for activities: [ExpandedActivity], page: Int?) -> Bool {
-        let sessions = activities.firstIndex(where: { if case .agents = $0 { return true }; return false })
-        let tray = activities.firstIndex(where: { if case .shelf = $0 { return true }; return false })
-        let usage = activities.firstIndex(where: {
-            switch $0 {
-            case .codexQuota, .claudeQuota, .cursorQuota, .openCodeUsage: return true
-            default: return false
-            }
-        })
-        let count = (sessions != nil ? 1 : 0) + (tray != nil ? 1 : 0) + (usage != nil ? 1 : 0)
-        guard count > 0 else { return false }
-        if count >= 2 { return true }
-        guard let page, activities.indices.contains(page) else { return false }
-        return page == sessions || page == tray || page == usage
-    }
-
-    /// Caption-sized tab row plus its top padding. Replaces `deckChromeHeight`
-    /// on tray pages that show the Fetch tab bar.
-    static let fetchTabBarHeight: CGFloat = 22
 
     // MARK: - Dev ready peek
 
@@ -778,6 +745,7 @@ enum NotchContentLayout {
 
     private static func collapsedChipBaseWidth(_ chip: CollapsedChip) -> CGFloat {
         switch chip {
+        case .command: return 130
         case .media: return 136
         case .systemStats: return 132
         case .calendar: return 96
@@ -874,8 +842,8 @@ enum NotchContentLayout {
     /// Capped the same way `rowsHeight` caps, so a long history scrolls rather
     /// than growing the pill without limit.
     static func clipboardHeight(_ items: [ClipboardEntry], searching: Bool) -> CGFloat {
-        let lineHeight: CGFloat = 12
-        let rowPadding: CGFloat = 8
+        let lineHeight: CGFloat = 13
+        let rowPadding: CGFloat = 12
         let shown = items.prefix(expandedMaxCardRows)
         let rows = shown.reduce(CGFloat(0)) { total, entry in
             total + rowPadding + lineHeight * CGFloat(entry.displayLines)
@@ -883,11 +851,11 @@ enum NotchContentLayout {
         // The search field is drawn from view state the deck cannot see, so
         // its row has to be reserved here or the card overruns its budget and
         // pushes the page dots off the bottom of the pill.
-        return 18 + (searching ? searchRow : 0) + max(lineHeight + rowPadding, rows)
+        return 30 + (searching ? searchRow : 0) + max(lineHeight + rowPadding, rows)
     }
 
     /// The clipboard search field plus the gap above it.
-    static let searchRow: CGFloat = 22
+    static let searchRow: CGFloat = 26
 
     private static func rowsHeight(header: CGFloat, row: CGFloat, count: Int) -> CGFloat {
         header + row * CGFloat(min(expandedMaxCardRows, max(1, count)))
@@ -919,18 +887,22 @@ enum NotchContentLayout {
         // — those are now inside the surface, not below a floating card.
         case .media: return 140
         case .agents: return agentsShelf
+        case .commands: return 132
         case .openCodeUsage: return quotaCard
-        case .shelf: return 72
+        case .shelf(_, let receipt, let error, _):
+            return receipt != nil || error != nil ? 128 : 104
         // Same shelf height as agents: each run is a full painted tile.
         case .ci: return agentsShelf
         case .clipboard(let items, let searching): return clipboardHeight(items, searching: searching)
-        case .terminal: return 4 + 11 * CGFloat(TerminalStore.rows)
-        case .recentAlerts(let alerts): return rowsHeight(header: 16, row: 22, count: alerts.count)
-        case .battery: return 78
-        case .volume: return 64
-        case .calendar: return 56
-        case .timer: return 64
+        // Header + six fixed shell rows + the inset grid surface.
+        case .terminal: return 22 + 8 + 11 * CGFloat(TerminalStore.rows) + 16 + 4
+        case .recentAlerts(let alerts): return rowsHeight(header: 30, row: 42, count: alerts.count)
+        case .battery: return 92
+        case .volume: return 92
+        case .calendar: return 94
+        case .timer: return 82
         case .systemStats: return quotaCard
+        case .clock: return 84
         case .activeApp, .appSwitch: return NotchSpace.hero
         default: return 56
         }
@@ -951,6 +923,7 @@ enum NotchContentLayout {
         case .clipboard: return 340
         case .terminal: return 340
         case .agents: return 400
+        case .commands: return 400
         case .openCodeUsage: return 124
         case .codexQuota: return 176
         case .claudeQuota: return 176

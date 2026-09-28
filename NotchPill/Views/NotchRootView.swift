@@ -153,19 +153,9 @@ struct NotchRootView: View {
                     .mask(growingPeekMask)
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else if state.isExpanded || state.isCollapsing {
-                // Tied to the surface rather than to `isExpanded`. The
-                // transition below never had an animation in scope for that
-                // flag, so the whole card was inserted at full opacity on the
-                // frame hover began — one frame *before* the pill started
-                // growing. You saw the content first and the container catching
-                // up to it, which is the "pop" on open; on close the reverse,
-                // full-size copy held sharp inside a shrinking surface until it
-                // was cut off.
-                //
-                // Masked to the same silhouette the fill draws. Without it,
-                // agent tiles, quota meters and media glow paint into the
-                // wallpaper past the rounded bottom corners — the "outside
-                // the border" look. Peeks already mask this way.
+                // The surface and its mask share expansionProgress. Content
+                // has one delayed opacity phase, so it enters after the shape
+                // makes room and leaves ahead of the shrinking edge.
                 expandedContent
                     .mask(growingSurfaceMask(progress: state.expansionProgress))
                     .opacity(Double(state.expansionProgress))
@@ -290,8 +280,11 @@ struct NotchRootView: View {
                     MediaBackdrop(nowPlaying: selectedMedia,
                                   size: CGSize(width: width, height: max(0, height - inset)))
                         .clipShape(shape)
+                        .transition(.opacity)
                 }
             }
+            .animation(reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.20),
+                       value: selectedMedia?.trackKey)
             .overlay { shape.stroke(NotchIslandChrome.rim, lineWidth: 0.5) }
             .frame(width: width, height: max(0, height - inset))
             .padding(.top, inset)
@@ -326,15 +319,6 @@ struct NotchRootView: View {
                        alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
-        .opacity(contentReveal)
-        .scaleEffect(0.96 + contentReveal * 0.04, anchor: .top)
-    }
-
-    /// Hold the content until the surface is wide enough to contain it. The
-    /// visual order is therefore notch → surface → cards, rather than all three
-    /// appearing at once.
-    private var contentReveal: CGFloat {
-        min(1, max(0, (state.expansionProgress - 0.5) / 0.5))
     }
 
     private var collapsedContent: some View {
@@ -552,9 +536,8 @@ struct ExpandedView: View {
     let activities: [ExpandedActivity]
     var readability: CGFloat = 1.0
     var textScale: CGFloat = 1.0
-    @State private var hoveringChrome = false
-    @State private var pageLabelFlashing = false
-    @State private var pageLabelTask: Task<Void, Never>?
+    @State private var pageDragOffset: CGFloat = 0
+    @State private var swipeGeneration = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -576,12 +559,6 @@ struct ExpandedView: View {
                 activityDeck
             }
         }
-        // Tray pages keep content off the 22pt corners. Island-surface pages
-        // (media) paint the whole body — padding would reopen the black frame
-        // around a smaller card. Their own content inset clears the curve.
-        .padding(.horizontal, isIslandSurfacePage ? 0 : NotchSpace.section * readability)
-        .padding(.top, isIslandSurfacePage ? 0 : NotchSpace.base * readability)
-        .padding(.bottom, isIslandSurfacePage ? 0 : NotchSpace.base * readability)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .clipped()
         // Keyed on the track, not the whole value. `NowPlaying` carries
@@ -597,32 +574,19 @@ struct ExpandedView: View {
         // around what changed inside it.
         .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: activities.map(\.contentKey))
         .onChange(of: activityKinds) { _, kinds in
+            swipeGeneration += 1
+            pageDragOffset = 0
             state.reconcileExpandedDeck(kinds: kinds)
         }
     }
 
-    /// One readable card at a time. The old row made every card narrower as
-    /// new signals appeared; this deck makes new signals discoverable without
-    /// changing the island's silhouette or shrinking their text.
-    @ViewBuilder
+    /// Keep one full-width stage for every page. Each tray card gets its own
+    /// insets, while media paints edge to edge; this lets a neighboring page
+    /// follow a drag without changing its size at the end of the swipe.
     private var activityDeck: some View {
-        if isIslandSurfacePage {
-            islandSurfaceDeck
-        } else {
-            trayDeck
-        }
-    }
-
-    /// Media owns the island body. The wash fills edge to edge; dots sit on
-    /// top of it rather than in a black strip underneath.
-    private var islandSurfaceDeck: some View {
         GeometryReader { geo in
             ZStack(alignment: .bottom) {
-                // Give the media card the deck's actual height. A flexible
-                // pageCard can otherwise settle at its content height, leaving
-                // the artwork wash ending above the page dots.
-                pageCard
-                    .frame(width: geo.size.width, height: geo.size.height)
+                pageCard(width: geo.size.width, height: geo.size.height)
                 if NotchContentLayout.showsDeckChrome(for: activities) {
                     deckChrome
                         .padding(.horizontal, NotchSpace.base * readability)
@@ -631,196 +595,162 @@ struct ExpandedView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .contentShape(Rectangle())
-            .gesture(pageSwipeGesture)
-            .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
+            .gesture(pageSwipeGesture(width: geo.size.width))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var sessionsPageIndex: Int? {
-        activities.firstIndex(where: { $0.kind == "agents" })
-    }
-    private var trayPageIndex: Int? {
-        activities.firstIndex(where: { $0.kind == "shelf" })
-    }
-    private var usagePageIndex: Int? {
-        activities.firstIndex(where: {
-            $0.kind == "codexQuota" || $0.kind == "claudeQuota" ||
-            $0.kind == "cursorQuota" || $0.kind == "openCodeUsage"
-        })
-    }
-    private var showsFetchTabBar: Bool {
-        NotchContentLayout.showsFetchTabBar(for: activities, page: clampedPage)
-    }
-
-    private var fetchTopTabBar: some View {
-        HStack(spacing: NotchSpace.base * readability) {
-            if let sIndex = sessionsPageIndex {
-                fetchTabButton(title: "Sessions", isSelected: clampedPage == sIndex) {
-                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
-                        state.selectExpandedDeckPage(sIndex, kinds: activityKinds)
-                    }
-                }
-            }
-            if let tIndex = trayPageIndex {
-                fetchTabButton(title: "Tray", isSelected: clampedPage == tIndex) {
-                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
-                        state.selectExpandedDeckPage(tIndex, kinds: activityKinds)
-                    }
-                }
-            }
-            if let uIndex = usagePageIndex {
-                let isUsage = activities.indices.contains(clampedPage) && (
-                    activities[clampedPage].kind == "codexQuota" ||
-                    activities[clampedPage].kind == "claudeQuota" ||
-                    activities[clampedPage].kind == "cursorQuota" ||
-                    activities[clampedPage].kind == "openCodeUsage"
-                )
-                fetchTabButton(title: "Usage", isSelected: isUsage) {
-                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
-                        state.selectExpandedDeckPage(uIndex, kinds: activityKinds)
-                    }
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, NotchSpace.tight * readability)
-        .padding(.top, 2)
-    }
-
-    private func fetchTabButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5 * readability) {
-                Circle()
-                    .fill(isSelected ? Color.white : Color.white.opacity(0.35))
-                    .frame(width: 4 * readability, height: 4 * readability)
-                Text(title)
-                    .font(.system(size: NotchType.caption * textScale, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? .white : .white.opacity(0.45))
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Agents, quota, CI, shelf — objects sitting in a tray with room for the
-    /// silhouette curve and a chrome strip below.
-    private var trayDeck: some View {
-        VStack(spacing: NotchSpace.snug * readability) {
-            if showsFetchTabBar {
-                fetchTopTabBar
-            }
-            pageCard
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .clipped()
-                .contentShape(Rectangle())
-                .gesture(pageSwipeGesture)
-                .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
-
-            if NotchContentLayout.showsDeckChrome(for: activities) && !showsFetchTabBar {
-                deckChrome
-            }
-        }
-    }
-
     @ViewBuilder
-    private var pageCard: some View {
-        ZStack {
+    private func pageCard(width: CGFloat, height: CGFloat) -> some View {
+        ZStack(alignment: .top) {
+            if pageDragOffset > 0, activities.indices.contains(clampedPage - 1) {
+                activityCard(at: clampedPage - 1, width: width, height: height)
+                    .offset(x: -width + pageDragOffset)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            if pageDragOffset < 0, activities.indices.contains(clampedPage + 1) {
+                activityCard(at: clampedPage + 1, width: width, height: height)
+                    .offset(x: width + pageDragOffset)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
             if activities.indices.contains(clampedPage) {
-                ExpandedActivityCard(
-                    activity: activities[clampedPage],
-                    appIcon: state.frontmostAppIcon,
-                    actions: actions,
-                    onCancelTimer: { timer.cancel() },
-                    readability: readability,
-                    textScale: textScale,
-                    expandToFill: true,
-                    bottomChromeHeight: isIslandSurfacePage
-                        ? NotchContentLayout.deckChromeHeight + NotchSpace.base * 2
-                        : 0,
-                    tokenUsage: settings.showTokenUsage ? tokens.summary : nil,
-                    tokenPeriod: settings.resolvedTokenPeriod
-                )
-                .id(activities[clampedPage].id)
-                .transition(pageTransition)
+                activityCard(at: clampedPage, width: width, height: height)
+                    .id(activities[clampedPage].id)
+                    .offset(x: pageDragOffset)
+                    .transition(pageTransition)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(width: width, height: height, alignment: .top)
     }
 
-    private var pageSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onEnded { value in
-                withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
-                    if value.translation.width < -24 { selectNextPage() }
-                    if value.translation.width > 24 { selectPreviousPage() }
-                }
-            }
-    }
-
-    /// The strip under the card: page dots, and the page's name only while
-    /// it is useful — for a beat after the page changes, and under the
-    /// pointer. Always-on, the label restated what the card's own header now
-    /// says ("Claude" over "claude") and made the strip read as a tab bar.
-    /// The dots stay: they are the one tap-to-page control, and the swipe
-    /// has no other affordance.
-    private var deckChrome: some View {
-        ZStack {
-            if showsPageLabel {
-                Label(activityLabel(activities[clampedPage]),
-                      systemImage: activityIcon(activities[clampedPage]))
-                    .font(.system(size: NotchType.caption * textScale, weight: .semibold))
-                    .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.opacity)
-            }
-
-            HStack(spacing: NotchSpace.snug * readability) {
-                ForEach(Array(activities.indices), id: \.self) { index in
-                    Button {
-                        withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
-                            state.selectExpandedDeckPage(index, kinds: activityKinds)
-                        }
-                    } label: {
-                        Capsule()
-                            .fill(index == clampedPage
-                                  ? Color.white.opacity(NotchOpacity.primary)
-                                  : .white.opacity(NotchOpacity.highlight))
-                            .frame(width: (index == clampedPage ? NotchSpace.base : NotchSpace.tight * 2) * readability,
-                                   height: NotchSpace.tight * 2 * readability)
-                            .frame(width: NotchSpace.mark * readability, height: NotchSpace.mark * readability)
-                            .contentShape(Rectangle())
+    private func activityCard(at index: Int, width: CGFloat, height: CGFloat) -> some View {
+        let isMedia: Bool = {
+            if case .media = activities[index] { return true }
+            return false
+        }()
+        let horizontalInset = isMedia ? 0 : NotchSpace.section * readability
+        let topInset = isMedia ? 0 : NotchSpace.base * readability
+        let bottomInset = isMedia ? 0 : NotchSpace.base * readability
+            + (NotchContentLayout.showsDeckChrome(for: activities)
+               ? NotchContentLayout.deckChromeHeight : 0)
+        return ExpandedActivityCard(
+                activity: activities[index],
+                appIcon: state.frontmostAppIcon,
+                actions: actions,
+                onCancelTimer: { timer.cancel() },
+                readability: readability,
+                textScale: textScale,
+                expandToFill: true,
+                bottomChromeHeight: isMedia && NotchContentLayout.showsDeckChrome(for: activities)
+                    ? NotchContentLayout.deckChromeHeight + NotchSpace.base * 2 : 0,
+                tokenUsage: settings.showTokenUsage ? tokens.summary : nil,
+                tokenPeriod: settings.resolvedTokenPeriod
+            )
+            .frame(width: max(0, width - horizontalInset * 2),
+                   height: max(0, height - topInset - bottomInset), alignment: .top)
+            .padding(.horizontal, horizontalInset)
+            .padding(.top, topInset)
+            .padding(.bottom, bottomInset)
+            .frame(width: width, height: height, alignment: .top)
+            .background {
+                // The root paints the selected media page. A page entering
+                // during a drag needs its own wash (or black tray) until it
+                // becomes selected, so the background follows the card.
+                if index != clampedPage {
+                    if case .media(let nowPlaying) = activities[index] {
+                        MediaBackdrop(nowPlaying: nowPlaying,
+                                      size: CGSize(width: width, height: height))
+                    } else {
+                        Color.black
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Show \(activityLabel(activities[index]))")
                 }
             }
-            .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
+    }
+
+    private func pageSwipeGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 18)
+            .onChanged { value in
+                guard !reduceMotion, activities.count > 1,
+                      abs(value.translation.width) > abs(value.translation.height) * 1.1 else { return }
+                // A new drag takes ownership from any page settle still in
+                // flight; its completion must not change the page afterward.
+                swipeGeneration += 1
+                let distance = value.translation.width
+                let hasNeighbor = activities.indices.contains(clampedPage + (distance < 0 ? 1 : -1))
+                // A small resistant movement at either end acknowledges the
+                // gesture without suggesting that another page exists.
+                pageDragOffset = hasNeighbor
+                    ? min(width * 0.95, max(-width * 0.95, distance))
+                    : min(18, max(-18, distance * 0.15))
+            }
+            .onEnded { value in
+                guard activities.count > 1,
+                      abs(value.translation.width) > abs(value.translation.height) * 1.1 else {
+                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) { pageDragOffset = 0 }
+                    return
+                }
+                let direction = value.translation.width < 0 ? 1 : -1
+                let target = clampedPage + direction
+                let projected = value.predictedEndTranslation.width
+                let commits = abs(value.translation.width) > width * 0.22 ||
+                    abs(projected) > width * 0.42
+                guard activities.indices.contains(target), commits else {
+                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) { pageDragOffset = 0 }
+                    return
+                }
+                if reduceMotion {
+                    state.selectExpandedDeckPage(target, kinds: activityKinds)
+                    return
+                }
+                swipeGeneration += 1
+                let generation = swipeGeneration
+                let targetKind = activities[target].kind
+                withAnimation(NotchMotion.page(reduceMotion: false), completionCriteria: .logicallyComplete) {
+                    pageDragOffset = CGFloat(-direction) * width
+                } completion: {
+                    guard swipeGeneration == generation,
+                          activities.indices.contains(target),
+                          activities[target].kind == targetKind else { return }
+                    var transaction = Transaction(animation: nil)
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        state.selectExpandedDeckPage(target, kinds: activityKinds)
+                        pageDragOffset = 0
+                    }
+                }
+            }
+    }
+
+    /// One compact page control for every kind of activity. Each card already
+    /// names itself, so this footer only needs to show position and navigation.
+    private var deckChrome: some View {
+        HStack(spacing: NotchSpace.snug * readability) {
+            ForEach(Array(activities.indices), id: \.self) { index in
+                Button {
+                    swipeGeneration += 1
+                    pageDragOffset = 0
+                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
+                        state.selectExpandedDeckPage(index, kinds: activityKinds)
+                    }
+                } label: {
+                    Capsule()
+                        .fill(index == clampedPage
+                              ? Color.white.opacity(NotchOpacity.primary)
+                              : .white.opacity(NotchOpacity.highlight))
+                        .frame(width: (index == clampedPage ? NotchSpace.base : NotchSpace.tight * 2) * readability,
+                               height: NotchSpace.tight * 2 * readability)
+                        .frame(width: NotchSpace.mark * readability, height: NotchSpace.mark * readability)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show \(activityLabel(activities[index]))")
+            }
         }
         .frame(height: NotchSpace.mark * readability)
         .contentShape(Rectangle())
-        .onHover { hovering in
-            hoveringChrome = hovering
-        }
-        .onChange(of: clampedPage) { _, _ in
-            flashPageLabel()
-        }
-        .onAppear { flashPageLabel() }
-        .animation(NotchMotion.exit(reduceMotion: reduceMotion), value: showsPageLabel)
-    }
-
-    private var showsPageLabel: Bool { hoveringChrome || pageLabelFlashing }
-
-    /// Show the page's name for long enough to read once, then let it go.
-    private func flashPageLabel() {
-        pageLabelTask?.cancel()
-        pageLabelFlashing = true
-        pageLabelTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(NotchMotion.linger))
-            guard !Task.isCancelled else { return }
-            pageLabelFlashing = false
-        }
+        .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
     }
 
     private var clampedPage: Int {
@@ -828,15 +758,6 @@ struct ExpandedView: View {
     }
 
     private var activityKinds: [String] { activities.map(\.kind) }
-
-    /// Pages whose content *is* the island surface (one full wash), not a
-    /// tray of objects. They keep a tighter horizontal inset so the wash
-    /// meets the silhouette instead of floating as a window inside it.
-    private var isIslandSurfacePage: Bool {
-        guard activities.indices.contains(clampedPage) else { return false }
-        if case .media = activities[clampedPage] { return true }
-        return false
-    }
 
     private var pageTransition: AnyTransition {
         let entering: Edge = state.expandedDeckDirection >= 0 ? .trailing : .leading
@@ -850,14 +771,6 @@ struct ExpandedView: View {
                 .combined(with: .opacity)
                 .combined(with: .scale(scale: scale))
         )
-    }
-
-    private func selectPreviousPage() {
-        state.moveExpandedDeckPage(by: -1, kinds: activityKinds)
-    }
-
-    private func selectNextPage() {
-        state.moveExpandedDeckPage(by: 1, kinds: activityKinds)
     }
 
     private func activityLabel(_ activity: ExpandedActivity) -> String {
@@ -883,6 +796,7 @@ struct ExpandedView: View {
     private func activityIcon(_ activity: ExpandedActivity) -> String {
         switch activity.kind {
         case "agents": return "terminal"
+        case "commands": return "hammer"
         case "codexQuota": return "chevron.left.forwardslash.chevron.right"
         case "openCodeUsage": return "curlybraces"
         case "ci": return "checkmark.seal"

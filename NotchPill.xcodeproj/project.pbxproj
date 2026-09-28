@@ -95,7 +95,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "# Ship the hook scripts inside the app, so an installed NotchPill can wire\n# up agents without the user also cloning the repo. Paths inside the scripts\n# resolve relative to their own location, so Resources/Scripts mirrors the\n# repo's Scripts/ layout exactly.\nDEST=\"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/Scripts\"\nrm -rf \"$DEST\"\nmkdir -p \"$DEST/cursor-hooks\"\nfor f in notify-notchpill.sh notchpill-dedup.sh claude-code-notify.sh claude-code-permission.sh codex-notify.sh deliver-notchpill-pending.sh queue-notchpill-notify.sh install-agent-hooks.sh; do\n  cp \"${SRCROOT}/Scripts/$f\" \"$DEST/\"\ndone\ncp \"${SRCROOT}/.cursor/hooks\"/*.sh \"$DEST/cursor-hooks/\"\nchmod +x \"$DEST\"/*.sh \"$DEST/cursor-hooks\"/*.sh\n";
+			shellScript = "# Ship the hook scripts inside the app, so an installed NotchPill can wire\n# up agents without the user also cloning the repo. Paths inside the scripts\n# resolve relative to their own location, so Resources/Scripts mirrors the\n# repo's Scripts/ layout exactly.\nDEST=\"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/Scripts\"\nrm -rf \"$DEST\"\nmkdir -p \"$DEST/cursor-hooks\"\nfor f in notchpill notify-notchpill.sh notchpill-command.sh notchpill-dedup.sh claude-code-notify.sh claude-code-permission.sh codex-notify.sh deliver-notchpill-pending.sh queue-notchpill-notify.sh install-agent-hooks.sh; do\n  cp \"${SRCROOT}/Scripts/$f\" \"$DEST/\"\ndone\ncp \"${SRCROOT}/.cursor/hooks\"/*.sh \"$DEST/cursor-hooks/\"\nchmod +x \"$DEST\"/*.sh \"$DEST/cursor-hooks\"/*.sh\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -369,7 +369,7 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "NotchPill shows your next upcoming event in the notch overlay.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				MARKETING_VERSION = 1.59.1;
+				MARKETING_VERSION = 1.61.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.local.notchpill;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -397,7 +397,7 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "NotchPill shows your next upcoming event in the notch overlay.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				MARKETING_VERSION = 1.59.1;
+				MARKETING_VERSION = 1.61.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.local.notchpill;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -416,7 +416,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.59.1;
+				MARKETING_VERSION = 1.61.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.local.notchpill.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -436,7 +436,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.59.1;
+				MARKETING_VERSION = 1.61.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.local.notchpill.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
