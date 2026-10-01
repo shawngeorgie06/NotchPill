@@ -618,14 +618,7 @@ final class NotchController {
         let activities = NotchContentSnapshot.expandedActivities(
             state: state, shelf: shelf, timer: TimerStore.shared, settings: AppSettings.shared
         )
-        // Same page the view is rendering. The window and the content have to
-        // agree on which card is on screen, or the pill is sized for one card
-        // while showing another.
-        return NotchContentLayout.expandedDeckSize(
-            metrics: metrics, activities: activities,
-            page: state.resolvedExpandedDeckPage(for: activities.map(\.kind)),
-            tokenRows: AppSettings.shared.showTokenUsage
-                ? TokenUsageStore.shared.summary.widestModelRows : 0)
+        return NotchContentLayout.expandedDeckSize(metrics: metrics, activities: activities)
     }
 
     private func devReadyContentSize() -> CGSize {

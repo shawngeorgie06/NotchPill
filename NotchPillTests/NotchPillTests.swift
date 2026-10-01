@@ -135,20 +135,13 @@ struct TokenLineBudgetTests {
                                        designExpandedHeight: 128,
                                        scale: 0.54)
 
-    /// The card grew and its budget has to grow with it. A card that renders
-    /// more than it reserved pushes the deck's page dots off the pill.
-    @Test("a quota card reserves room for the token lines it draws")
-    func budgetGrowsWithRows() {
-        let quota = ClaudeQuota(sessionPercent: 7, weeklyPercent: 85)
-        let cards: [ExpandedActivity] = [.claudeQuota(quota)]
-        let bare = NotchContentLayout.expandedDeckSize(metrics: metrics, activities: cards,
-                                                       page: 0, tokenRows: 0).height
-        let one = NotchContentLayout.expandedDeckSize(metrics: metrics, activities: cards,
-                                                      page: 0, tokenRows: 1).height
-        let two = NotchContentLayout.expandedDeckSize(metrics: metrics, activities: cards,
-                                                      page: 0, tokenRows: 2).height
-        #expect(one > bare)
-        #expect(two > one)
+    /// Token details must fit inside the shared card canvas without resizing
+    /// the island while the user moves between quota and other pages.
+    @Test("a quota card's token lines fit the fixed deck")
+    func tokenRowsFitFixedDeck() {
+        let content = NotchContentLayout.quotaCard
+            + NotchContentLayout.tokenLinesHeight(modelRows: 2)
+        #expect(content <= NotchContentLayout.expandedContentCeiling)
     }
 
     @Test("no token lines costs no height")
@@ -7288,7 +7281,7 @@ struct QuotaResetClockTests {
     }
 }
 
-@Suite("The deck is only as tall as the card on screen")
+@Suite("Every deck card uses the same island size")
 struct DeckPageHeightTests {
     private let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
                                        designExpandedWidth: 640, designExpandedHeight: 190,
@@ -7300,42 +7293,22 @@ struct DeckPageHeightTests {
         }
     }
 
-    /// The complaint that prompted this: paging right from a three-row agents
-    /// card to a usage card left the pill at the agents card's height, with
-    /// the difference showing as empty space.
-    @Test func aShortCardDoesNotInheritATallOne() {
+    /// Swiping from a dense agents card to a short quota card keeps the outer
+    /// silhouette fixed, so only the content moves.
+    @Test func denseAndShortCardsShareOneHeight() {
         let deck: [ExpandedActivity] = [
             .agents(AgentHomeTray(sessions(3))),
             .claudeQuota(ClaudeQuota(sessionPercent: 26, weeklyPercent: 28)),
         ]
-        let agentsPage = NotchContentLayout.expandedDeckSize(metrics: metrics,
-                                                            activities: deck, page: 0).height
-        let quotaPage = NotchContentLayout.expandedDeckSize(metrics: metrics,
-                                                           activities: deck, page: 1).height
-        #expect(quotaPage < agentsPage)
+        let mixed = NotchContentLayout.expandedDeckSize(metrics: metrics, activities: deck)
+        let agentsOnly = NotchContentLayout.expandedDeckSize(metrics: metrics,
+                                                            activities: [deck[0]])
+        let quotaOnly = NotchContentLayout.expandedDeckSize(metrics: metrics,
+                                                           activities: [deck[1]])
+        #expect(mixed == agentsOnly)
+        #expect(mixed == quotaOnly)
     }
 
-    /// A quota card alone and the same card inside a deck of tall cards must
-    /// be the same height — that is the whole point.
-    @Test func aCardIsTheSameHeightWhereverItSits() {
-        let quota = ExpandedActivity.claudeQuota(ClaudeQuota(sessionPercent: 26, weeklyPercent: 28))
-        let alone = NotchContentLayout.expandedContentBaseHeight([quota], page: 0)
-        let inDeck = NotchContentLayout.expandedContentBaseHeight([.agents(AgentHomeTray(sessions(3))), quota],
-                                                                  page: 1)
-        #expect(alone == inDeck)
-    }
-
-    /// A page index the view has not caught up with must not collapse the
-    /// pill; falling back to the tallest card is the old, safe behaviour.
-    @Test func anOutOfRangePageFallsBackRatherThanGuessing() {
-        let deck: [ExpandedActivity] = [
-            .agents(AgentHomeTray(sessions(3))),
-            .claudeQuota(ClaudeQuota(sessionPercent: 26, weeklyPercent: 28)),
-        ]
-        let tallest = NotchContentLayout.expandedContentBaseHeight(deck)
-        #expect(NotchContentLayout.expandedContentBaseHeight(deck, page: 7) == tallest)
-        #expect(NotchContentLayout.expandedContentBaseHeight(deck, page: -1) == tallest)
-    }
 }
 
 @Suite("The reply composer shows what you are replying to")
@@ -8388,14 +8361,14 @@ struct DeckChromeTests {
         #expect(NotchContentLayout.deckChromeHeight >= NotchSpace.mark + NotchSpace.snug)
     }
 
-    @Test("A single page has no redundant navigation footer")
-    func singlePageHasNoFooter() {
+    @Test("A single page hides navigation but keeps its space")
+    func singlePageKeepsFooterSpace() {
         let onePage = [ExpandedActivity.clock]
         #expect(!NotchContentLayout.showsDeckChrome(for: onePage))
         let deck = NotchContentLayout.expandedDeckLayout(metrics: metrics, activities: onePage)
         let expectedHeight = metrics.notchHeight + metrics.topGap
-            + max(CGFloat(56), NotchContentLayout.expandedContentBaseHeight(onePage))
-            + NotchContentLayout.expandedTrayInset
+            + NotchContentLayout.expandedContentCeiling
+            + NotchContentLayout.deckChromeHeight + NotchContentLayout.expandedTrayInset
         #expect(deck.size.height == expectedHeight)
     }
 
@@ -8421,7 +8394,7 @@ struct DeckChromeTests {
         for activity in [ExpandedActivity.claudeQuota(quota), .cursorQuota(cursor)] {
             let activities = [activity, .clock]
             let deck = NotchContentLayout.expandedDeckLayout(
-                metrics: metrics, activities: activities, page: 0)
+                metrics: metrics, activities: activities)
             let footer = NotchContentLayout.deckChromeHeight
             let contentRoom = deck.size.height - metrics.notchHeight - metrics.topGap
                 - footer - NotchContentLayout.expandedTrayInset
@@ -8436,10 +8409,10 @@ struct DeckChromeTests {
             .agents(AgentHomeTray([])),
             .claudeQuota(ClaudeQuota(sessionPercent: 12, weeklyPercent: 34)),
         ]
-        let withTab = NotchContentLayout.expandedDeckLayout(metrics: metrics, activities: deck, page: 1)
-        let cardHeight = max(CGFloat(56), NotchContentLayout.expandedContentBaseHeight(deck, page: 1))
+        let withTab = NotchContentLayout.expandedDeckLayout(metrics: metrics, activities: deck)
         #expect(NotchContentLayout.showsDeckChrome(for: deck))
-        #expect(withTab.size.height == metrics.notchHeight + metrics.topGap + cardHeight
+        #expect(withTab.size.height == metrics.notchHeight + metrics.topGap
+                + NotchContentLayout.expandedContentCeiling
                 + NotchContentLayout.deckChromeHeight + NotchContentLayout.expandedTrayInset)
     }
 }

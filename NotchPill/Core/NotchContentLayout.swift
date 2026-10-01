@@ -12,9 +12,7 @@ struct NotchContentLayoutMetrics {
 }
 
 /// Computes pill dimensions and readability scaling from visible chips/cards.
-///
-/// Fewer visible items → larger text/chrome and a tighter pill around them.
-/// More visible items → smaller text so everything still fits.
+/// The expanded deck keeps one size while its pages change.
 enum NotchContentLayout {
     // MARK: - Collapsed
 
@@ -104,22 +102,17 @@ enum NotchContentLayout {
     /// The attached island is a deck, not a dashboard. Every activity gets a
     /// readable full-width page, so adding media, quota, CI, or another agent
     /// never turns the notch into a wider or denser strip of tiny cards.
-    static func expandedDeckLayout(metrics: NotchMetrics, activities: [ExpandedActivity],
-                                   page: Int? = nil,
-                                   tokenRows: Int = 0) -> NotchContentLayoutMetrics {
+    static func expandedDeckLayout(metrics: NotchMetrics, activities: [ExpandedActivity]) -> NotchContentLayoutMetrics {
         let maxW = metrics.maxExpandedRenderedWidth
         let preferredWidth = 400 * metrics.userScale
         let width = min(maxW, max(metrics.notchWidth + 112, preferredWidth))
-        let cardHeight = min(expandedContentCeiling,
-                             max(56, expandedContentBaseHeight(activities, page: page,
-                                                              tokenRows: tokenRows)))
-        // Reserve navigation space only when there is another page to reach.
-        // A single card gets the room back instead of showing a lone dot.
-        let footerChrome = showsDeckChrome(for: activities) ? deckChromeHeight : 0
+        // Every page uses the same canvas. Reserve the full card budget and
+        // footer even when there is only one visible card, so swipes and live
+        // changes in the deck never resize the island around its contents.
         return NotchContentLayoutMetrics(
             size: CGSize(width: width,
-                         height: metrics.notchHeight + metrics.topGap + cardHeight
-                            + footerChrome + expandedTrayInset),
+                         height: metrics.notchHeight + metrics.topGap + expandedContentCeiling
+                            + deckChromeHeight + expandedTrayInset),
             readability: 1,
             textScale: textCompensation(forUserScale: metrics.userScale)
         )
@@ -130,10 +123,8 @@ enum NotchContentLayout {
     /// and `ExpandedView` so the dots cannot be pushed past the lower edge.
     static let expandedTrayInset: CGFloat = NotchSpace.base * 2
 
-    static func expandedDeckSize(metrics: NotchMetrics, activities: [ExpandedActivity],
-                                 page: Int? = nil, tokenRows: Int = 0) -> CGSize {
-        expandedDeckLayout(metrics: metrics, activities: activities,
-                           page: page, tokenRows: tokenRows).size
+    static func expandedDeckSize(metrics: NotchMetrics, activities: [ExpandedActivity]) -> CGSize {
+        expandedDeckLayout(metrics: metrics, activities: activities).size
     }
 
     /// The footer is a navigation control, so one-page decks do not need it.
@@ -785,23 +776,11 @@ enum NotchContentLayout {
     /// and a sliver of the next — the card scrolled with only two agents on it.
     ///
     /// This was derived from two agent rows while the agents page was a list.
-    /// The page is a fixed-height shelf now and no longer reaches it, but the
-    /// clipboard and terminal cards still cap here, so the number stays where
-    /// it was rather than moving every other card.
+    /// It is now the shared deck height, with longer lists scrolling inside it.
     static let expandedContentCeiling: CGFloat = 168
 
-    /// Height for the card **on screen**, not the tallest card in the deck.
-    ///
-    /// The deck shows one page at a time, but was sized to whichever card was
-    /// tallest — so a three-row agents card left the pill that tall on every
-    /// other page, and a usage card sat in a block of empty space it had no
-    /// use for. Sizing to the visible page costs an animated height change
-    /// when you turn a page, which is what a deck of different-sized cards
-    /// should do anyway.
-    ///
-    /// `page` out of range falls back to the old behaviour rather than
-    /// guessing, so a transient mismatch between the view's page and the
-    /// layout's cannot produce a collapsed pill.
+    /// Content estimate for the older row layout. The full-width deck always
+    /// reserves `expandedContentCeiling`, independent of the selected page.
     static func expandedContentBaseHeight(_ activities: [ExpandedActivity],
                                           page: Int? = nil,
                                           tokenRows: Int = 0) -> CGFloat {

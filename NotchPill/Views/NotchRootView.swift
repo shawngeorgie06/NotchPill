@@ -58,9 +58,7 @@ struct NotchRootView: View {
         }
         if state.isExpanded || state.isCollapsing {
             return NotchContentLayout.expandedDeckLayout(
-                metrics: metrics, activities: expandedActivities,
-                page: state.resolvedExpandedDeckPage(for: expandedActivities.map(\.kind)),
-                tokenRows: settings.showTokenUsage ? tokens.summary.widestModelRows : 0)
+                metrics: metrics, activities: expandedActivities)
         }
         return NotchContentLayout.collapsedLayout(metrics: metrics, chips: collapsedChips)
     }
@@ -633,8 +631,7 @@ struct ExpandedView: View {
         let horizontalInset = isMedia ? 0 : NotchSpace.section * readability
         let topInset = isMedia ? 0 : NotchSpace.base * readability
         let bottomInset = isMedia ? 0 : NotchSpace.base * readability
-            + (NotchContentLayout.showsDeckChrome(for: activities)
-               ? NotchContentLayout.deckChromeHeight : 0)
+            + NotchContentLayout.deckChromeHeight
         return ExpandedActivityCard(
                 activity: activities[index],
                 appIcon: state.frontmostAppIcon,
@@ -643,7 +640,7 @@ struct ExpandedView: View {
                 readability: readability,
                 textScale: textScale,
                 expandToFill: true,
-                bottomChromeHeight: isMedia && NotchContentLayout.showsDeckChrome(for: activities)
+                bottomChromeHeight: isMedia
                     ? NotchContentLayout.deckChromeHeight + NotchSpace.base * 2 : 0,
                 tokenUsage: settings.showTokenUsage ? tokens.summary : nil,
                 tokenPeriod: settings.resolvedTokenPeriod
