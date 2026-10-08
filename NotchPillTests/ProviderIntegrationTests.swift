@@ -8,31 +8,70 @@ import SwiftUI
 
 @Suite("Claude CLI cancellation")
 struct ClaudeCLICancellationTests {
-    actor StartMarker {
-        private var started = false
-        func mark() { started = true }
-        func hasStarted() -> Bool { started }
+    // The handler runs synchronously on cancellation, independent of when the
+    // service actor or awaiting test next receives a cooperative worker.
+    final class BlockedRead: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Data, Error>?
+        private var cancellation: ContinuousClock.Instant?
+        private var cancelledBeforeStart = false
+
+        var isBlocked: Bool { lock.withLock { continuation != nil } }
+        var cancelledAt: ContinuousClock.Instant? { lock.withLock { cancellation } }
+
+        func read() async throws -> Data {
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    let alreadyCancelled = lock.withLock {
+                        if cancelledBeforeStart { return true }
+                        self.continuation = continuation
+                        return false
+                    }
+                    if alreadyCancelled { continuation.resume(throwing: CancellationError()) }
+                    // Bound a broken-forwarding regression without relying on
+                    // cancellation to end the fixture or hanging the suite.
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 10) {
+                        self.finish(cancelled: false)
+                    }
+                }
+            } onCancel: {
+                self.finish(cancelled: true)
+            }
+        }
+
+        private func finish(cancelled: Bool) {
+            let pending = lock.withLock {
+                if cancelled {
+                    if continuation != nil { cancellation = ContinuousClock.now }
+                    cancelledBeforeStart = true
+                }
+                let pending = continuation
+                continuation = nil
+                return pending
+            }
+            if cancelled { pending?.resume(throwing: CancellationError()) }
+            else { pending?.resume(returning: Data()) }
+        }
     }
 
     @Test("cancelled quota stops its in-flight CLI request")
     func cancelsBlockedCLI() async throws {
-        let marker = StartMarker()
-        let service = ClaudeUsageService(readCLI: {
-            await marker.mark()
-            try await Task.sleep(for: .seconds(10))
-            return Data()
-        }, store: nil)
-        let request = cancellationMeasuredTask { await service.quota() }
+        let read = BlockedRead()
+        let service = ClaudeUsageService(readCLI: { try await read.read() }, store: nil)
+        let request = Task { await service.quota() }
         for _ in 0..<100 {
-            if await marker.hasStarted() { break }
+            if read.isBlocked { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        #expect(await marker.hasStarted())
+        #expect(read.isBlocked, "the CLI read must be suspended before cancellation")
         let cancelledAt = ContinuousClock.now
         request.cancel()
-        let completion = await request.value
-        #expect(try completion.result.get() == nil)
-        #expect(cancelledAt.duration(to: completion.finishedAt) < .seconds(1))
+        let result = await request.value
+        #expect(result == nil)
+        let deliveredAt = try #require(read.cancelledAt,
+                                      "cancellation must reach the in-flight CLI read")
+        #expect(cancelledAt.duration(to: deliveredAt) < .seconds(1))
+        #expect(!read.isBlocked, "cancellation must release the suspended read")
     }
 }
 

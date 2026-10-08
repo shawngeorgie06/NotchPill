@@ -1,4 +1,4 @@
-# NotchPill 1.62.3
+# NotchPill 1.62.4
 
 The notch expands from both sides and the bottom of the hardware outline, with smooth, interruptible spring motion. Usage cards fit their details within the selected pill size without vertical scrolling.
 
