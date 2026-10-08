@@ -509,7 +509,10 @@ struct LocatorChoiceTests {
         900 504 /usr/bin/tail -f SESSION-42.jsonl
         504   1 /Applications/cmux.app/Contents/MacOS/cmux
         """)
-        #expect(AgentSessionLocator.hostingBundleId(forSessionId: sid, in: table) != nil)
+        // Candidate ranking is pure; resolving the host bundle depends on the
+        // referenced app being installed, which is not true on CI runners.
+        let candidates = AgentSessionLocator.candidates(forSessionId: sid, in: table)
+        #expect(candidates.map(\.pid) == [900])
     }
 
     @Test("no match yields nothing rather than an arbitrary app")

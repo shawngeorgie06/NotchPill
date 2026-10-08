@@ -758,7 +758,7 @@ struct NotchMotionTests {
     }
 }
 
-@Suite("NotchMotion surface")
+@Suite("NotchMotion surface", .serialized)
 struct NotchSurfaceMotionTests {
     @Test("the surface spring never overshoots")
     func surfaceDoesNotOvershoot() {
@@ -900,7 +900,11 @@ struct NotchSurfaceMotionTests {
             let color = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)
             return try #require(color?.usingColorSpace(.sRGB))
         }
-        try await Task.sleep(for: .milliseconds(100))
+        // Older SwiftUI versions animate the initial insertion as well.
+        // A 100ms capture can sample the 140ms fade rather than opaque chips.
+        try await Task.sleep(for: .milliseconds(400))
+        host.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
         // Window captures are color managed. Compare to steady-state captures
         // from this same host rather than assuming pure device RGB channels.
         let opaqueChips = try pixel()
@@ -929,7 +933,8 @@ struct NotchSurfaceMotionTests {
             #expect(reds.contains { $0 > 0.02 && $0 < 0.98 }, "chips popped directly to opaque: \(reds)")
         }
         let returned = try pixel()
-        #expect(abs(returned.redComponent - opaqueChips.redComponent) < 0.01)
+        #expect(abs(returned.redComponent - opaqueChips.redComponent) < 0.01,
+                "returned red \(returned.redComponent), baseline \(opaqueChips.redComponent), samples \(reds)")
         #expect(abs(returned.greenComponent - opaqueChips.greenComponent) < 0.01)
         #expect(geometry.samples.allSatisfy { $0 == 0 }, "finalisation restarted the surface motion")
         #expect(geometry.samples.allSatisfy { NotchMotion.contentOpacity(surfaceProgress: $0) == 0 },
