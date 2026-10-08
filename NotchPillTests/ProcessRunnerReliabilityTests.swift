@@ -90,7 +90,7 @@ struct ProcessRunnerReliabilityTests {
         let task = Task {
             try await ProcessRunner.run(
                 executableURL: URL(fileURLWithPath: "/bin/sh"),
-                arguments: ["-c", "trap '' TERM; echo $$ > \"$1\"; while :; do :; done", "probe", pidFile.path],
+                arguments: ["-c", "trap '' TERM; echo $$ > \"$1\"; while :; do sleep 0.1; done", "probe", pidFile.path],
                 timeout: 5
             )
         }
@@ -245,13 +245,26 @@ private struct DescendantProbe: Sendable {
     }
 
     func isRunning(_ pid: pid_t) -> Bool {
+        Self.canRun(pid)
+    }
+
+    static func canRun(_ pid: pid_t) -> Bool {
         var info = proc_bsdinfo()
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
         guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else {
-            // `proc_pidinfo` can fail transiently or for an access reason. Only
-            // ESRCH proves absence; conservatively count every other result as
-            // existing so the test cannot pass on an indeterminate probe.
-            return kill(pid, 0) == 0 || errno != ESRCH
+            // The native query can fail even for a real zombie. Only ESRCH
+            // from kill proves absence; permission failures remain unknown.
+            guard kill(pid, 0) == 0 else { return errno != ESRCH }
+            guard let output = ProcessRunner.capture(
+                "/bin/ps", ["-o", "stat=", "-p", String(pid)], timeout: 1),
+                  let state = String(data: output, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !state.isEmpty else {
+                return true
+            }
+            // Only a positive zombie status proves it cannot execute. Empty,
+            // failed, or unrecognized status queries must not pass the test.
+            return !state.hasPrefix("Z")
         }
         // kill(pid, 0) succeeds for zombies too. They are already dead and
         // cannot retain a pipe or execute work, even if launchd has not reaped
@@ -315,51 +328,101 @@ struct MediaSupervisorTests {
         }
     }
 
-    @Test("parent death stops and reaps only the owned stream child")
-    func parentDeathStopsOwnedChild() async throws {
+    @Test("parent death stops and reaps only the owned stream child", arguments: [false, true])
+    func parentDeathStopsOwnedChild(unreapedParent: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let script = directory.appendingPathComponent("child.sh")
         let pidFile = directory.appendingPathComponent("child.pid")
-        try "echo $$ > \"$1\"; trap 'exit 0' TERM; while :; do sleep 0.1; done\n"
+        try "trap 'exit 0' TERM; echo $$ > \"$1\"; while :; do sleep 0.1; done\n"
             .write(to: script, atomically: true, encoding: .utf8)
 
+        let unrelated = Process()
+        unrelated.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        unrelated.arguments = ["60"]
+        unrelated.standardOutput = FileHandle.nullDevice
+        unrelated.standardError = FileHandle.nullDevice
+        try unrelated.run()
+        defer { if unrelated.isRunning { unrelated.terminate() } }
+
+        let parentPIDFile = directory.appendingPathComponent("parent.pid")
         let parent = Process()
-        parent.executableURL = URL(fileURLWithPath: "/bin/sh")
-        parent.arguments = ["-c", "sleep 60"]
+        parent.standardOutput = FileHandle.nullDevice
+        parent.standardError = FileHandle.nullDevice
+        if unreapedParent {
+            // The Perl owner intentionally does not waitpid until teardown.
+            // Its child dies as soon as the stream is ready and remains a real
+            // kernel zombie, rather than relying on launchd's reaping latency.
+            parent.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+            parent.arguments = ["-e", #"""
+            my ($ready, $pidfile) = @ARGV;
+            my $pid = fork(); defined($pid) or die "fork: $!";
+            if (!$pid) {
+                while (!-s $ready) { select undef, undef, undef, 0.01; }
+                exit 0;
+            }
+            open my $out, '>', $pidfile or die "open: $!";
+            print $out "$pid\n"; close $out;
+            $SIG{TERM} = sub { kill 'KILL', $pid; waitpid($pid, 0); exit 0; };
+            while (1) { select undef, undef, undef, 0.1; }
+            """#, pidFile.path, parentPIDFile.path]
+        } else {
+            parent.executableURL = URL(fileURLWithPath: "/bin/sh")
+            // Deliver parent death independently of the cooperative executor.
+            // Previously the runner's five-second deadline started before the
+            // test task could resume to terminate the parent; CI contention
+            // could consume that deadline before parent death was delivered.
+            parent.arguments = ["-c", "while [ ! -s \"$1\" ]; do sleep 0.01; done",
+                                "test-parent", pidFile.path]
+        }
         try parent.run()
         defer { if parent.isRunning { parent.terminate() } }
+        var monitoredPID = parent.processIdentifier
+        if unreapedParent {
+            let deadline = Date().addingTimeInterval(2)
+            var recordedPID: pid_t?
+            while recordedPID == nil {
+                if let raw = try? String(contentsOf: parentPIDFile, encoding: .utf8) {
+                    recordedPID = pid_t(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+                // Always inspect readiness after resuming, even if a delayed
+                // executor wakeup crossed the setup deadline.
+                if recordedPID != nil || Date() >= deadline { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            monitoredPID = try #require(recordedPID)
+        }
 
-        let supervisor = Task {
-            try await ProcessRunner.run(
+        do {
+            _ = try await ProcessRunner.run(
                 executableURL: URL(fileURLWithPath: "/bin/sh"),
                 arguments: ["-c", MediaRemoteBridge.supervisorScript, "test-supervisor",
-                            String(parent.processIdentifier), "/bin/sh", script.path, pidFile.path],
+                            String(monitoredPID), "/bin/sh", script.path, pidFile.path],
                 timeout: 5
             )
-        }
-        defer { supervisor.cancel() }
-
-        var childPID: Int32?
-        for _ in 0..<50 {
-            if let raw = try? String(contentsOf: pidFile, encoding: .utf8),
-               let value = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                childPID = value
-                break
-            }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        let pid = try #require(childPID)
-        defer { if kill(pid, 0) == 0 { kill(pid, SIGKILL) } }
-        parent.terminate()
-        parent.waitUntilExit()
-        do {
-            _ = try await supervisor.value
         } catch ProcessRunnerError.nonzeroExit {
             // A TERM-terminated child may report a nonzero status; ownership is
             // established by the child disappearing and the supervisor exiting.
         }
+        let raw = try String(contentsOf: pidFile, encoding: .utf8)
+        let pid = try #require(pid_t(raw.trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer { if kill(pid, 0) == 0 { kill(pid, SIGKILL) } }
         #expect(kill(pid, 0) != 0)
+        #expect(unrelated.isRunning, "parent death must not signal an unrelated process")
+        #expect(DescendantProbe.canRun(unrelated.processIdentifier),
+                "the observer must classify a live unrelated process as running")
+        if unreapedParent {
+            // proc_pidinfo can return ESRCH for zombies even while kill -0
+            // succeeds. ps exposes their state on both macOS 15 and 27.
+            #expect(kill(monitoredPID, 0) == 0)
+            let status = try await ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/bin/ps"),
+                arguments: ["-o", "stat=", "-p", String(monitoredPID)], timeout: 3)
+            #expect(String(decoding: status.stdout, as: UTF8.self).contains("Z"),
+                    "the supervisor must finish before the parent is reaped")
+            #expect(!DescendantProbe.canRun(monitoredPID),
+                    "the observer must classify the unreaped parent as dead")
+        }
     }
 }

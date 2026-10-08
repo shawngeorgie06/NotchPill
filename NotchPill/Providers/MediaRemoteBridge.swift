@@ -45,7 +45,19 @@ parent="$1"; perl="$2"; script="$3"; framework="$4"
 "$perl" "$script" "$framework" stream &
 child=$!
 (
-  while kill -0 "$parent" 2>/dev/null; do sleep 1; done
+  parent_alive() {
+    kill -0 "$parent" 2>/dev/null || return 1
+    # kill -0 also succeeds for a dead, unreaped parent. In particular,
+    # launchd need not reap a killed app before we shut down its stream.
+    state=$(/bin/ps -o stat= -p "$parent" 2>/dev/null) || {
+      # A failed status query alone does not prove the parent is dead.
+      kill -0 "$parent" 2>/dev/null
+      return $?
+    }
+    case "$state" in *Z*) return 1 ;; esac
+    return 0
+  }
+  while parent_alive; do sleep 1; done
   kill "$child" 2>/dev/null || true
 ) &
 watcher=$!

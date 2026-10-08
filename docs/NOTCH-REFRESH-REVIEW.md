@@ -56,3 +56,19 @@ The destination menu previously scheduled its popup asynchronously while the cal
 All 934 local tests passed. The Dev 1.62.1 installation is running, matches the staged executable SHA-256 `acef9c31d62d2bfeb8e6bc023d7aa2cae231b5057922ad528e81e39f77e5b361`, and passed strict signature verification.
 
 GitHub's older Swift compiler exposed an oversized arithmetic expression in the geometry test helper; explicit typed Bezier coefficients resolve that compiler timeout. Further CI failures revealed a locator test that assumed cmux was installed and an animation reference capture taken before an older SwiftUI initial insertion fade settled. Those tests now check candidate ranking directly and capture a settled reference, with the window animation suite serialized. CI retains full result bundles and prints assertion summaries for subsequent diagnosis. These changes do not suppress tests or alter production motion.
+
+
+### CI observation corrections
+
+A subsequent tagged run exposed two additional observer assumptions. The process probe now reads Darwin process status: a zombie is exited, while a failed status query falls back conservatively and only ESRCH proves the process is gone. The animation integration test no longer demands that AppKit cacheDisplay capture intermediate Core Animation presentation frames; it checks hidden, returned, reversal, and geometry states plus the configured return curve and Reduce Motion floor. All 934 local tests pass with these corrections; no production motion or process-runner behavior changed.
+
+
+### Sol release recovery
+
+The main CI failure in `parentDeathStopsOwnedChild` led to a reproduced production defect: `kill -0` succeeds for a dead, unreaped parent, so the media supervisor could keep its owned stream alive. The watcher now checks `/bin/ps` for zombie state and remains conservative if that status query fails. A deliberately unreaped parent regression fails with the old watcher and passes with the fix; an unrelated live process remains untouched.
+
+Sol also reproduced a fixture scheduling race: its five-second runner deadline could elapse before the Swift test task resumed to terminate the parent. Parent death now follows child readiness independently of that task, preserving the deadline. The descendant observer uses a bounded status fallback when the native query cannot see a zombie, with live and zombie assertions. The TERM-ignoring cancellation fixture sleeps instead of spinning the CPU. No tests were skipped and no deadlines were increased.
+
+The watcher fix passed 140 focused stress executions and a full local suite of 943 executions. Subsequent observer hardening passed all 14 focused cases twice, and restoring the old observer reproduced the zombie-classification failure. Logs are `/tmp/notchpill-sol-release-stress-green.log`, `/tmp/notchpill-sol-release-full.log`, and `/tmp/notchpill-sol-test-hardening-final-green.log`.
+
+Final integrated validation passed all 934 unique tests (943 executions, zero failures or skips), including both reaped and unreaped parent cases. Log: `/tmp/notchpill-1.62.3-final-tests.log`.
