@@ -1720,7 +1720,7 @@ struct ExpandedActivityCard: View {
         }
         .onHover { hoveredShelfItem = $0 ? item.id : nil }
         .contextMenu {
-            Button("Move to…") { presentDestinationMenu(for: item) }
+            Button("Move to…") { presentDestinationMenu(for: item, fromContextMenu: true) }
             Button("Share / AirDrop…") { ShelfDestinationMenu.airDrop(item.url) }
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([item.url])
@@ -1730,17 +1730,16 @@ struct ExpandedActivityCard: View {
         .help("Click to move \(item.name) to a folder")
     }
 
-    /// `NSMenu.popUp` runs a modal event loop, so the hold is raised for the
-    /// whole time it is on screen and dropped once a choice is made.
-    private func presentDestinationMenu(for item: ShelfCardItem) {
+    /// The menu owns its hold through deferred presentation and tracking.
+    private func presentDestinationMenu(for item: ShelfCardItem, fromContextMenu: Bool = false) {
         let entries = destinations.destinations()
         LogStore.shelf("chip tapped: \(item.name) — \(entries.count) destinations")
-        actions.holdNotchOpen(true)
-        ShelfDestinationMenu.shared.present(destinations: entries) { folder in
+        ShelfDestinationMenu.shared.present(destinations: entries,
+                                            fromContextMenu: fromContextMenu,
+                                            holdNotchOpen: actions.holdNotchOpen) { folder in
             LogStore.shelf("picked \(folder.lastPathComponent) for \(item.name)")
             actions.fileShelfItem(item.id, folder)
         }
-        actions.holdNotchOpen(false)
     }
 
     private func relativeStart(for date: Date) -> String {

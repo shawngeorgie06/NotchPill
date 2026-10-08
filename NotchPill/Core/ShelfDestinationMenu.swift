@@ -16,13 +16,30 @@ final class ShelfDestinationMenu: NSObject {
     static let shared = ShelfDestinationMenu()
 
     private var onPick: ((URL) -> Void)?
+    private var isPresenting = false
+    private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
+    private let showMenu: (NSMenu, NSPoint) -> Bool
 
-    /// - Parameter onPick: called with the chosen folder. Not called if the
-    ///   menu is dismissed without a choice.
-    /// - Parameter onPick: called with the chosen folder. Not called if the
-    ///   menu is dismissed without a choice.
-    func present(destinations: [FileDestination], onPick: @escaping (URL) -> Void) {
+    init(schedule: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, work in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }, showMenu: @escaping (NSMenu, NSPoint) -> Bool = { menu, location in
+        NSApp.activate(ignoringOtherApps: true)
+        return menu.popUp(positioning: nil, at: location, in: nil)
+    }) {
+        self.schedule = schedule
+        self.showMenu = showMenu
+        super.init()
+    }
+
+    /// Holds the notch through the deferred launch and the full tracking loop,
+    /// including cancellation and the modal Other Folder picker.
+    func present(destinations: [FileDestination], fromContextMenu: Bool = false,
+                 holdNotchOpen: @escaping (Bool) -> Void = { _ in },
+                 onPick: @escaping (URL) -> Void) {
+        guard !isPresenting else { return }
+        isPresenting = true
         self.onPick = onPick
+        holdNotchOpen(true)
 
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -65,13 +82,17 @@ final class ShelfDestinationMenu: NSObject {
         // and worked on the second. One turn of the run loop is not enough to
         // clear the session; a short delay is.
         let location = NSEvent.mouseLocation
-        let delay = NSApp.currentEvent?.type == .rightMouseDown ? 0.12 : 0.0
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            NSApp.activate(ignoringOtherApps: true)
+        let delay = fromContextMenu ? 0.12 : 0.0
+        schedule(delay) { [self] in
+            defer {
+                self.onPick = nil
+                isPresenting = false
+                holdNotchOpen(false)
+            }
             let started = Date()
             // `in: nil` makes the location screen-relative, which is what
             // `NSEvent.mouseLocation` already is.
-            let shown = menu.popUp(positioning: nil, at: location, in: nil)
+            let shown = showMenu(menu, location)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             LogStore.shelf("menu popUp returned \(shown) after \(ms)ms at "
                 + "\(Int(location.x)),\(Int(location.y))")

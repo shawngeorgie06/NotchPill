@@ -1475,17 +1475,27 @@ private func flattened(_ path: Path, stepsPerCurve: Int = 160) -> [CGPoint] {
             points.append(p); current = p
         case .quadCurve(let p, let c):
             for i in 1...stepsPerCurve {
-                let t = CGFloat(i) / CGFloat(stepsPerCurve), u = 1 - t
-                points.append(CGPoint(x: u * u * current.x + 2 * u * t * c.x + t * t * p.x,
-                                      y: u * u * current.y + 2 * u * t * c.y + t * t * p.y))
+                let t: CGFloat = CGFloat(i) / CGFloat(stepsPerCurve)
+                let u: CGFloat = 1 - t
+                let a: CGFloat = u * u
+                let b: CGFloat = 2 * u * t
+                let d: CGFloat = t * t
+                let x: CGFloat = a * current.x + b * c.x + d * p.x
+                let y: CGFloat = a * current.y + b * c.y + d * p.y
+                points.append(CGPoint(x: x, y: y))
             }
             current = p
         case .curve(let p, let c1, let c2):
             for i in 1...stepsPerCurve {
-                let t = CGFloat(i) / CGFloat(stepsPerCurve), u = 1 - t
-                let a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t
-                points.append(CGPoint(x: a * current.x + b * c1.x + c * c2.x + d * p.x,
-                                      y: a * current.y + b * c1.y + c * c2.y + d * p.y))
+                let t: CGFloat = CGFloat(i) / CGFloat(stepsPerCurve)
+                let u: CGFloat = 1 - t
+                let a: CGFloat = u * u * u
+                let b: CGFloat = 3 * u * u * t
+                let c: CGFloat = 3 * u * t * t
+                let d: CGFloat = t * t * t
+                let x: CGFloat = a * current.x + b * c1.x + c * c2.x + d * p.x
+                let y: CGFloat = a * current.y + b * c1.y + c * c2.y + d * p.y
+                points.append(CGPoint(x: x, y: y))
             }
             current = p
         case .closeSubpath:

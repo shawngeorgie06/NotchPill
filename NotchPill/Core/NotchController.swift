@@ -137,6 +137,13 @@ final class NotchController {
             self, selector: #selector(testMultipleDevReadyFromSettings),
             name: .notchPillTestMultipleDevReady, object: nil)
 
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(menuTrackingBegan(_:)),
+            name: NSMenu.didBeginTrackingNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(menuTrackingEnded(_:)),
+            name: NSMenu.didEndTrackingNotification, object: nil)
+
         // Resize window and refresh hover when expansion or chip content changes.
         state.$isExpanded
             .removeDuplicates()
@@ -345,6 +352,7 @@ final class NotchController {
         ciRefreshTask = nil
         pendingCIDirectories = nil
         NotificationCenter.default.removeObserver(self)
+        interactionHolds = NotchInteractionHold()
         hoverMonitor.stop()
         hotZoneKeys.stop()
         nowPlaying.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
@@ -1049,18 +1057,38 @@ final class NotchController {
 
     private var keyboardCaptureObserver: NSObjectProtocol?
 
-    /// Set while a popover (the shelf's destination menu) owns the pointer.
-    /// Collapsing underneath one destroys its anchor view and dismisses it.
-    private var interactionHold = false
+    /// Explicit interactions and AppKit menu tracking overlap during the
+    /// right-click -> destination picker handoff. Neither may release the other.
+    private var interactionHolds = NotchInteractionHold()
+    private var interactionHold: Bool { interactionHolds.isHeld }
 
     func setInteractionHold(_ hold: Bool) {
-        interactionHold = hold
-        if hold {
+        let wasHeld = interactionHold
+        interactionHolds.manual = hold
+        applyInteractionHoldChange(wasHeld: wasHeld)
+    }
+
+    @objc private func menuTrackingBegan(_ notification: Notification) {
+        guard let menu = notification.object as? NSMenu else { return }
+        let wasHeld = interactionHold
+        interactionHolds.begin(menu)
+        applyInteractionHoldChange(wasHeld: wasHeld)
+    }
+
+    @objc private func menuTrackingEnded(_ notification: Notification) {
+        guard let menu = notification.object as? NSMenu else { return }
+        let wasHeld = interactionHold
+        interactionHolds.end(menu)
+        applyInteractionHoldChange(wasHeld: wasHeld)
+    }
+
+    private func applyInteractionHoldChange(wasHeld: Bool) {
+        guard interactionHold != wasHeld else { return }
+        if interactionHold {
             collapseWorkItem?.cancel()
             collapseWorkItem = nil
             pillEngaged = true
         } else {
-            // Re-evaluate immediately: the pointer may already be well away.
             pointerExitedHot()
         }
     }
