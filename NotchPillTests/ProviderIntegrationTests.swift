@@ -22,16 +22,17 @@ struct ClaudeCLICancellationTests {
             try await Task.sleep(for: .seconds(10))
             return Data()
         }, store: nil)
-        let request = Task { await service.quota() }
+        let request = cancellationMeasuredTask { await service.quota() }
         for _ in 0..<100 {
             if await marker.hasStarted() { break }
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(await marker.hasStarted())
-        let cancelledAt = Date()
+        let cancelledAt = ContinuousClock.now
         request.cancel()
-        #expect(await request.value == nil)
-        #expect(Date().timeIntervalSince(cancelledAt) < 1)
+        let completion = await request.value
+        #expect(try completion.result.get() == nil)
+        #expect(cancelledAt.duration(to: completion.finishedAt) < .seconds(1))
     }
 }
 

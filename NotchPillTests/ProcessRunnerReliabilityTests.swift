@@ -169,7 +169,7 @@ struct ProcessRunnerDescendantTests {
         let probe = try DescendantProbe()
         defer { probe.cleanup() }
         let arguments = probe.arguments()
-        let task = Task {
+        let task = cancellationMeasuredTask {
             try await ProcessRunner.run(executableURL: URL(fileURLWithPath: "/bin/sh"),
                                         arguments: arguments, timeout: 5)
         }
@@ -180,19 +180,26 @@ struct ProcessRunnerDescendantTests {
         #expect(getpgid(leader) == leader)
         #expect(getpgid(descendant) == leader)
         #expect(leader != getpgrp())
-        let cancelledAt = Date()
+        let cancelledAt = ContinuousClock.now
+        let leaderExit = cancellationMeasuredTask {
+            await probe.observeGone(leader, deadline: cancelledAt.advanced(by: .milliseconds(400)))
+        }
+        let descendantExit = cancellationMeasuredTask {
+            await probe.observeGone(descendant, deadline: cancelledAt.advanced(by: .seconds(2)))
+        }
         task.cancel()
         do {
-            _ = try await task.value
+            let completion = await task.value
+            #expect(cancelledAt.duration(to: completion.finishedAt) < .seconds(1))
+            _ = try completion.result.get()
             Issue.record("Expected cancellation")
         } catch ProcessRunnerError.cancelled {
         } catch {
             Issue.record("Unexpected error: \(error)")
         }
-        #expect(Date().timeIntervalSince(cancelledAt) < 1)
         // The default-TERM leader exits before the 0.5-second KILL escalation.
-        try await probe.waitUntilGone(leader, seconds: 0.4)
-        try await probe.waitUntilGone(descendant, seconds: 2)
+        #expect(try await leaderExit.value.result.get())
+        #expect(try await descendantExit.value.result.get())
     }
 
     @Test("normal success leaves descendants with closed pipes alone")
@@ -287,6 +294,14 @@ private struct DescendantProbe: Sendable {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(!isRunning(pid))
+    }
+
+    func observeGone(_ pid: pid_t, deadline: ContinuousClock.Instant) async -> Bool {
+        while isRunning(pid) {
+            if ContinuousClock.now >= deadline { return false }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return ContinuousClock.now < deadline
     }
 
     func cleanup() {
@@ -425,4 +440,39 @@ struct MediaSupervisorTests {
                     "the observer must classify the unreaped parent as dead")
         }
     }
+}
+
+// Cancellation deadlines describe the operation completing, not when the test
+// caller next gets a cooperative worker. A private executor runs preferred
+// operation jobs and records completion before the caller resumes. Actors keep
+// their own executors; this does not bypass service isolation or hide time
+// spent awaiting service work.
+@available(macOS 15.0, *)
+private final class CancellationTestExecutor: TaskExecutor, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "notchpill.tests.cancellation", qos: .userInitiated)
+    func enqueue(_ job: UnownedJob) {
+        let executor = asUnownedTaskExecutor()
+        queue.async { job.runSynchronously(on: executor) }
+    }
+}
+
+struct CancellationTestCompletion<Value: Sendable>: @unchecked Sendable {
+    let result: Result<Value, Error>
+    let finishedAt: ContinuousClock.Instant
+}
+
+func cancellationMeasuredTask<Value: Sendable>(
+    _ operation: @escaping @Sendable () async throws -> Value
+) -> Task<CancellationTestCompletion<Value>, Never> {
+    let measured: @Sendable () async -> CancellationTestCompletion<Value> = {
+        let result: Result<Value, Error>
+        do { result = .success(try await operation()) }
+        catch { result = .failure(error) }
+        return CancellationTestCompletion(result: result, finishedAt: ContinuousClock.now)
+    }
+    if #available(macOS 15.0, *) {
+        return Task(executorPreference: CancellationTestExecutor(), operation: measured)
+    }
+    // Keep the same required result/deadline checks on the minimum supported OS.
+    return Task(operation: measured)
 }
