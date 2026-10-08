@@ -1,5 +1,11 @@
 import Foundation
 
+@MainActor
+protocol UsageCardSettings {
+    var showClaudeUsage: Bool { get }
+    var showCursorUsage: Bool { get }
+}
+
 /// Lists the agent conversations that are alive right now, across Claude Code,
 /// Codex and Cursor.
 ///
@@ -38,8 +44,27 @@ final class AgentSessionsProvider {
     /// prompt — but it is still only consulted when asked for.
     private let cursorUsage = CursorUsageService()
     private var scanning = false
+    private var scanTask: Task<Void, Never>?
     /// Invalidates results from scans started before the last stop.
     private var generation = 0
+    private let usageSettings: any UsageCardSettings
+
+    init(usageSettings: any UsageCardSettings = AppSettings.shared) {
+        self.usageSettings = usageSettings
+    }
+
+    /// Use the publisher's incoming values: @Published emits before the
+    /// corresponding setting's stored value changes.
+    func clearDisabledUsage(claudeEnabled: Bool, cursorEnabled: Bool) {
+        if !claudeEnabled {
+            lastClaudeQuota = nil
+            onClaudeQuotaUpdate?(nil)
+        }
+        if !cursorEnabled {
+            lastCursorQuota = nil
+            onCursorQuotaUpdate?(nil)
+        }
+    }
 
 
     /// Sessions the hooks told us are blocked, by session id. A pending prompt
@@ -72,6 +97,8 @@ final class AgentSessionsProvider {
         // back on screen moments after it was told to go away. Bump the
         // generation so its result is discarded.
         generation &+= 1
+        scanTask?.cancel()
+        scanTask = nil
         scanning = false
         Task { await scanner.reset() }
         // Publish the empty list, or the card keeps showing whatever was on
@@ -100,8 +127,9 @@ final class AgentSessionsProvider {
         // off must not silently take it down too — the setting that is still
         // ticked would then describe a card that never appears.
         guard AppSettings.shared.showExpandedAgents
-            || AppSettings.shared.showClaudeUsage
-            || AppSettings.shared.showCursorUsage else {
+            || usageSettings.showClaudeUsage
+            || usageSettings.showCursorUsage
+            || AppSettings.shared.showExpandedCI else {
             if !lastPublished.isEmpty { lastPublished = []; onUpdate?([]) }
             if lastOpenCodeUsage != nil { lastOpenCodeUsage = nil; onOpenCodeUsageUpdate?(nil) }
             if lastCodexQuota != nil { lastCodexQuota = nil; onCodexQuotaUpdate?(nil) }
@@ -110,6 +138,9 @@ final class AgentSessionsProvider {
             return
         }
         let wantsAgents = AppSettings.shared.showExpandedAgents
+        // CI uses the same discovered project paths as the agent shelf, but
+        // must still work when the agents card itself is turned off.
+        let wantsSessions = wantsAgents || AppSettings.shared.showExpandedCI
         if AppSettings.shared.showTokenUsage {
             // Keep the local Codex/Claude token lines current while the app is
             // running. TokenUsageStore performs its own incremental rate limit.
@@ -125,11 +156,11 @@ final class AgentSessionsProvider {
         blockedSessions = blockedSessions.filter { now.timeIntervalSince($0.value) < 600 }
         let blocked = blockedSessions
         let issued = generation
-        let wantsClaude = AppSettings.shared.showClaudeUsage
-        let wantsCursor = AppSettings.shared.showCursorUsage
-        Task { [weak self] in
+        let wantsClaude = usageSettings.showClaudeUsage
+        let wantsCursor = usageSettings.showCursorUsage
+        scanTask = Task { [weak self] in
             guard let self else { return }
-            let sessions = wantsAgents
+            let sessions = wantsSessions
                 ? await scanner.sessions(now: now, blocked: blocked) : []
             let usage = wantsAgents
                 ? await scanner.openCodeUsage(since: Calendar.current.startOfDay(for: now)) : nil
@@ -186,10 +217,15 @@ final class AgentSessionsProvider {
         }
     }
 
-    private func publish(_ ordered: [AgentSession], usage: OpenCodeUsage?, quota: CodexQuota?,
+    func publish(_ ordered: [AgentSession], usage: OpenCodeUsage?, quota: CodexQuota?,
                          claude: ClaudeQuota?, cursor: CursorQuota?, from issued: Int) {
         guard issued == generation else { return }   // stopped mid-scan
+        scanTask = nil
         scanning = false
+        // A partial toggle does not stop scanning for agents or CI. Discard
+        // quota results fetched under settings that have since been disabled.
+        let claude = usageSettings.showClaudeUsage ? claude : nil
+        let cursor = usageSettings.showCursorUsage ? cursor : nil
         if usage != lastOpenCodeUsage {
             lastOpenCodeUsage = usage
             onOpenCodeUsageUpdate?(usage)

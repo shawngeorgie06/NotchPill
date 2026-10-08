@@ -29,13 +29,59 @@ DEV_BUNDLE_ID="com.local.notchpill.dev"
 DEV_NAME="NotchPill Dev"
 DEST="/Applications/${DEV_NAME}.app"
 
-# The executable inside the bundle is still called `NotchPill`, so matching on
-# the process name would hit the installed release too — or, with -x, nothing at
-# all. Match the bundle path instead: it is the only thing that tells the two
-# apart in `ps`.
+# Use the kernel's executable path, never argv/process names or System Events.
+# Include start time in snapshots so a reused PID is not signaled.
+dev_processes() {
+  local scope="${1:-all}"
+  local table pid weekday month day clock year executable bundle identifier
+  table="$(/bin/ps -ww -axo pid=,lstart=,comm=)" || {
+    echo "!! Cannot inspect processes; refusing to replace the dev app." >&2
+    return 1
+  }
+  while read -r pid weekday month day clock year executable; do
+    case "$executable" in
+      "$DEST/Contents/MacOS/NotchPill"|"$ROOT"/build-dev/*.app/Contents/MacOS/NotchPill|"$ROOT"/build/*.app/Contents/MacOS/NotchPill) ;;
+      *) continue ;;
+    esac
+    if [[ "$scope" == "prebuild" ]]; then
+      case "$executable" in
+        "$ROOT/build-dev/Build/Products/Debug/NotchPill.app/Contents/MacOS/NotchPill"|"$ROOT"/build-dev/stage/*.app/Contents/MacOS/NotchPill) ;;
+        *) continue ;;
+      esac
+    fi
+    bundle="${executable%/Contents/MacOS/NotchPill}"
+    identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle/Contents/Info.plist" 2>/dev/null)" || {
+      echo "!! Cannot verify candidate dev bundle: $bundle" >&2
+      return 1
+    }
+    [[ "$identifier" == "$DEV_BUNDLE_ID" ]] || continue
+    printf '%s %s %s %s %s %s %s\n' "$pid" "$weekday" "$month" "$day" "$clock" "$year" "$executable"
+  done <<< "$table"
+}
+
 quit_dev() {
-  pkill -f "${DEST}/Contents/MacOS/" 2>/dev/null || true
-  sleep 1
+  local scope="${1:-all}"
+  local original current entry pid attempt signal
+  original="$(dev_processes "$scope")" || return 1
+  [[ -n "$original" ]] || return 0
+  for signal in TERM KILL; do
+    while IFS= read -r entry; do
+      # Revalidate executable, bundle identity and process start time immediately
+      # before each signal. Never escalate against an unverified/reused PID.
+      current="$(dev_processes "$scope")" || return 1
+      if /usr/bin/grep -Fxq -- "$entry" <<< "$current"; then
+        pid="${entry%% *}"
+        /bin/kill -"$signal" "$pid" 2>/dev/null || true
+      fi
+    done <<< "$original"
+    for ((attempt=0; attempt<20; attempt++)); do
+      current="$(dev_processes "$scope")" || return 1
+      [[ -n "$current" ]] || return 0
+      /bin/sleep 0.25
+    done
+  done
+  echo "!! Dev app is still running; refusing to replace its bundle." >&2
+  return 1
 }
 
 if [[ "${1:-}" == "--uninstall" ]]; then
@@ -48,6 +94,9 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   echo "under System Settings → Privacy & Security → Accessibility by hand."
   exit 0
 fi
+
+# Stop source/staged dev builds before xcodebuild or staging overwrites them.
+quit_dev prebuild
 
 echo "==> Building MediaRemote adapter…"
 ./Scripts/setup-vendor.sh

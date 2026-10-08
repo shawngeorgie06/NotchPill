@@ -9,11 +9,16 @@ final class CalendarProvider {
 
     private let store = EKEventStore()
     private var refreshTimer: Timer?
+    private var isRunning = false
+    private var generation = 0
 
     func start() {
+        guard !isRunning else { return }
+        isRunning = true
+        generation &+= 1
         NotificationCenter.default.addObserver(self, selector: #selector(storeChanged),
                                                name: .EKEventStoreChanged, object: store)
-        requestAccessAndLoad()
+        requestAccessAndLoad(generation: generation)
         // Re-evaluate periodically so a passed event rolls to the next one.
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.load()
@@ -21,23 +26,36 @@ final class CalendarProvider {
     }
 
     func stop() {
+        guard isRunning else { return }
+        isRunning = false
+        generation &+= 1
         refreshTimer?.invalidate()
         refreshTimer = nil
-        NotificationCenter.default.removeObserver(self)
+        NotificationCenter.default.removeObserver(self, name: .EKEventStoreChanged, object: store)
+        onUpdate?(nil)
     }
 
-    @objc private func storeChanged() { load() }
+    @objc private func storeChanged() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.load()
+        }
+    }
 
-    private func requestAccessAndLoad() {
+    private func requestAccessAndLoad(generation: Int) {
         store.requestFullAccessToEvents { [weak self] granted, _ in
-            guard let self else { return }
-            if granted { self.load() } else { self.publish(nil) }
+            DispatchQueue.main.async {
+                guard let self, self.isRunning, self.generation == generation else { return }
+                if granted { self.load() } else { self.publish(nil, generation: generation) }
+            }
         }
     }
 
     private func load() {
+        guard isRunning else { return }
+        let loadGeneration = generation
         guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
-            publish(nil); return
+            publish(nil, generation: loadGeneration); return
         }
 
         let now = Date()
@@ -52,13 +70,16 @@ final class CalendarProvider {
             publish(CalendarEvent(title: event.title ?? "Event",
                                   start: event.startDate,
                                   location: event.location,
-                                  isAllDay: event.isAllDay))
+                                  isAllDay: event.isAllDay), generation: loadGeneration)
         } else {
-            publish(nil)
+            publish(nil, generation: loadGeneration)
         }
     }
 
-    private func publish(_ event: CalendarEvent?) {
-        DispatchQueue.main.async { [weak self] in self?.onUpdate?(event) }
+    private func publish(_ event: CalendarEvent?, generation: Int) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isRunning, self.generation == generation else { return }
+            self.onUpdate?(event)
+        }
     }
 }

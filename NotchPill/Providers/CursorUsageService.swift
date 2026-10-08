@@ -111,9 +111,19 @@ actor CursorUsageService {
     }
 
     func quota(now: Date = Date()) async -> CursorQuota? {
-        if givenUp { return nil }
-        if now < retryNoEarlierThan { return servedCache(now: now) }
-        if now.timeIntervalSince(lastFetch) < Self.refreshInterval { return cached }
+        if givenUp {
+            IntegrationHealthStore.report("cursor", state: .signedOut)
+            return nil
+        }
+        if now < retryNoEarlierThan {
+            IntegrationHealthStore.report("cursor", state: .retrying,
+                                          updatedAt: cached?.updatedAt, retryAt: retryNoEarlierThan)
+            return servedCache(now: now)
+        }
+        if now.timeIntervalSince(lastFetch) < Self.refreshInterval {
+            if let cached { IntegrationHealthStore.report("cursor", state: .ready, updatedAt: cached.updatedAt) }
+            return cached
+        }
         lastFetch = now
         do {
             let fresh = try await fetch(now: now)
@@ -133,6 +143,7 @@ actor CursorUsageService {
             }
             cached = fresh
             persist(fresh)
+            IntegrationHealthStore.report("cursor", state: .ready, updatedAt: fresh.updatedAt)
             return fresh
         } catch let error as CursorUsageFetcher.FetchError {
             switch error {
@@ -140,18 +151,26 @@ actor CursorUsageService {
                 givenUp = true
                 LogStore.log("cursor", "not signed in to Cursor")
                 cached = nil
+                IntegrationHealthStore.report("cursor", state: .signedOut)
                 return nil
             case .unauthorized:
                 givenUp = true
+                IntegrationHealthStore.report("cursor", state: .signedOut, updatedAt: cached?.updatedAt)
                 LogStore.log("cursor", "token rejected — sign in to Cursor again")
             case .rateLimited(let retryAfter):
                 let wait = backoff(suggested: retryAfter, now: now)
+                IntegrationHealthStore.report("cursor", state: .retrying, updatedAt: cached?.updatedAt,
+                                              retryAt: now.addingTimeInterval(wait))
                 LogStore.log("cursor", "rate limited — next try in \(Int(wait))s")
             case .http(let code):
                 let wait = backoff(suggested: nil, now: now)
+                IntegrationHealthStore.report("cursor", state: .retrying, updatedAt: cached?.updatedAt,
+                                              retryAt: now.addingTimeInterval(wait))
                 LogStore.log("cursor", "usage fetch failed: HTTP \(code)"
                              + " — next try in \(Int(wait))s")
             case .malformedResponse:
+                IntegrationHealthStore.report("cursor", state: .retrying, updatedAt: cached?.updatedAt,
+                                              retryAt: now.addingTimeInterval(Self.refreshInterval))
                 LogStore.log("cursor", "usage fetch failed: unrecognised response")
             }
             return servedCache(now: now)
@@ -160,6 +179,8 @@ actor CursorUsageService {
             // request whose headers hold a session token.
             LogStore.log("cursor", "usage fetch failed: "
                          + "\((error as NSError).domain) \((error as NSError).code)")
+            IntegrationHealthStore.report("cursor", state: .retrying, updatedAt: cached?.updatedAt,
+                                          retryAt: now.addingTimeInterval(Self.refreshInterval))
             return servedCache(now: now)
         }
     }

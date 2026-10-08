@@ -22,9 +22,15 @@ struct NotchActions {
     var beginPlanRevision: (DevReadyAlert) -> Void
     var submitPlanRevision: (DevReadyAlert, String) -> Void
     var answer: (DevReadyAlert, AgentAnswer) -> Void
+    var openSettings: () -> Void = {}
     var clearRecentActivity: () -> Void = {}
     /// Bring forward the app this agent session is running in.
     var focusAgentSession: (AgentSession) -> Void = { _ in }
+    /// Jump to the command's exact recorded TTY when its terminal supports it.
+    /// Reports whether the exact target was found on main when lookup ends.
+    var focusDevCommand: (DevCommand, @escaping (Bool) -> Void) -> Void = { _, done in done(false) }
+    /// Dismiss one completed or active developer activity.
+    var dismissDevCommand: (String) -> Void = { _ in }
     /// Open a URL (a CI run) in the default browser.
     var openURL: (String) -> Void = { _ in }
     /// Move a shelf item into a folder.
@@ -53,6 +59,8 @@ struct NotchActions {
         answer: { _, _ in },
         clearRecentActivity: {},
         focusAgentSession: { _ in },
+        focusDevCommand: { _, done in done(false) },
+        dismissDevCommand: { _ in },
         openURL: { _ in },
         fileShelfItem: { _, _ in },
         removeShelfItem: { _ in },

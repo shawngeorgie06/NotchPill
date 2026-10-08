@@ -19,6 +19,7 @@ actor ClaudeUsageService {
     /// The fetch currently running, so concurrent callers share it rather than
     /// each starting their own.
     private var inFlight: Task<ClaudeQuota?, Never>?
+    private var inFlightID: UUID?
     private var lastFetch = Date.distantPast
     /// Where the last good answer is kept between launches.
     ///
@@ -115,38 +116,35 @@ actor ClaudeUsageService {
     /// The local `/usage` command makes no model request. Run outside the
     /// project directory so project hooks and instructions cannot affect it.
     nonisolated static func cliUsage() async throws -> Data {
-        try await Task.detached(priority: .utility) {
-            let home = FileManager.default.homeDirectoryForCurrentUser
-            let candidates = [
-                home.appendingPathComponent(".local/bin/claude").path,
-                "/opt/homebrew/bin/claude", "/usr/local/bin/claude",
-            ] + (ProcessInfo.processInfo.environment["PATH"] ?? "")
-                .split(separator: ":").map { "\($0)/claude" }
-            guard let path = candidates.first(where: FileManager.default.isExecutableFile(atPath:)) else {
-                throw ClaudeCLIError.notInstalled
-            }
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: path)
-            process.arguments = ["-p", "/usage", "--output-format", "json", "--no-session-persistence"]
-            process.currentDirectoryURL = home
-            let output = Pipe()
-            process.standardOutput = output
-            process.standardError = FileHandle.nullDevice
-            try process.run()
-            DispatchQueue.global().asyncAfter(deadline: .now() + 20) {
-                if process.isRunning { process.terminate() }
-            }
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else {
-                throw ClaudeCLIError.failed(process.terminationStatus)
-            }
-            return output.fileHandleForReading.readDataToEndOfFile()
-        }.value
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let candidates = [
+            home.appendingPathComponent(".local/bin/claude").path,
+            "/opt/homebrew/bin/claude", "/usr/local/bin/claude",
+        ] + (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":").map { "\($0)/claude" }
+        guard let path = candidates.first(where: FileManager.default.isExecutableFile(atPath:)) else {
+            throw ClaudeCLIError.notInstalled
+        }
+        do {
+            let result = try await ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: path),
+                arguments: ["-p", "/usage", "--output-format", "json", "--no-session-persistence"],
+                currentDirectoryURL: home,
+                timeout: 20,
+                outputLimitBytes: 256 * 1024
+            )
+            return result.stdout
+        } catch ProcessRunnerError.nonzeroExit(let status, let stdout, let stderr) {
+            throw ClaudeCLIError.failed(status, stdout: stdout, stderr: stderr)
+        } catch ProcessRunnerError.timedOut {
+            throw ClaudeCLIError.timedOut
+        }
     }
 
     private enum ClaudeCLIError: Error {
         case notInstalled
-        case failed(Int32)
+        case failed(Int32, stdout: Data, stderr: Data)
+        case timedOut
     }
 
     /// One request at a time, whoever asks.
@@ -162,28 +160,51 @@ actor ClaudeUsageService {
     /// on the same question, which also stops the duplicate log lines that
     /// made a single failure look like four.
     func quota(now: Date = Date()) async -> ClaudeQuota? {
-        if let inFlight { return await inFlight.value }
+        if let inFlight, let inFlightID {
+            return await awaitResult(of: inFlight, id: inFlightID)
+        }
+        let id = UUID()
         let task = Task<ClaudeQuota?, Never> { [weak self] in
             guard let self else { return nil }
             return await self.computeQuota(now: now)
         }
         inFlight = task
-        let result = await task.value
-        inFlight = nil
-        return result
+        inFlightID = id
+        return await awaitResult(of: task, id: id)
+    }
+
+    private func awaitResult(of task: Task<ClaudeQuota?, Never>, id: UUID) async -> ClaudeQuota? {
+        await withTaskCancellationHandler {
+            let result = await task.value
+            if inFlightID == id {
+                inFlight = nil
+                inFlightID = nil
+            }
+            return result
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     private func computeQuota(now: Date) async -> ClaudeQuota? {
         // A refusal is permanent until the app restarts: re-asking re-prompts.
         if let givenUp {
-            _ = givenUp
+            IntegrationHealthStore.report("claude", state: givenUp == .missingScope ? .permissionNeeded : .signedOut)
             return nil
         }
-        if now < retryNoEarlierThan { return servedCache(now: now) }
-        if now.timeIntervalSince(lastFetch) < Self.refreshInterval { return cached }
+        if now < retryNoEarlierThan {
+            IntegrationHealthStore.report("claude", state: .retrying,
+                                          updatedAt: cached?.updatedAt, retryAt: retryNoEarlierThan)
+            return servedCache(now: now)
+        }
+        if now.timeIntervalSince(lastFetch) < Self.refreshInterval {
+            if let cached { IntegrationHealthStore.report("claude", state: .ready, updatedAt: cached.updatedAt) }
+            return cached
+        }
         lastFetch = now
         do {
             let fresh = try await fetch(now: now)
+            try Task.checkCancellation()
             let recovered = consecutiveFailures > 0
             consecutiveFailures = 0
             retryNoEarlierThan = .distantPast
@@ -200,8 +221,13 @@ actor ClaudeUsageService {
             }
             cached = fresh
             persist(fresh)
+            IntegrationHealthStore.report("claude", state: .ready, updatedAt: fresh.updatedAt)
             return fresh
         } catch let error as ClaudeUsageFetcher.FetchError {
+            if Task.isCancelled {
+                lastFetch = .distantPast
+                return nil
+            }
             switch error {
             case .noCredentials, .missingScope:
                 // Nothing a retry fixes, and retrying `noCredentials` would
@@ -211,33 +237,81 @@ actor ClaudeUsageService {
                     ? "token cannot read usage (needs \(ClaudeUsageFetcher.requiredScope))"
                     : "not signed in to Claude Code")
                 cached = nil
+                IntegrationHealthStore.report("claude", state: error == .missingScope ? .permissionNeeded : .signedOut)
                 return nil
             case .keychainUnavailable:
                 // Deliberately not `givenUp`: the Keychain never said no, it
                 // said not now. Backing off is what makes the card come back
                 // on its own instead of only after a relaunch.
                 let wait = backoff(suggested: nil, now: now)
+                IntegrationHealthStore.report("claude", state: .retrying, updatedAt: cached?.updatedAt,
+                                              retryAt: now.addingTimeInterval(wait))
                 LogStore.log("claude", "keychain unavailable — next try in \(Int(wait))s")
             case .unauthorized:
+                givenUp = error
+                IntegrationHealthStore.report("claude", state: .signedOut, updatedAt: cached?.updatedAt)
                 LogStore.log("claude", "token rejected — sign in to Claude Code again")
             case .rateLimited(let retryAfter):
                 let wait = backoff(suggested: retryAfter, now: now)
+                IntegrationHealthStore.report("claude", state: .retrying, updatedAt: cached?.updatedAt,
+                                              retryAt: now.addingTimeInterval(wait))
                 LogStore.log("claude", "rate limited — next try in \(Int(wait))s")
             case .http(let code):
                 let wait = backoff(suggested: nil, now: now)
+                IntegrationHealthStore.report("claude", state: .retrying, updatedAt: cached?.updatedAt,
+                                              retryAt: now.addingTimeInterval(wait))
                 LogStore.log("claude", "usage fetch failed: HTTP \(code)"
                              + " — next try in \(Int(wait))s")
             case .malformedResponse:
+                IntegrationHealthStore.report("claude", state: .retrying, updatedAt: cached?.updatedAt,
+                                              retryAt: now.addingTimeInterval(Self.refreshInterval))
                 LogStore.log("claude", "usage fetch failed: unrecognised response")
             }
             return servedCache(now: now)
+        } catch let error as ClaudeCLIError {
+            if Task.isCancelled {
+                lastFetch = .distantPast
+                return nil
+            }
+            switch error {
+            case .notInstalled:
+                IntegrationHealthStore.report("claude", state: .toolMissing)
+                return servedCache(now: now)
+            case .failed(_, let stdout, let stderr):
+                let state = Self.classifyCLIErrorOutput(stderr + stdout)
+                IntegrationHealthStore.report("claude", state: state,
+                                              updatedAt: cached?.updatedAt,
+                                              retryAt: state == .retrying
+                                                ? now.addingTimeInterval(Self.refreshInterval) : nil)
+                return servedCache(now: now)
+            case .timedOut:
+                IntegrationHealthStore.report("claude", state: .retrying,
+                                              updatedAt: cached?.updatedAt,
+                                              retryAt: now.addingTimeInterval(Self.refreshInterval))
+                return servedCache(now: now)
+            }
         } catch {
+            if Task.isCancelled {
+                lastFetch = .distantPast
+                return nil
+            }
             // Never interpolate the error itself: a URLError carries the URL of
             // a request whose headers hold a bearer token.
             LogStore.log("claude", "usage fetch failed: "
                          + "\((error as NSError).domain) \((error as NSError).code)")
+            IntegrationHealthStore.report("claude", state: .retrying, updatedAt: cached?.updatedAt,
+                                          retryAt: now.addingTimeInterval(Self.refreshInterval))
             return servedCache(now: now)
         }
+    }
+
+    nonisolated static func classifyCLIErrorOutput(_ output: Data) -> IntegrationHealthState {
+        let message = String(decoding: output, as: UTF8.self).lowercased()
+        if message.contains("not logged in") || message.contains("please run /login")
+            || message.contains("please login") || message.contains("authentication required") {
+            return .signedOut
+        }
+        return .retrying
     }
 
     /// Sets the next allowed attempt and returns how long that is away.

@@ -54,49 +54,20 @@ enum NotchContentLayout {
 
     // MARK: - Expanded
 
-    static func expandedLayout(metrics: NotchMetrics, activities: [ExpandedActivity]) -> NotchContentLayoutMetrics {
-        guard !activities.isEmpty else {
-            return NotchContentLayoutMetrics(
-                size: CGSize(
-                    width: max(metrics.notchWidth, 140),
-                    height: metrics.notchHeight + metrics.topGap + 36
-                ),
-                readability: 1,
-                textScale: 1
-            )
-        }
-
-        let includesMedia = activities.contains(where: { if case .media = $0 { return true }; return false })
-        let spacing: CGFloat = 10
-        let padding: CGFloat = 28
-        let maxW = metrics.maxExpandedRenderedWidth
-        let minW = metrics.notchWidth + 20
-
-        let baseWidths = activities.map { expandedCardBaseWidth($0) }
-        let baseRowWidth = baseWidths.reduce(0, +)
-            + spacing * CGFloat(max(0, activities.count - 1))
-            + padding
-
-        let readability = fitReadability(
-            itemCount: activities.count,
-            baseRowWidth: baseRowWidth,
-            maxWidth: maxW,
-            fewItemBoost: (2.2, 1.85, 1.5)
-        )
-        let baseContentHeight = expandedContentBaseHeight(activities)
-        let cornerPad: CGFloat = 4
-        let contentHeight = baseContentHeight * readability + cornerPad
-        let width = min(maxW, max(minW, baseRowWidth * readability))
-        return NotchContentLayoutMetrics(
-            size: CGSize(width: width, height: metrics.notchHeight + metrics.topGap + contentHeight),
-            readability: readability,
-            textScale: textScale(forLayoutScale: readability)
-                * textCompensation(forUserScale: metrics.userScale)
-        )
+    /// Clearance below the hardware/menu-bar height, spent once by the root
+    /// and every expanded surface's height budget. Content begins below the
+    /// hardware bottom with a small inner margin. These are rendered points:
+    /// user width scaling must not shrink the clearance into the silhouette.
+    static func surfaceTopInset(metrics: NotchMetrics) -> CGFloat {
+        let clearance = metrics.hasPhysicalNotch
+            ? 12
+            : ExpandedNotchShape.floatingGap + 12
+        return max(metrics.topGap, clearance)
     }
 
-    static func expandedSize(metrics: NotchMetrics, activities: [ExpandedActivity]) -> CGSize {
-        expandedLayout(metrics: metrics, activities: activities).size
+    /// The remaining body/footer canvas after the root's single top spacer.
+    static func surfaceContentHeight(metrics: NotchMetrics, surfaceSize: CGSize) -> CGFloat {
+        max(0, surfaceSize.height - metrics.notchHeight - surfaceTopInset(metrics: metrics))
     }
 
     /// The attached island is a deck, not a dashboard. Every activity gets a
@@ -111,7 +82,7 @@ enum NotchContentLayout {
         // changes in the deck never resize the island around its contents.
         return NotchContentLayoutMetrics(
             size: CGSize(width: width,
-                         height: metrics.notchHeight + metrics.topGap + expandedContentCeiling
+                         height: metrics.notchHeight + surfaceTopInset(metrics: metrics) + expandedContentCeiling
                             + deckChromeHeight + expandedTrayInset),
             readability: 1,
             textScale: textCompensation(forUserScale: metrics.userScale)
@@ -473,7 +444,7 @@ enum NotchContentLayout {
         let headerHeight: CGFloat = count > 1 ? 18 : 0
         let listHeight = devReadyListHeight(rowCount: count)
         let title = peekTitleLayout(metrics: metrics, alerts: alerts, answerEnabled: answerEnabled)
-        let height = metrics.notchHeight + metrics.topGap + headerHeight + listHeight + 4
+        let height = metrics.notchHeight + surfaceTopInset(metrics: metrics) + headerHeight + listHeight + 4
             + titleExtraHeight(alerts: alerts, lines: title.lines)
         return NotchContentLayoutMetrics(
             size: CGSize(width: title.width, height: height),
@@ -615,7 +586,7 @@ enum NotchContentLayout {
     static func updateLayout(metrics: NotchMetrics) -> NotchContentLayoutMetrics {
         let width = min(metrics.designExpandedWidth * metrics.scale,
                         max(metrics.notchWidth + 240, 380))
-        let height = metrics.notchHeight + metrics.topGap + 78
+        let height = metrics.notchHeight + surfaceTopInset(metrics: metrics) + 78
         return NotchContentLayoutMetrics(
             size: CGSize(width: width, height: height),
             readability: 1.05,
@@ -634,26 +605,13 @@ enum NotchContentLayout {
                                    hasQuestion: Bool = false) -> NotchContentLayoutMetrics {
         let width = min(metrics.designExpandedWidth * metrics.scale,
                         max(metrics.notchWidth + 240, 380))
-        let height = metrics.notchHeight + metrics.topGap + 92
+        let height = metrics.notchHeight + surfaceTopInset(metrics: metrics) + 92
             + (hasQuestion ? replyQuestionExtra : 0)
         return NotchContentLayoutMetrics(
             size: CGSize(width: width, height: height),
             readability: 1.05,
             textScale: 1.05
         )
-    }
-
-    /// Legacy helper used by tests.
-    static func readabilityScale(itemCount: Int) -> CGFloat {
-        switch itemCount {
-        case 0: return 1.0
-        case 1: return 2.2
-        case 2: return 1.85
-        case 3: return 1.5
-        case 4: return 1.0
-        case 5: return 0.88
-        default: return max(0.7, 1.0 - CGFloat(itemCount - 4) * 0.08)
-        }
     }
 
     /// Typography grows faster than layout when there is extra room.
@@ -675,45 +633,10 @@ enum NotchContentLayout {
         return 1 / pow(userScale, 0.55)
     }
 
-    /// How many cards a pill this size can show.
-    ///
-    /// Raised to eight. The old ceiling of five was inherited from the row
-    /// layout, where every card was drawn side by side and each extra one
-    /// shrank the type for all of them — there, trimming the tail was the only
-    /// way to keep anything readable. `expandedDeckLayout` does not work that
-    /// way: it gives each card a full-width page at a fixed
-    /// `400 * userScale`, with readability pinned at 1. Card count costs
-    /// nothing in width and nothing in text size.
-    ///
-    /// What it does cost is page dots, and those live in a strip as wide as
-    /// the pill. Eight dots need 156pt of the ~414pt a default pill has, which
-    /// is comfortable; at 70% the pill is 252pt and the strip also carries the
-    /// card's label, so the ladder still gives ground at the small end.
-    ///
-    /// Cards are in priority order (live agents first), so what a limit trims
-    /// is always the tail.
-    static let maximumVisibleCards = 8
-
-    static func visibleCardLimit(forUserScale userScale: CGFloat) -> Int {
-        switch userScale {
-        case ..<0.85: return 6
-        case ..<1.0: return 7
-        default: return maximumVisibleCards
-        }
-    }
-
-    /// Design canvas size (pre-scale) for the expanded card row.
-    static func expandedDesignContentSize(metrics: NotchMetrics, activities: [ExpandedActivity]) -> CGSize {
-        let layout = expandedLayout(metrics: metrics, activities: activities)
-        let renderedContentHeight = max(0, layout.size.height - metrics.notchHeight - metrics.topGap)
-        return CGSize(
-            width: layout.size.width / metrics.scale,
-            height: renderedContentHeight / metrics.scale
-        )
-    }
-
     // MARK: - Fit math
 
+    /// Fits the collapsed chip row to its display, with a modest readability
+    /// boost when a short row has room to grow.
     private static func fitReadability(
         itemCount: Int,
         baseRowWidth: CGFloat,
@@ -721,7 +644,6 @@ enum NotchContentLayout {
         fewItemBoost: (CGFloat, CGFloat, CGFloat)
     ) -> CGFloat {
         guard baseRowWidth > 0, maxWidth > 0 else { return 1 }
-
         let fitScale = maxWidth / baseRowWidth
         if baseRowWidth <= maxWidth {
             switch itemCount {
@@ -749,172 +671,13 @@ enum NotchContentLayout {
         }
     }
 
-    /// How tall the row needs to be: the tallest card in it, not a constant.
-    ///
-    /// It used to be a flat 96 with media on screen and 66 without, times the
-    /// readability boost. That budgets for a *full* pill regardless of what is
-    /// in it, so one agent row beside three CI rows got the same box as a
-    /// crowded one and the difference showed up as dead space under the cards —
-    /// worst at small sizes, where the whole point was to take less room.
-    ///
-    /// The constant was wrong in both directions, which is why this is measured
-    /// per card rather than retuned. With media on screen and one agent row it
-    /// budgeted 96 and left dead space under everything — the reported bug.
-    /// With three agent rows and no media it budgeted 66 and clipped the third
-    /// row mid-line, which nobody had reported but is visible the moment you
-    /// look.
-    ///
-    /// Row-based cards grow with what they hold, capped at the rows they show
-    /// before their own `ScrollView` takes over. Agent rows deliberately earn
-    /// a little more vertical room than the small utility cards: the expanded
-    /// notch is where you read the work, rather than merely count sessions.
-    /// The ceiling is two agent rows plus their header.
-    ///
-    /// It used to be 112, which was two rows back when a row was ~47pt. The
-    /// console redesign took rows to 52 and the ceiling stayed put, so two
-    /// sessions and three both clamped to the same height and you saw one row
-    /// and a sliver of the next — the card scrolled with only two agents on it.
-    ///
-    /// This was derived from two agent rows while the agents page was a list.
-    /// It is now the shared deck height, with longer lists scrolling inside it.
+    /// Fixed content canvas shared by every expanded page.
     static let expandedContentCeiling: CGFloat = 168
 
-    /// Content estimate for the older row layout. The full-width deck always
-    /// reserves `expandedContentCeiling`, independent of the selected page.
-    static func expandedContentBaseHeight(_ activities: [ExpandedActivity],
-                                          page: Int? = nil,
-                                          tokenRows: Int = 0) -> CGFloat {
-        guard !activities.isEmpty else { return 66 }
-        let measured: CGFloat
-        if let page, activities.indices.contains(page) {
-            measured = expandedCardBaseHeight(activities[page], tokenRows: tokenRows)
-        } else {
-            measured = activities.map { expandedCardBaseHeight($0, tokenRows: tokenRows) }.max() ?? 66
-        }
-        return min(expandedContentCeiling, max(48, measured))
-    }
-
-    /// Height the deck's footer strip needs: the page dots' 16pt tap targets
-    /// (`NotchSpace.mark`) plus the 4pt `VStack` gap above them.
-    ///
-    /// Was 22 — the strip's own height with the gap forgotten. The gap is
-    /// not much until a card is also over its own budget, and then the two
-    /// shortfalls land on the same edge and clip the row that tells you which
-    /// page you are on and how many there are. Then 27, with a 22pt row and
-    /// an always-on page label; the label went (the card header names the
-    /// page) and the row came down to a mark, so the strip stopped reading
-    /// as a tab bar and gave 7pt back to the card.
+    /// Height of the footer navigation controls.
     static let deckChromeHeight: CGFloat = 20
 
-    /// Rows a card renders before it starts scrolling. Beyond this the card's
-    /// own `ScrollView` takes over, so the pill must not keep growing.
-    private static let expandedMaxCardRows = 3
 
-    /// Header row is gone: the tiles fill the page. Room for a 36pt nested
-    /// icon, a two-line name, a model caption and a status capsule, including
-    /// the 1.22× text compensation at the smallest pill. Tighter than this
-    /// and the icon sits on the name.
-    static let agentsShelf: CGFloat = 120
-
-    /// Clipboard rows are not uniform: each is as tall as its own copy needs,
-    /// so a one-line snippet does not reserve the room a paragraph would.
-    /// Capped the same way `rowsHeight` caps, so a long history scrolls rather
-    /// than growing the pill without limit.
-    static func clipboardHeight(_ items: [ClipboardEntry], searching: Bool) -> CGFloat {
-        let lineHeight: CGFloat = 13
-        let rowPadding: CGFloat = 12
-        let shown = items.prefix(expandedMaxCardRows)
-        let rows = shown.reduce(CGFloat(0)) { total, entry in
-            total + rowPadding + lineHeight * CGFloat(entry.displayLines)
-        }
-        // The search field is drawn from view state the deck cannot see, so
-        // its row has to be reserved here or the card overruns its budget and
-        // pushes the page dots off the bottom of the pill.
-        return 30 + (searching ? searchRow : 0) + max(lineHeight + rowPadding, rows)
-    }
-
-    /// The clipboard search field plus the gap above it.
-    static let searchRow: CGFloat = 26
-
-    private static func rowsHeight(header: CGFloat, row: CGFloat, count: Int) -> CGFloat {
-        header + row * CGFloat(min(expandedMaxCardRows, max(1, count)))
-    }
-
-    /// Height the folded token lines need on a quota card.
-    ///
-    /// A total line at 11pt plus one 9pt line per model shown, over the small
-    /// pad above them. Declared here rather than left to the view, because a
-    /// card that renders more than its budget pushes the deck's page dots off
-    /// the bottom of the pill — the same drift `expandedContentCeiling` documents.
-    static func tokenLinesHeight(modelRows: Int) -> CGFloat {
-        guard modelRows > 0 else { return 0 }
-        // pad + the 11pt total + the 9pt cached line + one 9pt line per model
-        return 3 + 14 + 12 + 12 * CGFloat(modelRows)
-    }
-
-    private static func expandedCardBaseHeight(_ activity: ExpandedActivity,
-                                               tokenRows: Int = 0) -> CGFloat {
-        switch activity {
-        // One meter row (hero 28 + bar 6 + caption 9 + tile pad 16 ≈ 69), plus
-        // snug spacing and a trailing detail line (extra spend, credits, or
-        // usage counts). Token lines stack below.
-        case .claudeQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
-        case .codexQuota: return quotaCard + tokenLinesHeight(modelRows: tokenRows)
-        case .cursorQuota: return quotaCard
-        // Hero cover grows with the island body; progress + overlaid dots sit
-        // under it. Budget includes what used to be tray inset and chrome strip
-        // — those are now inside the surface, not below a floating card.
-        case .media: return 140
-        case .agents: return agentsShelf
-        case .commands: return 132
-        case .openCodeUsage: return quotaCard
-        case .shelf(_, let receipt, let error, _):
-            return receipt != nil || error != nil ? 128 : 104
-        // Same shelf height as agents: each run is a full painted tile.
-        case .ci: return agentsShelf
-        case .clipboard(let items, let searching): return clipboardHeight(items, searching: searching)
-        // Header + six fixed shell rows + the inset grid surface.
-        case .terminal: return 22 + 8 + 11 * CGFloat(TerminalStore.rows) + 16 + 4
-        case .recentAlerts(let alerts): return rowsHeight(header: 30, row: 42, count: alerts.count)
-        case .battery: return 92
-        case .volume: return 92
-        case .calendar: return 94
-        case .timer: return 82
-        case .systemStats: return quotaCard
-        case .clock: return 84
-        case .activeApp, .appSwitch: return NotchSpace.hero
-        default: return 56
-        }
-    }
-
-    /// Provider header (title + mark) plus one meter row and a trailing detail
-    /// line. Was 80, then 96 without the header — both clipped once the Fetch
-    /// tab bar and token lines shared the same page.
-    static let quotaCard: CGFloat = 114
-
-    private static func expandedCardBaseWidth(_ activity: ExpandedActivity) -> CGFloat {
-        switch activity {
-        case .media: return 400
-        case .calendar: return 118
-        case .timer: return 96
-        case .systemStats: return 176
-        case .shelf: return 108
-        case .clipboard: return 340
-        case .terminal: return 340
-        case .agents: return 400
-        case .commands: return 400
-        case .openCodeUsage: return 124
-        case .codexQuota: return 176
-        case .claudeQuota: return 176
-        case .cursorQuota: return 176
-        case .ci: return 176
-        case .recentAlerts: return 170
-        case .activeApp, .appSwitch: return 160
-        case .volume: return 120
-        case .clock: return 76
-        case .battery: return 120
-        }
-    }
 }
 
 private extension NotchMetrics {

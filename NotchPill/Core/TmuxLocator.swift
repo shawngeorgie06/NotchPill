@@ -71,13 +71,13 @@ enum TmuxLocator {
     @discardableResult
     static func focusPane(tty: String,
                           tmuxPath: String? = executable(),
-                          run: (String, [String]) -> Data? = ProcessRunner.capture) -> Bool {
+                          run: (String, [String]) -> Data? = ProcessRunner.captureForFocus) -> Bool {
         guard let tmux = tmuxPath,
               let data = run(tmux, listArguments),
               let text = String(data: data, encoding: .utf8),
               let target = paneTarget(forTTY: tty, in: text) else { return false }
         for arguments in selectArguments(target: target) {
-            _ = run(tmux, arguments)
+            guard run(tmux, arguments) != nil else { return false }
         }
         return true
     }

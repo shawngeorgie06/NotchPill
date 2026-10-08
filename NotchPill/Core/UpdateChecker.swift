@@ -16,6 +16,7 @@ struct UpdateRelease: Equatable, Sendable {
 @MainActor
 final class UpdateChecker: ObservableObject {
     static let shared = UpdateChecker()
+    nonisolated static let stableBundleIdentifier = "com.local.notchpill"
 
     @Published private(set) var available: UpdateRelease?
     @Published private(set) var isChecking = false
@@ -33,7 +34,19 @@ final class UpdateChecker: ObservableObject {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 
+    /// Dev builds use the same release feed but must never offer stable bundles
+    /// for an in-place replacement. Keep this check at the checker boundary as
+    /// well as in AppDelegate so forced menu/settings checks are covered.
+    nonisolated static func allowsStableSelfUpdate(bundleIdentifier: String?) -> Bool {
+        bundleIdentifier == stableBundleIdentifier
+    }
+
+    var allowsSelfUpdate: Bool {
+        Self.allowsStableSelfUpdate(bundleIdentifier: Bundle.main.bundleIdentifier)
+    }
+
     func start() {
+        guard allowsSelfUpdate else { return }
         check()
         let timer = Timer(timeInterval: recheckInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.check() }
@@ -49,6 +62,12 @@ final class UpdateChecker: ObservableObject {
 
     /// `force` bypasses the auto-check preference (used by "Check for Updates…").
     func check(force: Bool = false) {
+        guard allowsSelfUpdate else {
+            available = nil
+            isChecking = false
+            lastError = nil
+            return
+        }
         guard force || AppSettings.shared.autoCheckUpdates else { return }
         guard !isChecking else { return }
         isChecking = true
@@ -118,7 +137,7 @@ final class UpdateChecker: ObservableObject {
     nonisolated static func isTrustedDownload(_ url: URL) -> Bool {
         guard url.scheme?.lowercased() == "https",
               let host = url.host?.lowercased() else { return false }
-        return ["github.com", "objects.githubusercontent.com"]
+        return ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"]
             .contains { host == $0 || host.hasSuffix("." + $0) }
     }
 

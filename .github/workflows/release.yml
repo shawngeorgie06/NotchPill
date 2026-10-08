@@ -15,7 +15,30 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build MediaRemote adapter
+        run: ./Scripts/setup-vendor.sh
+
+      - name: Run tests
+        run: >-
+          xcodebuild
+          -project NotchPill.xcodeproj
+          -scheme NotchPill
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath build/CI
+          CODE_SIGNING_ALLOWED=NO
+          test
+
   build:
+    needs: test
     runs-on: macos-15
     timeout-minutes: 40
     steps:

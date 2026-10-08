@@ -1,0 +1,40 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build MediaRemote adapter
+        run: ./Scripts/setup-vendor.sh
+
+      - name: Run tests
+        env:
+          NOTCHPILL_VISUAL_FIXTURE_DIR: ${{ github.workspace }}/build/visual-fixtures
+          TEST_RUNNER_NOTCHPILL_VISUAL_FIXTURE_DIR: ${{ github.workspace }}/build/visual-fixtures
+        run: >-
+          xcodebuild
+          -project NotchPill.xcodeproj
+          -scheme NotchPill
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath build/CI
+          CODE_SIGNING_ALLOWED=NO
+          test
+
+      - name: Upload visual fixtures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-fixtures
+          path: build/visual-fixtures/
+          if-no-files-found: ignore

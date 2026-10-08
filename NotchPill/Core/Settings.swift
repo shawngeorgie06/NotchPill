@@ -152,15 +152,6 @@ final class AppSettings: ObservableObject {
     @Published var pinnedActivityKind: String {
         didSet { defaults.set(pinnedActivityKind, forKey: Keys.pinnedActivityKind) }
     }
-    /// How much of the row each card gets, relative to the others. 1.0 is an
-    /// equal share; a card at 2.0 takes twice the width of one at 1.0. Stored
-    /// per card kind so it survives cards coming and going.
-    @Published var cardWeights: [String: Double] {
-        didSet { defaults.set(cardWeights, forKey: Keys.cardWeights) }
-    }
-
-    nonisolated static let cardWeightRange: ClosedRange<Double> = 0.4...3.0
-
     /// The order cards are considered in, most important first.
     ///
     /// Stored as kinds rather than indices so that adding a card kind in a
@@ -174,9 +165,7 @@ final class AppSettings: ObservableObject {
     /// longer exist are dropped, and kinds this version added are appended in
     /// their built-in position rather than being lost.
     var resolvedCardOrder: [String] {
-        let known = ExpandedActivity.allKinds.map(\.kind)
-        let kept = cardOrder.filter(known.contains)
-        return kept + known.filter { !kept.contains($0) }
+        CardOrdering.resolving(cardOrder, known: ExpandedActivity.allKinds.map(\.kind))
     }
 
     /// Whether a card kind can appear at all, given the switches.
@@ -214,12 +203,6 @@ final class AppSettings: ObservableObject {
     /// list shows, and the only numbering that means anything.
     var enabledCardOrder: [String] { resolvedCardOrder.filter(isCardEnabled) }
 
-    /// The order the deck would actually draw at the current pill size.
-    var drawableCardOrder: ArraySlice<String> {
-        enabledCardOrder.prefix(
-            NotchContentLayout.visibleCardLimit(forUserScale: CGFloat(notchScale)))
-    }
-
     /// Reorders within the enabled subset.
     func moveEnabledCards(from source: IndexSet, to destination: Int) {
         cardOrder = CardOrdering.moving(source, to: destination,
@@ -237,55 +220,6 @@ final class AppSettings: ObservableObject {
         cardOrder = ExpandedActivity.allKinds.map(\.kind)
     }
 
-    /// Not every card wants an equal share out of the box. CI is three short
-    /// rows of "repo — passed"; at an equal split it took half the row to say
-    /// very little, and the first thing anyone does is drag it back down. The
-    /// agents card is the opposite — it holds a task line per session and is
-    /// the one people lean on — so it starts wider.
-    ///
-    /// This is only the starting point: an explicit weight in `cardWeights`
-    /// always wins, so changing a default never moves a row someone has
-    /// already arranged.
-    nonisolated static func defaultWeight(for kind: String) -> Double {
-        switch kind {
-        case "ci": return 0.7
-        case "agents": return 1.6
-        default: return 1.0
-        }
-    }
-
-    func cardWeight(_ kind: String) -> Double {
-        AppSettings.clampWeight(cardWeights[kind] ?? AppSettings.defaultWeight(for: kind))
-    }
-
-    func setCardWeight(_ kind: String, _ value: Double) {
-        cardWeights[kind] = AppSettings.clampWeight(value)
-    }
-
-    /// A zero or negative weight would divide the row by nothing and collapse
-    /// every card, so the range is enforced on the way in.
-    nonisolated static func clampWeight(_ value: Double) -> Double {
-        guard value.isFinite else { return 1.0 }
-        return min(max(value, cardWeightRange.lowerBound), cardWeightRange.upperBound)
-    }
-
-    /// Shares of the row, normalised to sum to 1. Kept pure so the split can be
-    /// tested without a layout pass.
-    nonisolated static func shares(for kinds: [String],
-                                   weights: [String: Double]) -> [String: Double] {
-        guard !kinds.isEmpty else { return [:] }
-        let resolved = kinds.map {
-            (kind: $0, w: clampWeight(weights[$0] ?? defaultWeight(for: $0)))
-        }
-        let total = resolved.reduce(0) { $0 + $1.w }
-        guard total > 0 else {
-            let equal = 1.0 / Double(kinds.count)
-            return Dictionary(uniqueKeysWithValues: kinds.map { ($0, equal) })
-        }
-        var out: [String: Double] = [:]
-        for item in resolved { out[item.kind] = item.w / total }
-        return out
-    }
     /// User size for the expanded pill, as a multiplier on the design scale.
     /// Clamped on write so a hand-edited plist cannot produce a pill that is
     /// invisible or wider than the screen.
@@ -500,7 +434,6 @@ final class AppSettings: ObservableObject {
         static let returnFocusAfterReply = "returnFocusAfterReply"
         static let showExpandedRecentActivity = "showExpandedRecentActivity"
         static let pinnedActivityKind = "pinnedActivityKind"
-        static let cardWeights = "cardWeights"
         static let cardOrder = "cardOrder"
         static let notchScale = "notchScale"
         static let notchDisplayMode = "notchDisplayMode"
@@ -618,7 +551,6 @@ final class AppSettings: ObservableObject {
         returnFocusAfterReply = defaults.bool(forKey: Keys.returnFocusAfterReply)
         showExpandedRecentActivity = defaults.bool(forKey: Keys.showExpandedRecentActivity)
         pinnedActivityKind = defaults.string(forKey: Keys.pinnedActivityKind) ?? ""
-        cardWeights = (defaults.dictionary(forKey: Keys.cardWeights) as? [String: Double]) ?? [:]
         cardOrder = (defaults.array(forKey: Keys.cardOrder) as? [String])
             ?? ExpandedActivity.allKinds.map(\.kind)
         notchScale = AppSettings.clampNotchScale(defaults.double(forKey: Keys.notchScale))
@@ -743,7 +675,6 @@ final class AppSettings: ObservableObject {
         showCursorUsage = false
         returnFocusAfterReply = true
         pinnedActivityKind = ""
-        cardWeights = [:]
         cardOrder = ExpandedActivity.allKinds.map(\.kind)
         notchScale = AppSettings.defaultNotchScale
         showDevReadyPings = true
@@ -772,6 +703,16 @@ final class AppSettings: ObservableObject {
 /// The card-order arithmetic, kept out of `AppSettings` so it can be tested
 /// without a singleton that writes to the real preferences.
 enum CardOrdering {
+    /// Drops unknown and duplicate stored kinds while retaining the first
+    /// occurrence, then appends any newly introduced kinds in catalog order.
+    /// This guarantees card-order consumers can safely build unique-key maps.
+    static func resolving(_ stored: [String], known: [String]) -> [String] {
+        let knownSet = Set(known)
+        var seen = Set<String>()
+        let kept = stored.filter { knownSet.contains($0) && seen.insert($0).inserted }
+        return kept + known.filter { !seen.contains($0) }
+    }
+
     /// Applies a drag made in the *enabled* subset to the full stored order.
     ///
     /// The rows a person drags are not the whole order, so the move is applied

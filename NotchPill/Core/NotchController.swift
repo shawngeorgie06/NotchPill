@@ -2,39 +2,40 @@ import AppKit
 import SwiftUI
 import Combine
 
-/// Owns the overlay window, its placement over the physical notch, hover-driven
-/// expand/collapse with a grace delay, multi-display handling, and the wiring
-/// of every data provider into the single `NotchState`.
+/// Owns overlay placement, hover-driven expand/collapse, keyboard input, and
+/// multi-display handling. Provider subscriptions live in its provider extension.
 @MainActor
 final class NotchController {
-    private let state = NotchState()
+    let state = NotchState()
     private let shelf = ShelfStore()
     private var window: NotchWindow?
     private var container: NotchContainerView?
-    private var metrics = NotchMetrics(notchWidth: 200, notchHeight: 32,
+    var metrics = NotchMetrics(notchWidth: 200, notchHeight: 32,
                                        designExpandedWidth: NotchGeometry.expandedWidth,
                                        designExpandedHeight: NotchGeometry.expandedHeight,
                                        scale: NotchGeometry.expandedScale,
                                        topGap: NotchGeometry.contentTopGap)
 
     // Providers.
-    private let nowPlaying = NowPlayingProvider()
-    private let volume = VolumeProvider()
-    private let brightness = BrightnessProvider()
-    private let microphone = MicrophoneProvider()
-    private let calendar = CalendarProvider()
-    private let airDrop = AirDropProvider()
-    private let appSwitch = AppSwitchProvider()
-    private let systemStats = SystemStatsProvider()
-    private let battery = BatteryProvider()
-    private let devReady = DevReadyProvider()
-    private let dictation = DictationCaptionProvider()
-    private let transcripts = AgentTranscriptProvider()
-    private let cursorActivity = CursorActivityProvider()
-    private let agentSessions = AgentSessionsProvider()
-    private let ciStatus = CIStatusProvider()
-    private let devCommands = DevCommandProvider()
-    private var ciTimer: Timer?
+    let nowPlaying = NowPlayingProvider()
+    let volume = VolumeProvider()
+    let brightness = BrightnessProvider()
+    let microphone = MicrophoneProvider()
+    let calendar = CalendarProvider()
+    let airDrop = AirDropProvider()
+    let appSwitch = AppSwitchProvider()
+    let systemStats = SystemStatsProvider()
+    let battery = BatteryProvider()
+    let devReady = DevReadyProvider()
+    let dictation = DictationCaptionProvider()
+    let transcripts = AgentTranscriptProvider()
+    let cursorActivity = CursorActivityProvider()
+    let agentSessions = AgentSessionsProvider()
+    let ciStatus = CIStatusProvider()
+    let devCommands = DevCommandProvider()
+    private var ciRefreshTask: Task<Void, Never>?
+    private var pendingCIDirectories: [String]?
+    private var ciRefreshGeneration = 0
     private let replyHotKey = GlobalHotKey()
     /// Most-recent finished-agent alert, kept so the reply hotkey can target it
     /// even after its peek has auto-dismissed.
@@ -83,7 +84,7 @@ final class NotchController {
     private var motionTraceTimer: Timer?
     private var motionTraceStartedAt: Date?
 
-    private var cancellables = Set<AnyCancellable>()
+    var cancellables = Set<AnyCancellable>()
 
     func start() {
         replyHotKey.onPressed = { [weak self] in self?.openReplyForLatest() }
@@ -306,8 +307,15 @@ final class NotchController {
             beginPlanRevision: { [weak self] alert in self?.state.beginPlanRevision(for: alert) },
             submitPlanRevision: { [weak self] alert, text in self?.performPlanRevision(alert: alert, feedback: text) },
             answer: { [weak self] alert, ans in self?.performAnswer(alert: alert, answer: ans) },
+            openSettings: { PreferencesController.shared.show() },
             clearRecentActivity: { [weak self] in self?.state.clearRecentDevReady() },
             focusAgentSession: { [weak self] session in self?.focusAgentSession(session) },
+            focusDevCommand: { command, done in
+                AgentSessionLocator.focusCommand(terminalTTY: command.terminalTTY,
+                                                 bundleId: command.bundleId,
+                                                 completion: done)
+            },
+            dismissDevCommand: { [weak self] id in self?.devCommands.dismiss(id: id) },
             openURL: { url in
                 guard let u = URL(string: url) else { return }
                 NSWorkspace.shared.open(u)
@@ -331,12 +339,19 @@ final class NotchController {
     }
 
     func stop() {
+        cancellables.removeAll()
+        ciRefreshTask?.cancel()
+        ciRefreshGeneration &+= 1
+        ciRefreshTask = nil
+        pendingCIDirectories = nil
         NotificationCenter.default.removeObserver(self)
         hoverMonitor.stop()
         hotZoneKeys.stop()
         nowPlaying.stop(); calendar.stop(); airDrop.stop(); appSwitch.stop()
         systemStats.stop(); battery.stop(); devReady.stop(); brightness.stop(); microphone.stop()
+        dictation.stop(); transcripts.stop(); cursorActivity.stop(); agentSessions.stop()
         devCommands.stop()
+        ClipboardStore.shared.stop(); TerminalStore.shared.stop()
         AudioOutputStore.shared.stop()
         replyHotKey.unregister()
         peekEscapeMonitors.forEach(NSEvent.removeMonitor)
@@ -357,105 +372,6 @@ final class NotchController {
     }
 
     // MARK: - Providers
-
-    private func wireProviders() {
-        devCommands.onUpdate = { [weak self] commands in self?.state.devCommands = commands }
-        devCommands.start()
-        nowPlaying.onUpdate = { [weak self] np in self?.state.notifyMediaChanged(np) }
-        calendar.onUpdate = { [weak self] event in self?.state.nextEvent = event }
-        airDrop.onUpdate = { [weak self] status in self?.state.airDrop = status }
-        appSwitch.onFrontmostApp = { [weak self] name, icon in self?.state.setFrontmostApp(name, icon: icon) }
-        appSwitch.onSwitch = { [weak self] name, icon in self?.state.notifyAppSwitched(name, icon: icon) }
-        systemStats.onUpdate = { [weak self] stats in self?.state.updateSystemStats(stats) }
-        battery.onUpdate = { [weak self] status in self?.state.updateBattery(status) }
-
-        nowPlaying.start(); appSwitch.start()
-        volume.start()
-        AudioOutputStore.shared.start()
-        if let level = volume.currentVolume() { state.refreshSystemVolume(level) }
-        volume.onVolumeChanged = { [weak self] level in self?.state.showVolume(level) }
-        brightness.onBrightnessChanged = { [weak self] level in self?.state.showBrightness(level) }
-        microphone.onMuteChanged = { [weak self] muted in self?.state.showMicrophoneMuted(muted) }
-        brightness.start()
-        microphone.start()
-        devReady.onDevReady = { [weak self] alert in self?.presentDevReady(alert, origin: "signal") }
-        // Murmur's opt-in caption mirror. Nothing appears unless that app is
-        // installed and the user switched it on, so there is no cost to
-        // everyone else: the file simply never exists.
-        dictation.onCaption = { [weak self] caption in
-            guard let self else { return }
-            let scale = AppSettings.shared.captionScale
-            let width = NotchContentLayout.peekWidthCeiling(metrics: self.metrics,
-                                                            wrapping: true, scale: scale)
-            self.presentDevReady(
-                Self.alert(for: caption, width: width,
-                           maxLines: NotchContentLayout.titleMaxLines(scale: scale)),
-                origin: "dictation")
-        }
-        dictation.start()
-        // Hookless finished peeks. Emits the same title/subtitle/sessionId as the
-        // hooks, so DevReadyDedup collapses the pair when both are active.
-        transcripts.onDevReady = { [weak self] alert in self?.presentDevReady(alert, origin: "transcript") }
-        transcripts.start()
-        cursorActivity.onDevReady = { [weak self] alert in self?.presentDevReady(alert, origin: "cursordb") }
-        cursorActivity.start()
-        agentSessions.onUpdate = { [weak self] sessions in
-            self?.state.agentSessions = sessions
-            self?.refreshCI(for: sessions)
-        }
-        agentSessions.onOpenCodeUsageUpdate = { [weak self] usage in
-            self?.state.openCodeUsage = usage
-        }
-        agentSessions.onCodexQuotaUpdate = { [weak self] quota in
-            self?.state.codexQuota = quota
-        }
-        agentSessions.onClaudeQuotaUpdate = { [weak self] quota in
-            self?.state.claudeQuota = quota
-        }
-        agentSessions.onCursorQuotaUpdate = { [weak self] quota in
-            self?.state.cursorQuota = quota
-        }
-        agentSessions.start()
-        devReady.start()
-
-        // The clipboard is only watched while the setting is on, and turning it
-        // off clears what was already remembered rather than merely hiding it.
-        if AppSettings.shared.showClipboard { ClipboardStore.shared.start() }
-        AppSettings.shared.$showClipboard
-            .removeDuplicates()
-            .sink { on in
-                if on { ClipboardStore.shared.start() } else { ClipboardStore.shared.stop() }
-            }
-            .store(in: &cancellables)
-
-        // The shell is not started here even when the card is on: it costs a
-        // process and a profile read, and the card is one of seventeen that
-        // may never come up. `TerminalStore` starts it the first time someone
-        // clicks into it. Turning the setting off does kill it, so switching
-        // the card away never leaves a shell running invisibly.
-        AppSettings.shared.$showTerminal
-            .removeDuplicates()
-            .sink { on in if !on { TerminalStore.shared.stop() } }
-            .store(in: &cancellables)
-
-        // Secondary providers can warm up after the notch is on screen.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.calendar.start()
-            self.airDrop.start()
-            self.systemStats.start()
-            self.battery.start()
-        }
-
-        state.$isExpanded
-            .removeDuplicates()
-            .filter { $0 }
-            .sink { [weak self] _ in
-                guard let self, let level = self.volume.currentVolume() else { return }
-                self.state.refreshSystemVolume(level)
-            }
-            .store(in: &cancellables)
-    }
 
     // MARK: - Display handling
 
@@ -676,15 +592,12 @@ final class NotchController {
                     pointerInHotZone: self.expandHoverScreenRect().contains(NSEvent.mouseLocation))
             }
             pendingShrink = item
-            // The duration the peek is *actually* animating with, not the
-            // constant: a long caption now collapses over a longer interval,
-            // and shrinking the window on the old schedule would clip the last
-            // third of its own animation — the exact snap this defer exists to
-            // prevent, reappearing only for the longest captions.
-            DispatchQueue.main.asyncAfter(
-                deadline: .now() + max(NotchState.devReadyAnimationDuration,
-                                       state.devReadyMotionDuration),
-                execute: item)
+            // The duration the surface is *actually* animating with, not a
+            // constant: a long caption collapses over a longer interval, and
+            // the hover spring has its own settling time. Shrinking the window
+            // on a shorter schedule would clip the tail of the animation, the
+            // exact snap this defer exists to prevent.
+            DispatchQueue.main.asyncAfter(deadline: .now() + state.windowShrinkDelay, execute: item)
             MotionTrace.record("defer shrink to \(MotionTrace.rect(frame))")
             return
         }
@@ -1052,9 +965,8 @@ final class NotchController {
         return rect.insetBy(dx: -pad, dy: -pad).contains(point)
     }
 
-    /// Live answer for the key tap: geometry *and* the movement latch. Called
-    /// on the main thread, both from the hover tick and synchronously from the
-    /// event tap at key-press time.
+    /// Live answer for a key action: geometry and the movement latch. The
+    /// event tap reads its cached hover state; queued actions reach this on main.
     @discardableResult
     private func refreshShortcutArming(at point: NSPoint = NSEvent.mouseLocation) -> Bool {
         arming.update(point: point, inZone: shouldArmShortcuts(at: point))
@@ -1376,26 +1288,43 @@ final class NotchController {
 
     /// The repos to watch come from wherever agents are working, so the card
     /// follows you rather than needing configuration.
-    private func refreshCI(for sessions: [AgentSession]) {
+    func refreshCI(for sessions: [AgentSession]) {
+        refreshCI(forDirectories: sessions.compactMap(\.directory))
+    }
+
+    private func refreshCI(forDirectories dirs: [String]) {
         guard AppSettings.shared.showExpandedCI else {
+            ciRefreshTask?.cancel()
+            ciRefreshGeneration &+= 1
+            ciRefreshTask = nil
+            pendingCIDirectories = nil
             if !state.ciRuns.isEmpty { state.ciRuns = [] }
             return
         }
         // Deliberately called even with no directories: the provider remembers
         // repos for an hour, so CI outlives the session that introduced it.
-        let dirs = sessions.compactMap(\.directory)
-        Task { [weak self] in
+        if ciRefreshTask != nil {
+            pendingCIDirectories = dirs
+            return
+        }
+        let issued = ciRefreshGeneration
+        ciRefreshTask = Task { [weak self] in
             guard let self else { return }
             // Filter again on the way out. The provider only ages runs when it
             // fetches, once every 45s, and a two-minute lifetime cannot afford
             // to overshoot by most of a poll interval.
             let runs = CIRun.current(await ciStatus.runs(forDirectories: dirs))
-            await MainActor.run {
-                if runs.count != self.state.ciRuns.count {
-                    LogStore.log("ci", "\(runs.count) run(s) from \(dirs.count) agent director"
-                        + (dirs.count == 1 ? "y" : "ies"))
-                }
-                self.state.ciRuns = runs
+            guard issued == self.ciRefreshGeneration else { return }
+            self.ciRefreshTask = nil
+            guard !Task.isCancelled, AppSettings.shared.showExpandedCI else { return }
+            if runs.count != self.state.ciRuns.count {
+                LogStore.log("ci", "\(runs.count) run(s) from \(dirs.count) agent director"
+                    + (dirs.count == 1 ? "y" : "ies"))
+            }
+            self.state.ciRuns = runs
+            if let pending = self.pendingCIDirectories {
+                self.pendingCIDirectories = nil
+                self.refreshCI(forDirectories: pending)
             }
         }
     }
@@ -1457,7 +1386,7 @@ final class NotchController {
                                                       maxLines: maxLines))
     }
 
-    private func presentDevReady(_ alert: DevReadyAlert, origin: String = "?") {
+    func presentDevReady(_ alert: DevReadyAlert, origin: String = "?") {
         guard AppSettings.shared.showDevReadyPings else {
             LogStore.log("peek", "suppressed (peeks are switched off) from=\(origin)", level: .warn)
             return

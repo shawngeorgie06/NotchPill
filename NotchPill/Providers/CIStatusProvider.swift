@@ -17,6 +17,7 @@ actor CIStatusProvider {
     /// invocations — each one a network round trip — to learn nothing.
     private let pollInterval: TimeInterval = 45
     private var lastFetch = Date.distantPast
+    private var lastSuccessfulFetch: Date?
     private var cached: [CIRun] = []
     /// Repo slug by working directory, so `git remote` is not re-read for a
     /// path already resolved.
@@ -28,12 +29,15 @@ actor CIStatusProvider {
     private var recentRepos: [String: Date] = [:]
     private let repoMemory: TimeInterval = 3600
 
-    private lazy var ghPath: String? = Self.findGH()
+    private var ghPath: String? { Self.findGH() }
 
     /// Runs for the given working directories, at most one `gh` call per repo
     /// per interval.
-    func runs(forDirectories directories: [String], now: Date = Date()) -> [CIRun] {
-        guard ghPath != nil else { return [] }
+    func runs(forDirectories directories: [String], now: Date = Date()) async -> [CIRun] {
+        guard ghPath != nil else {
+            IntegrationHealthStore.report("ci", state: .toolMissing)
+            return []
+        }
         // Note: no early return on an empty directory list — the remembered
         // repos below are the whole point.
         // No `|| cached.isEmpty` escape here. The first call always fetches
@@ -52,7 +56,8 @@ actor CIStatusProvider {
                 if let known { slugs.append(known) }
                 continue
             }
-            let slug = remoteSlug(in: dir)
+            let slug = await remoteSlug(in: dir)
+            if Task.isCancelled { lastFetch = .distantPast; return cached }
             slugByDirectory[dir] = slug
             if let slug { slugs.append(slug) }
         }
@@ -66,11 +71,29 @@ actor CIStatusProvider {
         var seen = Set<String>()
         let unique = (slugs + remembered).filter { seen.insert($0).inserted }.prefix(2)
 
+        guard !unique.isEmpty else {
+            IntegrationHealthStore.report("ci", state: .notChecked)
+            cached = []
+            return cached
+        }
+
         var found: [CIRun] = []
-        for slug in unique { found.append(contentsOf: fetchRuns(repo: slug)) }
+        var failure: IntegrationHealthState?
+        for slug in unique {
+            if Task.isCancelled { lastFetch = .distantPast; return cached }
+            switch await fetchRuns(repo: slug) {
+            case .success(let runs): found.append(contentsOf: runs)
+            case .failure(let state): failure = state
+            }
+        }
+        if Task.isCancelled { lastFetch = .distantPast; return cached }
         // Age them out here rather than at render time: an empty result has to
         // reach the card so it can take itself off the row.
         cached = CIRun.ordered(CIRun.current(found, now: now))
+        if failure == nil { lastSuccessfulFetch = now }
+        IntegrationHealthStore.report("ci", state: failure ?? .ready,
+                                      updatedAt: lastSuccessfulFetch,
+                                      retryAt: failure == .retrying ? now.addingTimeInterval(pollInterval) : nil)
         return cached
     }
 
@@ -89,6 +112,7 @@ actor CIStatusProvider {
     func reset() {
         cached = []
         lastFetch = .distantPast
+        lastSuccessfulFetch = nil
         slugByDirectory.removeAll()
         recentRepos.removeAll()
     }
@@ -108,21 +132,37 @@ actor CIStatusProvider {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    private func remoteSlug(in directory: String) -> String? {
-        guard let out = run("/usr/bin/git",
-                            ["-C", directory, "remote", "get-url", "origin"]) else { return nil }
-        return CIRun.repoSlug(fromRemote: out)
+    private func remoteSlug(in directory: String) async -> String? {
+        guard let out = try? await ProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: ["-C", directory, "remote", "get-url", "origin"],
+            timeout: 5, outputLimitBytes: 16 * 1024) else { return nil }
+        return CIRun.repoSlug(fromRemote: String(decoding: out.stdout, as: UTF8.self))
     }
 
-    private func fetchRuns(repo: String) -> [CIRun] {
-        guard let ghPath,
-              let out = run(ghPath, ["run", "list", "-R", repo, "--limit", "3", "--json",
-                                     "workflowName,status,conclusion,createdAt,updatedAt,url,headBranch"]),
-              let data = out.data(using: .utf8),
-              let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else { return [] }
+    private enum FetchOutcome {
+        case success([CIRun])
+        case failure(IntegrationHealthState)
+    }
+
+    private func fetchRuns(repo: String) async -> FetchOutcome {
+        guard let ghPath else { return .failure(.toolMissing) }
+        let result: ProcessResult
+        do {
+            result = try await ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: ghPath),
+                arguments: ["run", "list", "-R", repo, "--limit", "3", "--json",
+                            "workflowName,status,conclusion,createdAt,updatedAt,url,headBranch"],
+                timeout: 8, outputLimitBytes: 256 * 1024)
+        } catch ProcessRunnerError.nonzeroExit(_, let stdout, let stderr) {
+            return .failure(Self.classifyGHFailure(String(decoding: stderr + stdout, as: UTF8.self)))
+        } catch {
+            return .failure(.retrying)
+        }
+        guard let items = try? JSONSerialization.jsonObject(with: result.stdout) as? [[String: Any]]
+        else { return .failure(.retrying) }
         let iso = ISO8601DateFormatter()
-        return items.compactMap { item in
+        let runs: [CIRun] = items.compactMap { item in
             guard let url = item["url"] as? String else { return nil }
             let created = (item["createdAt"] as? String).flatMap { iso.date(from: $0) } ?? Date()
             // `updatedAt` is the finish time once a run completes, and what a
@@ -138,27 +178,21 @@ actor CIStatusProvider {
                 started: created,
                 updated: updated)
         }
+        return .success(runs)
     }
 
-    /// A hung `gh` must not wedge the card forever, so the process is given a
-    /// deadline and killed past it.
-    private func run(_ path: String, _ args: [String], timeout: TimeInterval = 8) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = args
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return nil }
-
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning, Date() < deadline { usleep(50_000) }
-        if process.isRunning { process.terminate(); return nil }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard process.terminationStatus == 0 else { return nil }
-        let text = String(decoding: data, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
+    /// Only label failures when gh provides a specific, recognizable reason.
+    /// A network/server error remains retrying rather than claiming sign-out.
+    nonisolated static func classifyGHFailure(_ stderr: String) -> IntegrationHealthState {
+        let message = stderr.lowercased()
+        if message.contains("gh auth login") || message.contains("not logged in")
+            || message.contains("authentication failed") || message.contains("http 401") {
+            return .signedOut
+        }
+        if message.contains("http 403") || message.contains("insufficient scopes")
+            || message.contains("resource not accessible by integration") {
+            return .permissionNeeded
+        }
+        return .retrying
     }
 }

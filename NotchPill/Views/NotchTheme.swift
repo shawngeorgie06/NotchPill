@@ -43,6 +43,82 @@ enum NotchMotion {
         reduceMotion ? floor : .easeIn(duration: 0.16)
     }
 
+    /// Seconds for the hover surface's spring to complete one undamped period.
+    static let surfaceResponse: TimeInterval = 0.21
+
+    /// Critical damping: no overshoot, because progress above 1 would draw the
+    /// pill wider than the window that clips it, and it is still a spring, so
+    /// retargeting mid-flight keeps the current velocity.
+    static let surfaceDamping: Double = 1
+
+    /// When the surface spring has covered all but the last half point of a
+    /// full-width travel. A critically damped spring leaves
+    /// `(1 + wt) * e^(-wt)` of the travel, with `w = 2 pi / response`; 1.7
+    /// responses is wt of about 10.7, ~0.0003 remaining. Collapse finalisation
+    /// and the window's deferred shrink both wait for this one number, so the
+    /// curve can be retuned without them drifting.
+    static let surfaceSettleDuration: TimeInterval = surfaceResponse * 1.7
+
+    /// The hover surface growing out of, and shrinking back into, the notch.
+    ///
+    /// A spring rather than a fixed timing curve: a curve retargeted by a
+    /// reversal restarts from rest, so hover in, out, in jerks to a stop and
+    /// sets off again. A spring carries its velocity into the new target.
+    static func surface(reduceMotion: Bool) -> Animation {
+        reduceMotion ? floor : .spring(surfaceSpring)
+    }
+
+    /// The spring itself, so timings derived from it (the reveal window, the
+    /// chips' cross-fade) are read off SwiftUI's own curve, not a model of it.
+    static let surfaceSpring = Spring(response: surfaceResponse, dampingRatio: surfaceDamping)
+
+    /// Seconds into an opening at which the surface reaches `progress`.
+    static func surfaceTime(reaching progress: Double) -> TimeInterval {
+        var low: TimeInterval = 0
+        var high = surfaceSettleDuration
+        for _ in 0..<40 {
+            let mid = (low + high) / 2
+            if surfaceSpring.value(target: 1.0, time: mid) < progress { low = mid } else { high = mid }
+        }
+        return high
+    }
+
+    /// Surface progress below which expanded content stays hidden: the pill is
+    /// still close to notch width and copy drawn into it is only clipped.
+    static let revealStart: CGFloat = 0.45
+
+    /// Surface progress at which expanded content is fully opaque.
+    static let revealEnd: CGFloat = 0.95
+
+    /// Expanded content opacity for a given surface progress.
+    ///
+    /// A pure function of progress, with no notion of direction: opening, the
+    /// copy appears once the surface has made room; closing, it is gone before
+    /// the edge arrives; and a reversal mid-flight just walks back along the
+    /// same curve instead of restarting a delayed fade.
+    static func contentOpacity(surfaceProgress: CGFloat) -> Double {
+        let t = min(1, max(0, (surfaceProgress - revealStart) / (revealEnd - revealStart)))
+        return Double(t * t * (3 - 2 * t))
+    }
+
+    /// The collapsed chips leaving as the expanded card arrives.
+    ///
+    /// Timed to the window in which the card's `SurfaceReveal` takes it from
+    /// clear to opaque, so the two cross-fade: earlier leaves an empty pill,
+    /// later stacks both sets of text on top of each other.
+    static func chipsYield(reduceMotion: Bool) -> Animation {
+        if reduceMotion { return floor }
+        let start = surfaceTime(reaching: Double(revealStart))
+        let end = surfaceTime(reaching: Double(revealEnd))
+        return .easeInOut(duration: end - start).delay(start)
+    }
+
+    /// Chips return only after the expanded tree has finished collapsing.
+    /// No delay: a re-hover can immediately hand them back to the opening.
+    static func chipsReturn(reduceMotion: Bool) -> Animation {
+        reduceMotion ? floor : .easeIn(duration: 0.14)
+    }
+
     /// The gap between one object arriving and the next on the same card.
     /// Long enough that three tiles read as three arrivals; short enough that
     /// the last is settled before you have finished reading the first.
@@ -70,6 +146,45 @@ enum NotchMotion {
     /// Not zero: a true zero-duration animation still lets SwiftUI batch the
     /// change, and matching the existing constant keeps every surface in step.
     private static let floor = Animation.linear(duration: 0.01)
+}
+
+/// Applies `NotchMotion.contentOpacity` to an *animated* progress value.
+///
+/// `.opacity(f(progress))` would only see the model value jump from 0 to 1 and
+/// interpolate opacity linearly between them; exposing progress as animatable
+/// data makes SwiftUI feed each in-flight sample through `f`, so the fade is
+/// shaped by the surface's real position.
+struct SurfaceReveal: ViewModifier, Animatable {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content.opacity(NotchMotion.contentOpacity(surfaceProgress: progress))
+    }
+}
+
+/// The hover's two transactions, layered in the only order that works.
+///
+/// One state change flips both values on collapse. SwiftUI lets the
+/// `.animation` nearest the leaves win, so the surface curve must sit inside
+/// the cross-fade: the other way round the chips' short ease-in hijacks the
+/// surface, its mask and the card's reveal, and the shrink stops being the
+/// interruptible spring it is meant to be.
+struct HoverTransactions: ViewModifier {
+    let progress: CGFloat
+    let isExpanded: Bool
+    let surface: Animation
+    let crossfade: Animation
+
+    func body(content: Content) -> some View {
+        content
+            .animation(surface, value: progress)
+            .animation(crossfade, value: isExpanded)
+    }
 }
 
 /// An object arriving on a card: it fades in and rises `NotchMotion.rise`
@@ -192,7 +307,8 @@ struct NotchPaintedFill: View {
         .overlay(
             shape.stroke(
                 LinearGradient(
-                    colors: [.white.opacity(lit ? NotchOpacity.secondary : NotchOpacity.highlight),
+                    // Painted sheen keeps its own opacity as text gets brighter.
+                    colors: [.white.opacity(lit ? 0.60 : NotchOpacity.highlight),
                              .white.opacity(NotchOpacity.hairline)],
                     startPoint: .top, endPoint: .bottom
                 ),
@@ -238,7 +354,7 @@ enum NotchSpace {
     static let hero: CGFloat = 72
 
     /// A card header's glyph well: the small tinted square every card opens
-    /// with, sized to sit on one 13pt title line. Smaller than `well`, which
+    /// with, sized to sit on one title line. Smaller than `well`, which
     /// is a tap target; this is a mark.
     static let mark: CGFloat = 16
 
@@ -273,13 +389,13 @@ enum NotchRadius {
 /// Type roles, in unscaled points. Pass through `textSize()`, which applies the
 /// user's readability setting.
 enum NotchType {
-    static let title: CGFloat = 13
-    static let body: CGFloat = 11
-    static let caption: CGFloat = 9
+    static let title: CGFloat = 14
+    static let body: CGFloat = 12
+    static let caption: CGFloat = 10
     /// Same size as `caption` by design — it is a different *face*, not a
     /// different size, and a monospaced digit at a different size next to a
     /// proportional one is what makes a metadata row look accidental.
-    static let mono: CGFloat = 9
+    static let mono: CGFloat = 10
     /// The one number a metric card is about — a percentage, a level. Larger
     /// than a title because it is read from across the desk, not up close.
     static let display: CGFloat = 15
@@ -299,10 +415,10 @@ enum NotchOpacity {
     /// The thing the row is about.
     static let primary: Double = 1.0
     /// Supporting text you read second.
-    static let secondary: Double = 0.60
+    static let secondary: Double = 0.72
     /// Facts you consult rather than read — runtime, context, model. Keep
     /// these legible at the notch's small caption size.
-    static let tertiary: Double = 0.48
+    static let tertiary: Double = 0.60
     /// Separators and card strokes.
     static let hairline: Double = 0.08
 

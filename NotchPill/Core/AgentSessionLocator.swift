@@ -13,6 +13,53 @@ import AppKit
 /// processes is far too expensive to poll, and the answer is only ever needed
 /// at the moment someone asks for it.
 enum AgentSessionLocator {
+    /// AppleScript and tmux queries are serialized off the UI thread. The
+    /// completion always returns on main for card state updates.
+    private static let commandFocusQueue = DispatchQueue(label: "notchpill.command-focus", qos: .userInitiated)
+
+    static func focusCommand(terminalTTY: String?, bundleId: String?,
+                             completion: @escaping (Bool) -> Void) {
+        commandFocusQueue.async {
+            let focused = focus(terminalTTY: terminalTTY, bundleId: bundleId)
+            DispatchQueue.main.async { completion(focused) }
+        }
+    }
+
+    /// Focuses only the exact terminal TTY recorded by the command wrapper.
+    /// The caller may offer an explicit app-opening fallback when this returns
+    /// false; this method never guesses from a project directory or bundle id.
+    @discardableResult
+    static func focus(terminalTTY: String?, bundleId: String?) -> Bool {
+        guard let terminalTTY,
+              terminalTTY.hasPrefix("/dev/"),
+              !terminalTTY.contains("\n"),
+              !terminalTTY.contains("\r"),
+              let bundleId,
+              ["com.apple.Terminal", "com.googlecode.iterm2"].contains(bundleId) else {
+            return false
+        }
+        guard NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first != nil else {
+            return false
+        }
+
+        // tmux pane selection is exact by TTY and works independently of the
+        // terminal app that hosts it.
+        let selectedTmuxPane = TmuxLocator.focusPane(tty: terminalTTY)
+
+        if bundleId == "com.apple.Terminal",
+           runBoundedAppleScript(terminalFocusScript(tty: terminalTTY)) {
+            return true
+        }
+        if bundleId == "com.googlecode.iterm2",
+           runBoundedAppleScript(iTermFocusScript(tty: terminalTTY)) {
+            return true
+        }
+        // Selecting an inner tmux pane does not identify which terminal tab
+        // hosts its attached client. Merely activating the app could reveal a
+        // different tab, so the caller must offer the explicit app fallback.
+        _ = selectedTmuxPane
+        return false
+    }
 
     /// Bundle id of the app hosting this session, if it can be determined.
     static func hostingBundleId(forSessionId sessionId: String) -> String? {
@@ -308,18 +355,27 @@ enum AgentSessionLocator {
         return error == nil && result?.booleanValue == true
     }
 
+    private static func runBoundedAppleScript(_ source: String) -> Bool {
+        guard let output = ProcessRunner.captureForFocus("/usr/bin/osascript", ["-e", source]) else {
+            return false
+        }
+        return String(decoding: output, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() == "true"
+    }
+
     /// Exposed for a small pure test. Inputs are escaped before being placed in
     /// AppleScript, even though a real TTY cannot normally contain quotes.
     static func terminalFocusScript(tty: String) -> String {
         let escaped = escapedAppleScriptString(tty)
         return """
         tell application "Terminal"
-            activate
             repeat with terminalWindow in windows
                 repeat with terminalTab in tabs of terminalWindow
                     if tty of terminalTab is "\(escaped)" then
                         set selected tab of terminalWindow to terminalTab
                         set index of terminalWindow to 1
+                        activate
                         return true
                     end if
                 end repeat
@@ -405,7 +461,6 @@ enum AgentSessionLocator {
         let escaped = escapedAppleScriptString(tty)
         return """
         tell application "iTerm2"
-            activate
             repeat with terminalWindow in windows
                 repeat with terminalTab in tabs of terminalWindow
                     repeat with terminalSession in sessions of terminalTab
@@ -413,6 +468,7 @@ enum AgentSessionLocator {
                             tell terminalWindow to select
                             tell terminalTab to select
                             tell terminalSession to select
+                            activate
                             return true
                         end if
                     end repeat

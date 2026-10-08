@@ -9,7 +9,10 @@ import SwiftUI
 /// double-render.
 @MainActor
 final class NotchState: ObservableObject {
-    static let hoverAnimationDuration: TimeInterval = 0.28
+    /// How long the hover surface takes to finish moving. Derived from the
+    /// spring that drives it so collapse finalisation cannot outlive or cut
+    /// short the animation it is waiting for.
+    static let hoverAnimationDuration: TimeInterval = NotchMotion.surfaceSettleDuration
     /// Notifications carry text and actions, so their entrance needs a touch
     /// more time than a hover surface to read as a deliberate motion.
     static let devReadyAnimationDuration: TimeInterval = 0.36
@@ -74,6 +77,11 @@ final class NotchState: ObservableObject {
     /// controller's deferred window shrink waits exactly that long instead of
     /// cutting a longer caption collapse short.
     private(set) var devReadyMotionDuration: TimeInterval = NotchState.devReadyAnimationDuration
+    /// How long the host window must stay large after content gets smaller:
+    /// long enough for whichever surface animation is in flight, hover or peek.
+    var windowShrinkDelay: TimeInterval {
+        max(Self.hoverAnimationDuration, Self.devReadyAnimationDuration, devReadyMotionDuration)
+    }
     @Published private(set) var recentDevReadyAlerts: [DevReadyAlert] = []
     /// Agent conversations alive right now. Distinct from `devReadyAlerts`:
     /// those are events that fire once, this is a standing list.

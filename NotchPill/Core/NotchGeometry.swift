@@ -344,21 +344,46 @@ struct NotchGeometry {
     /// The window that hosts the overlay. Sized to fit the fully expanded pill when
     /// expanded; shrinks to the visible collapsed pill when not.
     func windowFrame(expanded: Bool, collapsedContentSize: CGSize, expandedContentSize: CGSize) -> CGRect {
-        if expanded {
-            let pad: CGFloat = 2
-            let width = expandedContentSize.width + pad * 2
-            let height = expandedContentSize.height + pad
-            return CGRect(x: notchRect.midX - width / 2,
-                          y: screen.frame.maxY - height,
-                          width: width,
-                          height: height)
-        }
+        Self.windowFrame(notchMidX: notchRect.midX,
+                         screenMaxY: screen.frame.maxY,
+                         contentSize: expanded ? expandedContentSize : collapsedContentSize,
+                         scale: screen.backingScaleFactor)
+    }
+
+    /// Pure core of `windowFrame`, taking the screen's scale as a plain value so
+    /// it is testable without a display. The window hangs from the top of the
+    /// screen, centred on the notch, with a little padding around the content.
+    static func windowFrame(notchMidX: CGFloat, screenMaxY: CGFloat,
+                            contentSize: CGSize, scale: CGFloat) -> CGRect {
         let pad: CGFloat = 2
-        let width = collapsedContentSize.width + pad * 2
-        let height = collapsedContentSize.height + pad
-        return CGRect(x: notchRect.midX - width / 2,
-                      y: screen.frame.maxY - height,
-                      width: width,
-                      height: height)
+        let width = contentSize.width + pad * 2
+        let height = contentSize.height + pad
+        return pixelAligned(CGRect(x: notchMidX - width / 2,
+                                   y: screenMaxY - height,
+                                   width: width,
+                                   height: height),
+                            scale: scale)
+    }
+
+    /// Snaps a window rect outward to the display's device pixels.
+    ///
+    /// A fractional origin or size puts the vector notch silhouette and its
+    /// 0.5pt rim between physical pixels, so they are resampled and render soft
+    /// or shimmer as the frame changes. Rounding outward (floor the low edges,
+    /// ceil the right edge) keeps the window from ever shrinking below the
+    /// content, and moves the centre by under half a device pixel because each
+    /// side moves by less than one. When the centre is itself on the
+    /// half-device-pixel grid (any measured notch: both edges on whole points)
+    /// floor and ceil are mirror images about it and the centre does not move
+    /// at all — which matters, because SwiftUI and the hit rects centre on the
+    /// window, not on the notch. The top edge is deliberately left alone: it
+    /// is the screen's own edge, and nudging it would open a gap above the
+    /// pill or push it off-screen.
+    static func pixelAligned(_ rect: CGRect, scale: CGFloat) -> CGRect {
+        guard scale > 0 else { return rect }
+        let minX = (rect.minX * scale).rounded(.down) / scale
+        let maxX = (rect.maxX * scale).rounded(.up) / scale
+        let minY = (rect.minY * scale).rounded(.down) / scale
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: rect.maxY - minY)
     }
 }

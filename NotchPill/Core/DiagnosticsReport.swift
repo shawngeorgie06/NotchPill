@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import EventKit
 
 /// The text you attach to a bug report.
 ///
@@ -22,7 +23,6 @@ enum DiagnosticsReport {
         var ghAvailable: Bool
         var enabledCards: [String]
         var notchScale: Double
-        var cardWeights: [String: Double]
         var logLines: String
         var home: String
         /// One line per attached display, plus where the pill decided the notch
@@ -32,6 +32,7 @@ enum DiagnosticsReport {
         /// be in a coordinate space the report otherwise never mentions.
         var displays: [String] = []
         var notchDescription: String = "unknown"
+        var integrationStates: [String] = []
     }
 
     /// Replaces the user's home directory with `~`. Their account name is the
@@ -54,15 +55,10 @@ enum DiagnosticsReport {
         Cards on        \(f.enabledCards.isEmpty ? "none" : f.enabledCards.joined(separator: ", "))
         """
 
-        if !f.cardWeights.isEmpty {
-            let weights = f.cardWeights
-                .sorted { $0.key < $1.key }
-                .map { "\($0.key)=\(String(format: "%.2f", $0.value))" }
-                .joined(separator: " ")
-            out += "\nCard widths     \(weights)"
-        }
-
         out += "\nNotch            \(f.notchDescription)"
+        if !f.integrationStates.isEmpty {
+            out += "\n\nIntegrations\n------------\n" + f.integrationStates.joined(separator: "\n")
+        }
         if !f.displays.isEmpty {
             out += "\n\nDisplays\n--------\n" + f.displays.joined(separator: "\n")
         }
@@ -78,7 +74,13 @@ enum DiagnosticsReport {
         let settings = AppSettings.shared
         var cards: [String] = []
         if settings.showExpandedAgents { cards.append("agents") }
+        if settings.showExpandedCommands { cards.append("commands") }
         if settings.showExpandedCI { cards.append("ci") }
+        if settings.showExpandedRecentActivity { cards.append("recent activity") }
+        if settings.showClaudeUsage { cards.append("Claude usage") }
+        if settings.showCursorUsage { cards.append("Cursor usage") }
+        if settings.showClipboard { cards.append("clipboard") }
+        if settings.showTerminal { cards.append("terminal") }
         if settings.showExpandedMedia { cards.append("media") }
         if settings.showExpandedActiveApp { cards.append("activeApp") }
         if settings.showExpandedCalendar { cards.append("calendar") }
@@ -89,6 +91,36 @@ enum DiagnosticsReport {
         if settings.showExpandedShelf { cards.append("shelf") }
         if settings.showExpandedClock { cards.append("clock") }
 
+        let home = NSHomeDirectory()
+        func status(_ key: String, enabled: Bool) -> String {
+            guard enabled else { return "off" }
+            guard let record = IntegrationHealthStore.shared.records[key] else { return "not checked" }
+            switch record.state {
+            case .notChecked: return "not checked"
+            case .ready: return "ready"
+            case .toolMissing: return "tool missing"
+            case .permissionNeeded: return "permission needed"
+            case .signedOut: return "signed out"
+            case .retrying: return "retrying"
+            }
+        }
+        let calendarEnabled = (settings.showCalendar && settings.showCollapsedActivity)
+            || settings.showExpandedCalendar
+        var integrations = [
+            "Claude Code CLI  \(status("claude", enabled: settings.showClaudeUsage))",
+            "Cursor usage     \(status("cursor", enabled: settings.showCursorUsage))",
+            "Codex usage      \(status("codex", enabled: settings.showExpandedAgents))",
+            "GitHub CLI       \(settings.showExpandedCI && !CIStatusProvider.hasGH ? "tool missing" : status("ci", enabled: settings.showExpandedCI))",
+            "Dev Ready        \(status("devReady", enabled: settings.showDevReadyPings))",
+        ]
+        if calendarEnabled {
+            let authorization = EKEventStore.authorizationStatus(for: .event)
+            let calendarStatus = authorization == .fullAccess ? "ready"
+                : (authorization == .notDetermined ? "not checked" : "permission needed")
+            integrations.append("Calendar         \(calendarStatus)")
+        } else {
+            integrations.append("Calendar         off")
+        }
         let facts = Facts(
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
                 as? String ?? "unknown",
@@ -98,9 +130,8 @@ enum DiagnosticsReport {
             ghAvailable: CIStatusProvider.hasGH,
             enabledCards: cards,
             notchScale: settings.notchScale,
-            cardWeights: settings.cardWeights,
             logLines: LogStore.shared.formatted,
-            home: NSHomeDirectory(),
+            home: home,
             displays: NSScreen.screens.enumerated().map { index, screen in
                 let f = screen.frame
                 let v = screen.visibleFrame
@@ -135,7 +166,8 @@ enum DiagnosticsReport {
                 return String(format: "%.0f,%.0f %.0f×%.0f on %@display%@",
                               r.origin.x, r.origin.y, r.width, r.height,
                               onMain ? "main " : "secondary ", note)
-            }())
+            }(),
+            integrationStates: integrations)
         return build(facts)
     }
 }

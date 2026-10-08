@@ -43,6 +43,34 @@ enum NotchIslandChrome {
                        startPoint: .top, endPoint: .bottom)
     }
 
+    /// Fades the rim out toward a seam with the hardware notch: nothing down
+    /// to `seamY`, easing up to full over `fade` points, untouched below.
+    /// Applied as a mask over `rim`, top-aligned.
+    ///
+    /// `rim` alone is a gradient over the whole frame, so on the expanded pill
+    /// (whose path starts at the notch's lower edge, not at y=0) the seam and
+    /// the shoulders below it were already at or above the hairline: a pale
+    /// line visible right under the cutout.
+    ///
+    /// Built from fixed-height pieces rather than gradient stops at
+    /// `seamY / height`. While the surface animates, SwiftUI interpolates the
+    /// rendered frame but lays out (and so measures) only the final one; stops
+    /// computed from that height land a long way off the seam on the early
+    /// frames of a grow. Fixed heights anchored to the top have nothing to
+    /// interpolate, so the seam stays put.
+    static func seamMask(seamY: CGFloat, fade: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: max(0, seamY))
+            LinearGradient(colors: [.clear, .white], startPoint: .top, endPoint: .bottom)
+                .frame(height: max(0, fade))
+            Color.white
+        }
+    }
+
+    /// How far below the seam the rim takes to come in — past the neck and
+    /// both halves of the shoulder.
+    static let seamFade: CGFloat = 36
+
     /// The sheen along a real top edge, gone within `NotchSpace.base`. Only
     /// drawn where the pill has one — the free-floating island on a display
     /// with no notch. The caller clips it to the surface.
@@ -55,10 +83,14 @@ enum NotchIslandChrome {
 }
 
 /// Black notch / pill surface with rounded bottom corners and a painted rim.
-struct PillSurface: View {
+struct PillSurface<Backdrop: View>: View {
     var bottomRadius: CGFloat
     /// Non-zero only where there is no hardware notch to tuck into.
     var topRadius: CGFloat = 0
+    /// Painted over the fill and under the rim (the media artwork), clipped
+    /// to the surface. It lives in here so the rim can stay on top of it and
+    /// still be drawn exactly once.
+    @ViewBuilder var backdrop: Backdrop
 
     private var shape: NotchShape {
         NotchShape(bottomRadius: bottomRadius, topRadius: topRadius)
@@ -73,24 +105,36 @@ struct PillSurface: View {
                     NotchIslandChrome.highlight.clipShape(shape)
                 }
             }
+            .overlay { backdrop.clipShape(shape) }
             .overlay {
-                shape.stroke(NotchIslandChrome.rim, lineWidth: 0.5)
+                // Inside the fill, so the whole line sits on black instead of
+                // half of it anti-aliasing against the wallpaper.
+                NotchRimStroke(shape: shape, seamY: topRadius > 0 ? nil : 0)
             }
+    }
+}
+
+extension PillSurface where Backdrop == EmptyView {
+    init(bottomRadius: CGFloat, topRadius: CGFloat = 0) {
+        self.init(bottomRadius: bottomRadius, topRadius: topRadius) { EmptyView() }
     }
 }
 
 /// The expanded, floating silhouette. The notch and the lower pill share a
 /// single path so the surface feels like it grows out of the hardware rather
 /// than two panels snapping together.
-struct ExpandedPillSurface: View {
+struct ExpandedPillSurface<Backdrop: View>: View {
     let notchWidth: CGFloat
     let notchHeight: CGFloat
     let progress: CGFloat
     var hasPhysicalNotch: Bool = true
+    var wrapsHardwareNotch: Bool = false
+    @ViewBuilder var backdrop: Backdrop
 
     private var shape: ExpandedNotchShape {
         ExpandedNotchShape(notchWidth: notchWidth, notchHeight: notchHeight,
-                           progress: progress, hasPhysicalNotch: hasPhysicalNotch)
+                           progress: progress, hasPhysicalNotch: hasPhysicalNotch,
+                           wrapsHardwareNotch: wrapsHardwareNotch)
     }
 
     var body: some View {
@@ -101,11 +145,39 @@ struct ExpandedPillSurface: View {
                     NotchIslandChrome.highlight.clipShape(shape)
                 }
             }
+            .overlay { backdrop.clipShape(shape) }
             .overlay {
                 // The rim matters more without a notch: the pill has no
                 // hardware edge to borrow, so this is the only thing separating
                 // it from a dark wallpaper.
-                shape.stroke(NotchIslandChrome.rim, lineWidth: 0.5)
+                NotchRimStroke(shape: shape, seamY: hasPhysicalNotch ? notchHeight : nil)
             }
+    }
+}
+
+extension ExpandedPillSurface where Backdrop == EmptyView {
+    init(notchWidth: CGFloat, notchHeight: CGFloat, progress: CGFloat,
+         hasPhysicalNotch: Bool = true) {
+        self.init(notchWidth: notchWidth, notchHeight: notchHeight, progress: progress,
+                  hasPhysicalNotch: hasPhysicalNotch) { EmptyView() }
+    }
+}
+
+/// The 0.5pt rim, drawn inside the silhouette. `seamY` is where the surface
+/// meets the hardware notch (nil when it has no such seam), and the rim fades
+/// to nothing there.
+private struct NotchRimStroke<S: InsettableShape>: View {
+    let shape: S
+    let seamY: CGFloat?
+
+    var body: some View {
+        let rim = shape.strokeBorder(NotchIslandChrome.rim, lineWidth: 0.5)
+        if let seamY {
+            rim.mask(alignment: .top) {
+                NotchIslandChrome.seamMask(seamY: seamY, fade: NotchIslandChrome.seamFade)
+            }
+        } else {
+            rim
+        }
     }
 }

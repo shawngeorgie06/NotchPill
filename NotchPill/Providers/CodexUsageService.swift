@@ -50,9 +50,19 @@ actor CodexUsageService {
         // re-asked every sixty seconds for as long as the app was open, wrote
         // the same line each time, and could never have succeeded — a signed
         // out account produced hours of identical log and a request a minute.
-        if givenUp { return nil }
-        if now < retryNoEarlierThan { return servedCache(now: now) }
-        if now.timeIntervalSince(lastFetch) < Self.refreshInterval { return cached }
+        if givenUp {
+            IntegrationHealthStore.report("codex", state: .signedOut)
+            return nil
+        }
+        if now < retryNoEarlierThan {
+            IntegrationHealthStore.report("codex", state: .retrying,
+                                          updatedAt: cached?.updatedAt, retryAt: retryNoEarlierThan)
+            return servedCache(now: now)
+        }
+        if now.timeIntervalSince(lastFetch) < Self.refreshInterval {
+            if let cached { IntegrationHealthStore.report("codex", state: .ready, updatedAt: cached.updatedAt) }
+            return cached
+        }
         lastFetch = now
         do {
             let fresh = try await fetch(now: now)
@@ -61,6 +71,7 @@ actor CodexUsageService {
             retryNoEarlierThan = .distantPast
             if recovered { LogStore.log("codex", "usage recovered") }
             cached = fresh
+            IntegrationHealthStore.report("codex", state: .ready, updatedAt: fresh.updatedAt)
             return fresh
         } catch let error as CodexUsageFetcher.FetchError {
             switch error {
@@ -70,15 +81,20 @@ actor CodexUsageService {
                 givenUp = true
                 cached = nil
                 LogStore.log("codex", Self.describe(error))
+                IntegrationHealthStore.report("codex", state: .signedOut)
                 return nil
             case .http, .malformedResponse:
                 let wait = backoff(now: now)
+                IntegrationHealthStore.report("codex", state: .retrying, updatedAt: cached?.updatedAt,
+                                              retryAt: now.addingTimeInterval(wait))
                 LogStore.log("codex", "usage fetch failed: \(Self.describe(error))"
                              + " — next try in \(Int(wait))s")
                 return servedCache(now: now)
             }
         } catch {
             let wait = backoff(now: now)
+            IntegrationHealthStore.report("codex", state: .retrying, updatedAt: cached?.updatedAt,
+                                          retryAt: now.addingTimeInterval(wait))
             LogStore.log("codex", "usage fetch failed: \(Self.describe(error))"
                          + " — next try in \(Int(wait))s")
             return servedCache(now: now)

@@ -32,12 +32,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller?.start()
 
         // Check GitHub for a newer release so the menu bar can offer an in-app update.
-        UpdateChecker.shared.onUpdateFound = { [weak self] _ in
-            // Rebuilding isn't needed — the menu reads live state when opened —
-            // but nudge the icon so a fresh update is noticeable.
-            self?.menuBar?.flagUpdateAvailable()
+        if UpdateChecker.shared.allowsSelfUpdate {
+            UpdateChecker.shared.onUpdateFound = { [weak self] _ in
+                // Rebuilding isn't needed — the menu reads live state when opened —
+                // but nudge the icon so a fresh update is noticeable.
+                self?.menuBar?.flagUpdateAvailable()
+            }
+            UpdateChecker.shared.start()
         }
-        UpdateChecker.shared.start()
 
         // First launch only. Settings used to open here, which showed every
         // control at once and explained none of them; the guide walks the two

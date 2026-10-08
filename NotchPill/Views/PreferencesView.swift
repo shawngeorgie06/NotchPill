@@ -1,36 +1,128 @@
 import SwiftUI
+import EventKit
 
 struct PreferencesView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var timer = TimerStore.shared
     @ObservedObject private var updates = UpdateChecker.shared
     @ObservedObject private var destinations = DestinationStore.shared
+    @ObservedObject private var integrationHealth = IntegrationHealthStore.shared
+    @State private var selectedCategory = SettingsCategory.appearance
+    @State private var searchText = ""
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    displaySection
-                    collapsedSection
-                    expandedSection
-                    cardOrderSection
-                    shelfSection
-                    tokenSection
-                    audioSection
-                    fullScreenSection
-                    systemHUDSection
-                    timerSection
-                    devReadySection
-                    shortcutsSection
-                    updatesSection
-                    generalSection
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField("Search settings", text: $searchText)
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 14)
+                    ForEach(SettingsCategory.allCases.filter(categoryMatchesSearch), id: \.self) { category in
+                        Button {
+                            selectedCategory = category
+                        } label: {
+                            Label(category.rawValue, systemImage: category.symbol)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(selectedCategory == category ? Color.accentColor.opacity(0.13) : .clear,
+                                            in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 8)
+                    }
+                    if !searchText.isEmpty,
+                       SettingsCategory.allCases.filter(categoryMatchesSearch).isEmpty {
+                        Text("No matching settings")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                    }
+                    Spacer()
                 }
-                .padding(20)
+                .frame(width: 190)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        categoryContent
+                    }
+                    .padding(20)
+                }
             }
         }
-        .frame(minWidth: 500, minHeight: 640)
+        .frame(minWidth: 760, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onChange(of: searchText) { _, value in
+            if !value.isEmpty, !categoryMatchesSearch(selectedCategory) {
+                selectedCategory = SettingsCategory.allCases.first(where: categoryMatchesSearch) ?? .appearance
+            }
+        }
+    }
+
+    private enum SettingsCategory: String, CaseIterable {
+        case appearance = "Appearance"
+        case cards = "Cards"
+        case integrations = "Developer Integrations"
+        case notifications = "Notifications"
+        case advanced = "Advanced"
+
+        var symbol: String {
+            switch self {
+            case .appearance: "paintbrush"
+            case .cards: "square.stack"
+            case .integrations: "terminal"
+            case .notifications: "bell"
+            case .advanced: "gearshape"
+            }
+        }
+    }
+
+    private func categoryMatchesSearch(_ category: SettingsCategory) -> Bool {
+        searchText.isEmpty || category.rawValue.localizedCaseInsensitiveContains(searchText)
+            || categoryKeywords(category).contains { $0.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    private func categoryKeywords(_ category: SettingsCategory) -> [String] {
+        switch category {
+        case .appearance: ["display", "size", "collapsed", "hover", "screen", "chip", "media", "clock", "app switch"]
+        case .cards: ["card", "order", "usage", "token", "calendar", "battery", "volume", "agents", "builds", "tests", "ci", "activity", "media", "timer", "clock", "cpu", "memory", "shelf", "clipboard", "terminal"]
+        case .integrations: ["developer", "agent", "terminal", "cursor", "claude", "codex", "github", "calendar", "setup", "shelf", "folder", "file", "command"]
+        case .notifications: ["ping", "sound", "reply", "reminder", "approval", "alert", "quiet", "locked"]
+        case .advanced: ["login", "update", "shortcut", "accessibility", "hud", "fullscreen", "timer", "focus", "audio", "volume", "mute", "brightness", "microphone", "reset", "title bar"]
+        }
+    }
+
+    @ViewBuilder
+    private var categoryContent: some View {
+        switch selectedCategory {
+        case .appearance:
+            if matchesSearch("Display", "screen", "size") { displaySection }
+            if matchesSearch("Collapsed Preview", "hover", "chips", "collapsed", "media", "timer", "clock", "agent", "app switch", "calendar", "file", "cpu", "memory", "battery") { collapsedSection }
+        case .cards:
+            if matchesSearch("Expanded Pill", "cards", "agents", "builds", "tests", "claude", "cursor", "ci", "activity", "media", "timer", "app", "calendar", "volume", "clock", "cpu", "memory", "battery", "shelf", "clipboard", "terminal") { expandedSection }
+            if matchesSearch("Card Order", "cards", "order", "priority") { cardOrderSection }
+            if matchesSearch("Token Usage", "tokens", "usage") { tokenSection }
+        case .integrations:
+            if matchesSearch("Integration Health", "developer", "agent", "terminal", "cursor", "claude", "codex", "github", "calendar", "setup") { integrationHealthSection }
+            if matchesSearch("Shelf", "folders", "files") { shelfSection }
+        case .notifications:
+            if matchesSearch("Dev Ready Pings", "notifications", "sound", "reply", "reminder", "approval", "alert") { devReadySection }
+        case .advanced:
+            if matchesSearch("Focus & Timer", "timer", "focus") { timerSection }
+            if matchesSearch("Audio", "volume", "mute") { audioSection }
+            if matchesSearch("Full Screen", "fullscreen", "title bar") { fullScreenSection }
+            if matchesSearch("System HUDs", "hud", "brightness", "microphone") { systemHUDSection }
+            if matchesSearch("Keyboard Shortcuts", "shortcut", "accessibility") { shortcutsSection }
+            if matchesSearch("Updates", "update", "version") { updatesSection }
+            if matchesSearch("General", "login", "reset") { generalSection }
+        }
+    }
+
+    private func matchesSearch(_ terms: String...) -> Bool {
+        searchText.isEmpty || terms.contains { $0.localizedCaseInsensitiveContains(searchText) }
     }
 
     // MARK: - Sections
@@ -357,43 +449,219 @@ struct PreferencesView: View {
 
     private var cardOrderSection: some View {
         let order = settings.enabledCardOrder
-        let limit = NotchContentLayout.visibleCardLimit(
-            forUserScale: CGFloat(settings.notchScale))
         return SettingsPanel(title: "Card Order",
-                             subtitle: "Drag to choose which cards you see first") {
-            Text("Only the cards you have switched on are listed. At your pill size the "
-                 + "expanded notch draws at most \(limit) of them, so anything below the "
-                 + "line is only reached when the cards above it have nothing to say.")
+                             subtitle: "Drag to choose which card opens first") {
+            Text("Every enabled card stays available. Drag to set the order, or pick a card to keep in focus.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             List {
                 ForEach(Array(order.enumerated()), id: \.element) { index, kind in
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(spacing: 8) {
-                            Text("\(index + 1)")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .frame(width: 18, alignment: .trailing)
-                            Text(ExpandedActivity.allKinds.first { $0.kind == kind }?.label ?? kind)
-                                .foregroundStyle(index < limit ? .primary : .secondary)
-                            Spacer()
-                            Image(systemName: "line.3.horizontal")
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(.vertical, 1)
-                        // The cut is the whole reason a card goes missing, so
-                        // it is drawn rather than left to be worked out from a
-                        // number in a paragraph.
-                        if index == limit - 1, order.count > limit {
-                            Divider().padding(.top, 4)
-                        }
+                    HStack(spacing: 8) {
+                        Text("\(index + 1)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18, alignment: .trailing)
+                        Text(ExpandedActivity.allKinds.first { $0.kind == kind }?.label ?? kind)
+                        Spacer()
+                        Image(systemName: "line.3.horizontal")
+                            .foregroundStyle(.tertiary)
                     }
+                    .padding(.vertical, 1)
                 }
                 .onMove { settings.moveEnabledCards(from: $0, to: $1) }
             }
             .frame(height: 260)
             .listStyle(.plain)
             Button("Reset to default order") { settings.resetCardOrder() }
+        }
+    }
+
+    private var integrationHealthSection: some View {
+        SettingsPanel(title: "Integration Health", subtitle: "Connection state from enabled features and saved results") {
+            let claudeCache = UserDefaults.standard.dictionary(forKey: "claudeUsageCache")
+            let cursorCache = UserDefaults.standard.dictionary(forKey: "cursorUsageCache")
+            IntegrationHealthRow(name: "Claude Code usage", enabled: settings.showClaudeUsage,
+                status: healthLabel("claude", enabled: settings.showClaudeUsage, cache: claudeCache),
+                guidance: recoveryGuidance("claude", fallback: "Uses the Claude Code /usage command with its existing sign-in."),
+                updatedAt: integrationHealth.records["claude"]?.updatedAt ?? cacheDate(claudeCache))
+            IntegrationHealthRow(name: "Cursor usage", enabled: settings.showCursorUsage,
+                status: healthLabel("cursor", enabled: settings.showCursorUsage, cache: cursorCache),
+                guidance: recoveryGuidance("cursor", fallback: "Usage status appears after Cursor's saved session has been used."),
+                updatedAt: integrationHealth.records["cursor"]?.updatedAt ?? cacheDate(cursorCache))
+            IntegrationHealthRow(name: "Codex usage", enabled: settings.showExpandedAgents,
+                status: healthLabel("codex", enabled: settings.showExpandedAgents),
+                guidance: recoveryGuidance("codex", fallback: "Usage status appears after a Codex quota has been fetched."),
+                updatedAt: integrationHealth.records["codex"]?.updatedAt)
+            IntegrationHealthRow(name: "GitHub CLI / CI", enabled: settings.showExpandedCI,
+                status: healthLabel("ci", enabled: settings.showExpandedCI),
+                guidance: recoveryGuidance("ci", fallback: "Status follows GitHub CLI results for repositories NotchPill is already watching."),
+                updatedAt: integrationHealth.records["ci"]?.updatedAt)
+            let calendarStatus = EKEventStore.authorizationStatus(for: .event)
+            let calendarEnabled = (settings.showCalendar && settings.showCollapsedActivity)
+                || settings.showExpandedCalendar
+            IntegrationHealthRow(name: "Calendar", enabled: calendarEnabled,
+                status: !calendarEnabled ? "Off" : (calendarStatus == .fullAccess ? "Ready"
+                    : (calendarStatus == .notDetermined ? "Not checked yet" : "Permission needed")),
+                guidance: "Calendar access is checked only while a calendar card is enabled. Change access in System Settings → Privacy & Security → Calendars.",
+                updatedAt: nil)
+            IntegrationHealthRow(name: "Accessibility shortcuts", enabled: true,
+                status: AccessibilityAuthorization.isGranted ? "Ready" : "Permission needed",
+                guidance: "Grant Accessibility access in System Settings to use the keyboard shortcuts.",
+                updatedAt: nil)
+            IntegrationHealthRow(name: "Developer activity signals", enabled: settings.showDevReadyPings,
+                status: healthLabel("devReady", enabled: settings.showDevReadyPings),
+                guidance: "Listens for local NotchPill signal files and developer activity notifications.",
+                updatedAt: nil)
+            Divider()
+            Text("Cached usage values keep their original update time. This panel reads cache timestamps and integration availability; it never reads account credentials.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DevCommandSetupPanel()
+        }
+    }
+
+    private func cacheDate(_ cache: [String: Any]?) -> Date? {
+        guard let stamp = cache?["at"] as? Double else { return nil }
+        return Date(timeIntervalSince1970: stamp)
+    }
+
+    private func recoveryGuidance(_ key: String, fallback: String) -> String {
+        guard let record = integrationHealth.records[key] else { return fallback }
+        switch record.state {
+        case .signedOut:
+            switch key {
+            case "claude": return "Open Claude Code and sign in again, then check /usage."
+            case "cursor": return "Sign in again in Cursor, then restart NotchPill to recheck its saved session."
+            case "codex": return "Sign in again in Codex, then restart NotchPill to recheck usage."
+            case "ci": return "Run gh auth login in your terminal, then reopen your repository."
+            default: return fallback
+            }
+        case .retrying:
+            if let retryAt = record.retryAt {
+                return "The last check failed. Next attempt: \(retryAt.formatted(date: .omitted, time: .standard))."
+            }
+            return "The last check failed. NotchPill will try again automatically."
+        case .permissionNeeded:
+            return key == "claude"
+                ? "Your Claude Code sign-in cannot read usage. Sign in again with account usage access."
+                : "This integration needs permission. Check access in the connected application."
+        case .toolMissing:
+            if key == "ci" { return "Install GitHub CLI to show repository checks." }
+            if key == "claude" { return "Install the Claude Code CLI, then run /usage after signing in." }
+            return fallback
+        case .ready, .notChecked: return fallback
+        }
+    }
+
+    private func healthLabel(_ key: String, enabled: Bool, cache: [String: Any]? = nil) -> String {
+        guard enabled else { return "Off" }
+        guard let record = integrationHealth.records[key] else { return "Not checked yet" }
+        switch record.state {
+        case .notChecked: return "Not checked yet"
+        case .ready:
+            let updated = record.updatedAt ?? cacheDate(cache)
+            guard let updated else { return "Ready" }
+            return Date().timeIntervalSince(updated) > 60 ? "Last updated" : "Ready"
+        case .toolMissing: return "Tool missing"
+        case .permissionNeeded: return "Permission needed"
+        case .signedOut: return "Signed out"
+        case .retrying: return "Retrying"
+        }
+    }
+
+    private struct IntegrationHealthRow: View {
+        let name: String
+        let enabled: Bool
+        let status: String
+        let guidance: String
+        let updatedAt: Date?
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(name).font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text(status)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(status == "Ready" ? .green : (enabled ? .orange : .secondary))
+                }
+                Text(guidance)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let updatedAt {
+                    Text("Last updated \(updatedAt.formatted(date: .abbreviated, time: .shortened))\(Date().timeIntervalSince(updatedAt) > 300 ? " · cached" : "")")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private struct DevCommandSetupPanel: View {
+        @State private var destination = ""
+        @State private var message: String?
+
+        private var selectedURL: URL? {
+            guard !destination.isEmpty else { return nil }
+            return URL(fileURLWithPath: destination, isDirectory: true)
+        }
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Developer command line tools")
+                    .font(.subheadline.weight(.semibold))
+                Text("Install the bundled `notchpill` command into a folder already on your PATH. NotchPill will not edit your shell configuration.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Text(destination.isEmpty ? "Choose a PATH folder" : destination)
+                        .font(.caption.monospaced())
+                        .lineLimit(1)
+                        .foregroundStyle(destination.isEmpty ? .secondary : .primary)
+                    Spacer()
+                    Button("Choose…") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseDirectories = true
+                        panel.canChooseFiles = false
+                        panel.allowsMultipleSelection = false
+                        panel.prompt = "Use Folder"
+                        if panel.runModal() == .OK, let url = panel.url {
+                            destination = url.path
+                            message = nil
+                        }
+                    }
+                }
+                HStack {
+                    Button("Install command") { install() }
+                        .disabled(selectedURL == nil)
+                    if let selectedURL, DevCommandCLISetup.isInstalled(in: selectedURL) {
+                        Label("Installed", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
+                    Spacer()
+                    Button("Copy examples") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(DevCommandCLISetup.examples, forType: .string)
+                        message = "Examples copied."
+                    }
+                }
+                if let message {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 4)
+        }
+
+        private func install() {
+            guard let selectedURL else { return }
+            do {
+                try DevCommandCLISetup.install(to: selectedURL)
+                message = "Installed to \(selectedURL.path)."
+            } catch {
+                message = "Could not install: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -525,6 +793,13 @@ struct PreferencesView: View {
 
     private var updatesSection: some View {
         SettingsPanel(title: "Updates", subtitle: "Install new versions without leaving the app") {
+            if Bundle.main.bundleIdentifier == "com.local.notchpill.dev" {
+                Label("Updates are disabled for the Dev build.", systemImage: "info.circle")
+                    .foregroundStyle(.secondary)
+                Text("The Dev build stays on its development channel. Stable releases are available from the project download page.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
             Toggle("Check for updates automatically", isOn: $settings.autoCheckUpdates)
             if let update = updates.available {
                 HStack(spacing: 10) {
@@ -550,6 +825,7 @@ struct PreferencesView: View {
             }
             if let error = updates.lastError {
                 Text(error).font(.caption).foregroundStyle(.red)
+            }
             }
         }
     }

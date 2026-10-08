@@ -56,28 +56,51 @@ final class PTYSession {
                shell: String = PTYSession.loginShell()) -> Bool {
         guard !isRunning else { return true }
 
+        // Prepare every allocation and borrowed buffer before forking. The
+        // child can inherit runtime/allocator locks held by vanished threads.
+        var ownedStrings: [UnsafeMutablePointer<CChar>] = []
+        defer { ownedStrings.forEach { free($0) } }
+        func duplicate(_ string: String) -> UnsafeMutablePointer<CChar>? {
+            guard let pointer = strdup(string) else { return nil }
+            ownedStrings.append(pointer)
+            return pointer
+        }
+        guard let shellPointer = duplicate(shell),
+              let namePointer = duplicate("-" + (shell as NSString).lastPathComponent)
+        else { return false }
+        var directoryPointer: UnsafeMutablePointer<CChar>?
+        if let directory, !directory.isEmpty {
+            guard let pointer = duplicate(directory) else { return false }
+            directoryPointer = pointer
+        }
+
+        let argv = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: 2)
+        argv.initialize(repeating: nil, count: 2)
+        argv[0] = namePointer
+        defer { argv.deinitialize(count: 2); argv.deallocate() }
+
+        let environment = Self.environment(from: ProcessInfo.processInfo.environment)
+        let environmentCount = environment.count + 1
+        let envp = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: environmentCount)
+        envp.initialize(repeating: nil, count: environmentCount)
+        defer { envp.deinitialize(count: environmentCount); envp.deallocate() }
+        for (index, entry) in environment.enumerated() {
+            guard let pointer = duplicate("\(entry.key)=\(entry.value)") else { return false }
+            envp[index] = pointer
+        }
+
         var size = winsize(ws_row: UInt16(max(1, rows)), ws_col: UInt16(max(1, columns)),
                            ws_xpixel: 0, ws_ypixel: 0)
         var primaryFD: Int32 = -1
-        let pid = withUnsafeMutablePointer(to: &size) { sizePointer in
-            forkpty(&primaryFD, nil, nil, sizePointer)
-        }
+        let pid = forkpty(&primaryFD, nil, nil, &size)
 
         if pid < 0 { return false }
 
         if pid == 0 {
-            // Child. Only async-signal-safe calls belong here — no Swift
-            // allocation, no Foundation — so the environment is built before
-            // the fork and only exec'd afterwards.
-            if let directory, !directory.isEmpty { _ = directory.withCString { chdir($0) } }
-            let env = Self.environment(from: ProcessInfo.processInfo.environment)
-            let envStrings = env.map { "\($0.key)=\($0.value)" }
-            var envPointers: [UnsafeMutablePointer<CChar>?] =
-                envStrings.map { strdup($0) }
-            envPointers.append(nil)
-            let name = (shell as NSString).lastPathComponent
-            var argv: [UnsafeMutablePointer<CChar>?] = [strdup("-" + name), nil]
-            _ = shell.withCString { execve($0, &argv, &envPointers) }
+            // Only prepared C pointers and async-signal-safe calls here.
+            // _exit also bypasses all Swift cleanup if exec fails.
+            if let directoryPointer { _ = chdir(directoryPointer) }
+            execve(shellPointer, argv, envp)
             _exit(127)
         }
 

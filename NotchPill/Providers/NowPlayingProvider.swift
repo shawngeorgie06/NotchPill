@@ -15,6 +15,8 @@ final class NowPlayingProvider {
     private var lastArtworkURL: String?
     private var lastArtworkImage: NSImage?
     private var pollTimer: Timer?
+    private var transportTasks: [UUID: Task<Void, Never>] = [:]
+    private var commandGeneration: UInt64 = 0
 
     private static let scriptableBundleIDs: Set<String> = [
         "com.apple.Music",
@@ -33,6 +35,9 @@ final class NowPlayingProvider {
     }
 
     func stop() {
+        commandGeneration &+= 1
+        transportTasks.values.forEach { $0.cancel() }
+        transportTasks.removeAll()
         pollTimer?.invalidate()
         pollTimer = nil
         bridge.stop()
@@ -73,7 +78,9 @@ final class NowPlayingProvider {
     private func shouldSkipDelivery(_ np: NowPlaying?) -> Bool {
         guard np == lastDelivered else { return false }
         switch (lastDelivered?.artwork, np?.artwork) {
-        case (nil, nil), (.some, .some) where lastDelivered?.artwork === np?.artwork:
+        case (nil, nil):
+            return true
+        case (.some, .some) where lastDelivered?.artwork === np?.artwork:
             return true
         default:
             return false
@@ -157,12 +164,22 @@ final class NowPlayingProvider {
     func previous() { command(.previous, appleScript: "previous track") }
 
     private func command(_ command: Command, appleScript verb: String) {
-        if bridge.send(command: command.rawValue) { return }
-        scriptQueue.async { [weak self] in
+        let id = UUID()
+        let generation = commandGeneration
+        transportTasks[id] = Task { [weak self] in
             guard let self else { return }
-            for bundleID in Self.scriptableBundleIDs {
-                let appName = (bundleID == "com.spotify.client") ? "Spotify" : "Music"
-                if self.runAppleScript("tell application \"\(appName)\" to \(verb)") != nil { break }
+            let sent = await self.bridge.send(command: command.rawValue)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.transportTasks[id] = nil
+                guard self.commandGeneration == generation, !sent else { return }
+                self.scriptQueue.async { [weak self] in
+                    guard let self else { return }
+                    for bundleID in Self.scriptableBundleIDs {
+                        let appName = (bundleID == "com.spotify.client") ? "Spotify" : "Music"
+                        if self.runAppleScript("tell application \"\(appName)\" to \(verb)") != nil { break }
+                    }
+                }
             }
         }
     }

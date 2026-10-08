@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Darwin
 
 /// Reads now-playing metadata via the mediaremote-adapter Perl bridge.
 /// Direct MediaRemote calls return nil inside signed app bundles on macOS 15.4+;
@@ -8,8 +9,12 @@ final class MediaRemoteBridge {
     var onUpdate: ((NowPlaying?) -> Void)?
 
     private var streamProcess: Process?
-    private var stdoutPipe: Pipe?
     private var readSource: DispatchSourceRead?
+    /// Stream parser state is confined to workQueue. The generation also
+    /// prevents a cancelled source from delivering a queued stale event.
+    private var activeStreamGeneration: UInt64 = 0
+    /// Lifecycle state and this counter are confined to the main thread.
+    private var streamGeneration: UInt64 = 0
     private var lineBuffer = Data()
     private var accumulatedPayload: [String: Any] = [:]
     private var cachedArtwork: NSImage?
@@ -21,6 +26,9 @@ final class MediaRemoteBridge {
     private let artworkQueue = DispatchQueue(label: "notchpill.mediaremote.artwork")
     /// Track we're currently fetching artwork for (owned by `artworkQueue`).
     private var artworkInFlightKey: String?
+    /// Cancels the exact `get` subprocess when playback changes or the bridge
+    /// stops; stale queued retries are rejected by artworkInFlightKey.
+    private var artworkTask: Task<Void, Never>?
     /// Whether the bridge is meant to be running, as opposed to merely not
     /// running. Without it a restart cannot tell a crash apart from `stop()`
     /// and would resurrect the adapter after a deliberate shutdown.
@@ -30,9 +38,33 @@ final class MediaRemoteBridge {
     private var restartAttempts = 0
     private static let maxRestartDelay: TimeInterval = 30
 
+    /// Kept as an internal value so tests can exercise child exit and parent
+    /// death with harmless synthetic processes.
+    nonisolated static let supervisorScript = #"""
+parent="$1"; perl="$2"; script="$3"; framework="$4"
+"$perl" "$script" "$framework" stream &
+child=$!
+(
+  while kill -0 "$parent" 2>/dev/null; do sleep 1; done
+  kill "$child" 2>/dev/null || true
+) &
+watcher=$!
+cleanup() {
+  kill "$child" "$watcher" 2>/dev/null || true
+  wait "$child" 2>/dev/null || true
+  wait "$watcher" 2>/dev/null || true
+}
+trap 'cleanup; exit 0' HUP INT TERM
+wait "$child"
+status=$?
+cleanup
+exit "$status"
+"""#
+
     private static let logMedia = ProcessInfo.processInfo.environment["NOTCHPILL_LOG_NOWPLAYING"] == "1"
 
     func start() {
+        assert(Thread.isMainThread)
         shouldRun = true
         guard streamProcess == nil else { return }
         guard let paths = bundledPaths() else {
@@ -40,21 +72,22 @@ final class MediaRemoteBridge {
             onUpdate?(nil)
             return
         }
+        // Keep a small supervisor as the direct child. It owns the Perl stream,
+        // forwards its output, and stops that exact child if this app is killed
+        // before stop() can run. No process-name matching or global adapter kill
+        // is needed, and normal termination of the supervisor also reaps Perl.
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        process.arguments = [
-            paths.script.path,
-            paths.framework.path,
-            "stream",
-        ]
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", Self.supervisorScript, "notchpill-media-supervisor",
+                             String(getpid()), "/usr/bin/perl", paths.script.path, paths.framework.path]
         process.currentDirectoryURL = paths.script.deletingLastPathComponent()
 
         let pipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
         process.terminationHandler = { [weak self] proc in
             if Self.logMedia { print("NOWPLAYING: adapter stream exited \(proc.terminationStatus)") }
-            DispatchQueue.main.async { self?.handleStreamTerminated() }
+            DispatchQueue.main.async { self?.handleStreamTerminated(proc) }
         }
 
         do {
@@ -66,14 +99,24 @@ final class MediaRemoteBridge {
         }
 
         streamProcess = process
-        stdoutPipe = pipe
+        streamGeneration &+= 1
+        let generation = streamGeneration
+        workQueue.async { [weak self] in
+            guard let self else { return }
+            self.activeStreamGeneration = generation
+            self.lineBuffer.removeAll(keepingCapacity: false)
+            self.accumulatedPayload.removeAll(keepingCapacity: false)
+            self.cachedArtwork = nil
+            self.cachedArtworkKey = nil
+            self.cachedArtworkTrackKey = nil
+        }
 
         let source = DispatchSource.makeReadSource(fileDescriptor: pipe.fileHandleForReading.fileDescriptor, queue: workQueue)
         source.setEventHandler { [weak self] in
-            self?.readAvailableOutput()
+            self?.readAvailableOutput(from: pipe.fileHandleForReading, generation: generation)
         }
-        source.setCancelHandler { [weak self] in
-            try? self?.stdoutPipe?.fileHandleForReading.close()
+        source.setCancelHandler {
+            try? pipe.fileHandleForReading.close()
         }
         source.resume()
         readSource = source
@@ -82,35 +125,44 @@ final class MediaRemoteBridge {
     }
 
     func stop() {
+        assert(Thread.isMainThread)
         shouldRun = false
         restartAttempts = 0
+        streamGeneration &+= 1
         readSource?.cancel()
         readSource = nil
         if let streamProcess, streamProcess.isRunning {
             streamProcess.terminate()
         }
         streamProcess = nil
-        stdoutPipe = nil
-        lineBuffer.removeAll(keepingCapacity: false)
-        accumulatedPayload.removeAll(keepingCapacity: false)
-        cachedArtwork = nil
-        cachedArtworkKey = nil
-        cachedArtworkTrackKey = nil
-        artworkQueue.async { [weak self] in self?.artworkInFlightKey = nil }
+        workQueue.async { [weak self] in
+            guard let self else { return }
+            self.activeStreamGeneration = 0
+            self.lineBuffer.removeAll(keepingCapacity: false)
+            self.accumulatedPayload.removeAll(keepingCapacity: false)
+            self.cachedArtwork = nil
+            self.cachedArtworkKey = nil
+            self.cachedArtworkTrackKey = nil
+        }
+        artworkQueue.async { [weak self] in
+            self?.artworkTask?.cancel()
+            self?.artworkTask = nil
+            self?.artworkInFlightKey = nil
+        }
     }
 
     @discardableResult
-    func send(command: Int) -> Bool {
+    func send(command: Int) async -> Bool {
         guard let paths = bundledPaths() else { return false }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        process.arguments = [paths.script.path, paths.framework.path, "send", String(command)]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
         do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
+            _ = try await ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/perl"),
+                arguments: [paths.script.path, paths.framework.path, "send", String(command)],
+                currentDirectoryURL: paths.script.deletingLastPathComponent(),
+                timeout: 5,
+                outputLimitBytes: 16 * 1024
+            )
+            return true
         } catch {
             return false
         }
@@ -128,11 +180,18 @@ final class MediaRemoteBridge {
     /// Restarting is safe because the stream re-sends the current track the
     /// moment it connects, so a recovered bridge repopulates the card without
     /// waiting for the user to press anything.
-    private func handleStreamTerminated() {
+    private func handleStreamTerminated(_ process: Process) {
+        guard streamProcess === process else { return }
         streamProcess = nil
+        streamGeneration &+= 1
         readSource?.cancel()
         readSource = nil
-        stdoutPipe = nil
+        workQueue.async { [weak self] in
+            guard let self else { return }
+            self.activeStreamGeneration = 0
+            self.lineBuffer.removeAll(keepingCapacity: false)
+            self.accumulatedPayload.removeAll(keepingCapacity: false)
+        }
         // A deliberate `stop()` must stay stopped.
         guard shouldRun else { return }
         restartAttempts += 1
@@ -162,26 +221,27 @@ final class MediaRemoteBridge {
         return min(maxRestartDelay, pow(2, Double(min(attempt, 5))))
     }
 
-    private func readAvailableOutput() {
-        guard let handle = stdoutPipe?.fileHandleForReading else { return }
+    private func readAvailableOutput(from handle: FileHandle, generation: UInt64) {
+        guard activeStreamGeneration == generation else { return }
         let chunk = handle.availableData
         guard !chunk.isEmpty else { return }
         // Output is the only proof the restarted adapter actually works, so the
         // backoff is cleared here rather than when the process launches — a
         // bridge that starts and dies immediately must keep backing off.
-        if restartAttempts != 0 {
-            DispatchQueue.main.async { [weak self] in self?.restartAttempts = 0 }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.streamGeneration == generation else { return }
+            self.restartAttempts = 0
         }
         lineBuffer.append(chunk)
         while let range = lineBuffer.firstRange(of: Data([0x0A])) {
             let lineData = lineBuffer.subdata(in: lineBuffer.startIndex..<range.lowerBound)
             lineBuffer.removeSubrange(lineBuffer.startIndex...range.lowerBound)
             guard let line = String(data: lineData, encoding: .utf8), !line.isEmpty else { continue }
-            handleStreamLine(line)
+            handleStreamLine(line, generation: generation)
         }
     }
 
-    private func handleStreamLine(_ line: String) {
+    private func handleStreamLine(_ line: String, generation: UInt64) {
         guard let data = line.data(using: .utf8),
               let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               envelope["type"] as? String == "data",
@@ -201,14 +261,15 @@ final class MediaRemoteBridge {
         // Stream diffs omit artwork on a track change; fetch it (with retry) off
         // the stream queue so the title keeps flowing while art loads.
         if let np, np.artwork == nil {
-            requestArtwork(forTrackKey: "\(np.title)\u{0}\(np.artist)")
+            requestArtwork(forTrackKey: "\(np.title)\u{0}\(np.artist)", generation: generation)
         }
         DispatchQueue.main.async { [weak self] in
+            guard let self, self.shouldRun, self.streamGeneration == generation else { return }
             if Self.logMedia, let np {
                 let art = np.artwork == nil ? "no art" : "art"
                 print("NOWPLAYING: adapter -> \(np.title) / \(np.artist) (\(art))")
             }
-            self?.onUpdate?(np)
+            self.onUpdate?(np)
         }
     }
 
@@ -327,40 +388,70 @@ final class MediaRemoteBridge {
     /// Artwork arrives via a separate `get` (stream diffs omit it on track change).
     /// The player often hasn't populated the new art the instant the title flips,
     /// so retry a few times until it appears — or until the track changes again.
-    private func requestArtwork(forTrackKey trackKey: String) {
+    private func requestArtwork(forTrackKey trackKey: String, generation: UInt64) {
+        let token = "\(generation):\(trackKey)"
         artworkQueue.async { [weak self] in
             guard let self else { return }
-            guard self.artworkInFlightKey != trackKey else { return } // already fetching this track
-            self.artworkInFlightKey = trackKey
-            self.fetchArtwork(forTrackKey: trackKey, attempt: 0)
+            guard self.artworkInFlightKey != token else { return } // already fetching this track
+            self.artworkTask?.cancel()
+            self.artworkTask = nil
+            self.artworkInFlightKey = token
+            self.fetchArtwork(forTrackKey: trackKey, token: token, generation: generation, attempt: 0)
         }
     }
 
     /// Runs on `artworkQueue`. Uses the deadlock-safe `ProcessRunner` (the old code
     /// waited on the process before draining a >64 KB artwork pipe, which hung the
     /// shared stream queue after the first track change).
-    private func fetchArtwork(forTrackKey trackKey: String, attempt: Int) {
-        guard artworkInFlightKey == trackKey else { return } // superseded by a newer track
+    private func fetchArtwork(forTrackKey trackKey: String, token: String,
+                              generation: UInt64, attempt: Int) {
+        guard artworkInFlightKey == token else { return } // superseded by a newer track
         guard let paths = bundledPaths() else { artworkInFlightKey = nil; return }
 
         let maxAttempts = 6
-        if let data = ProcessRunner.capture("/usr/bin/perl",
-                                            [paths.script.path, paths.framework.path, "get"]),
-           let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let np = parseNowPlaying(payload),
-           np.artwork != nil,
-           "\(np.title)\u{0}\(np.artist)" == trackKey {
-            artworkInFlightKey = nil
-            DispatchQueue.main.async { [weak self] in self?.onUpdate?(np) }
-            return
-        }
-
-        if attempt + 1 < maxAttempts {
-            artworkQueue.asyncAfter(deadline: .now() + 0.7) { [weak self] in
-                self?.fetchArtwork(forTrackKey: trackKey, attempt: attempt + 1)
+        artworkTask = Task { [weak self] in
+            let payload: [String: Any]?
+            do {
+                let result = try await ProcessRunner.run(
+                    executableURL: URL(fileURLWithPath: "/usr/bin/perl"),
+                    arguments: [paths.script.path, paths.framework.path, "get"],
+                    currentDirectoryURL: paths.script.deletingLastPathComponent(),
+                    timeout: 8,
+                    outputLimitBytes: 2 * 1024 * 1024
+                )
+                payload = try JSONSerialization.jsonObject(with: result.stdout) as? [String: Any]
+            } catch {
+                if Task.isCancelled { return }
+                payload = nil
             }
-        } else {
-            artworkInFlightKey = nil
+            guard !Task.isCancelled else { return }
+            guard let self else { return }
+            // parseNowPlaying updates the stream's artwork cache, so it must
+            // run on the same serial queue as stream parsing.
+            self.workQueue.async { [weak self] in
+                guard let self, self.activeStreamGeneration == generation,
+                      self.cachedArtworkTrackKey == trackKey else { return }
+                let np = payload.flatMap { self.parseNowPlaying($0) }
+                self.artworkQueue.async { [weak self] in
+                    guard let self, self.artworkInFlightKey == token else { return }
+                    self.artworkTask = nil
+                    if let np, np.artwork != nil, "\(np.title)\u{0}\(np.artist)" == trackKey {
+                        self.artworkInFlightKey = nil
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self, self.shouldRun,
+                                  self.streamGeneration == generation else { return }
+                            self.onUpdate?(np)
+                        }
+                    } else if attempt + 1 < maxAttempts {
+                        self.artworkQueue.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+                            self?.fetchArtwork(forTrackKey: trackKey, token: token,
+                                               generation: generation, attempt: attempt + 1)
+                        }
+                    } else {
+                        self.artworkInFlightKey = nil
+                    }
+                }
+            }
         }
     }
 

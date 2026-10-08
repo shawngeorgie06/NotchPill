@@ -28,15 +28,16 @@ struct NotchRootView: View {
     private var selectedMedia: NowPlaying? {
         // Peeks and reply/update overlays borrow the same root surface. Keep
         // their background black even when media remains the selected deck page.
-        guard (state.isExpanded || state.isCollapsing),
-              state.renderedDevReadyAlerts.isEmpty,
-              state.replyCompose == nil,
-              state.updateProgress == nil else { return nil }
         let activities = expandedActivities
-        let page = state.resolvedExpandedDeckPage(for: activities.map(\.kind))
-        guard activities.indices.contains(page),
-              case .media(let nowPlaying) = activities[page] else { return nil }
-        return nowPlaying
+        return MediaBackdropSelection.resolve(
+            isExpanded: state.isExpanded,
+            isCollapsing: state.isCollapsing,
+            hasDevReadyAlerts: !state.renderedDevReadyAlerts.isEmpty,
+            hasReplyCompose: state.replyCompose != nil,
+            hasUpdateProgress: state.updateProgress != nil,
+            activities: activities,
+            selectedPage: state.resolvedExpandedDeckPage(for: activities.map(\.kind))
+        )
     }
 
     private var contentLayout: NotchContentLayoutMetrics {
@@ -65,6 +66,25 @@ struct NotchRootView: View {
 
     private var frameSize: CGSize { contentLayout.size }
 
+    private var surfaceTop: CGFloat {
+        metrics.notchHeight + NotchContentLayout.surfaceTopInset(metrics: metrics)
+    }
+
+    private var surfaceContentHeight: CGFloat {
+        NotchContentLayout.surfaceContentHeight(metrics: metrics, surfaceSize: frameSize)
+    }
+
+    /// The background and every expanded content mask use this same progress.
+    private var surfaceProgress: CGFloat {
+        if !state.renderedDevReadyAlerts.isEmpty { return state.devReadyPresentation }
+        return (state.isExpanded || state.isCollapsing) ? state.expansionProgress : 1
+    }
+
+    private var peekReplacementAnimation: Animation? {
+        state.renderedDevReadyAlerts.isEmpty ? nil
+            : .timingCurve(0.32, 0.72, 0.15, 1, duration: state.devReadyMotionDuration)
+    }
+
     private var readabilityScale: CGFloat { contentLayout.readability }
     private var textScale: CGFloat { contentLayout.textScale }
 
@@ -81,9 +101,10 @@ struct NotchRootView: View {
 
     private var expandAnimation: Animation {
         // The host window is positioned immediately; only the visible surface
-        // moves. This longer curve can therefore grow cleanly from the physical
-        // notch without fighting an AppKit frame animation.
-        reduceMotion ? .linear(duration: 0.01) : .timingCurve(0.22, 0.8, 0.2, 1, duration: NotchState.hoverAnimationDuration)
+        // moves, so it can grow cleanly from the physical notch without
+        // fighting an AppKit frame animation. A spring, so a hover that
+        // reverses mid-flight carries its velocity instead of restarting.
+        NotchMotion.surface(reduceMotion: reduceMotion)
     }
     /// In-place value changes: activity, volume, brightness, mic mute.
     ///
@@ -95,23 +116,33 @@ struct NotchRootView: View {
         NotchMotion.settle(reduceMotion: reduceMotion)
     }
 
-    /// How the expanded card's copy fades against the surface growing behind
-    /// it. Deliberately asymmetric.
+    /// How the collapsed chips cross-fade against the expanded card.
     ///
-    /// Opening, it waits: for the first third of the growth the pill is still
-    /// close to notch width, and copy drawn into it can only be clipped or
-    /// squeezed. Letting the surface open the room first, then filling it,
-    /// reads as one movement rather than two racing.
-    ///
-    /// Closing, it leaves ahead of the surface, and faster — text that stays
-    /// crisp while its container shrinks underneath is the same clipping seen
-    /// backwards, and it is the more noticeable of the two.
+    /// Only the chips, and the chip pill handing over to the expanded surface,
+    /// use this: the card's own opacity is a function of
+    /// surface progress (`SurfaceReveal`), and `HoverTransactions` keeps this
+    /// curve off anything that progress drives.
     private var contentFadeAnimation: Animation {
+        Self.chipCrossfade(opening: state.isExpanded, reduceMotion: reduceMotion)
+    }
+
+    /// Opening, the chips leave over exactly the window in which the card
+    /// arrives. Closing, the surface spring wins (see `HoverTransactions`)
+    /// and the chips only return when the collapse finalises, so this branch
+    /// is reached only by a leave that lands before the opening's first frame.
+    static func chipCrossfade(opening: Bool, reduceMotion: Bool) -> Animation {
         if reduceMotion { return .linear(duration: 0.01) }
-        let full = NotchState.hoverAnimationDuration
-        return state.isExpanded
-            ? .easeOut(duration: full * 0.6).delay(full * 0.34)
-            : .easeIn(duration: full * 0.4)
+        return opening
+            ? NotchMotion.chipsYield(reduceMotion: false)
+            : .easeIn(duration: NotchState.hoverAnimationDuration * 0.4)
+    }
+
+    /// Collapse finalisation happens after the hover transaction has ended.
+    /// Give only the returning chips an insertion fade; removal still inherits
+    /// the opening handoff, and neither the host nor the surface gets a new curve.
+    static func chipTransition(reduceMotion: Bool) -> AnyTransition {
+        .asymmetric(insertion: .opacity.animation(NotchMotion.chipsReturn(reduceMotion: reduceMotion)),
+                    removal: .opacity)
     }
 
     var body: some View {
@@ -133,9 +164,11 @@ struct NotchRootView: View {
         .overlay(alignment: .top) {
             if let progress = state.updateProgress {
                 updateProgressContent(progress)
+                    .mask(growingSurfaceMask(progress: surfaceProgress))
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else if let compose = state.replyCompose {
                 replyComposeContent(compose)
+                    .mask(growingSurfaceMask(progress: surfaceProgress))
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else if !state.renderedDevReadyAlerts.isEmpty {
                 devReadyContent(alerts: state.renderedDevReadyAlerts)
@@ -151,28 +184,29 @@ struct NotchRootView: View {
                     .mask(growingPeekMask)
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else if state.isExpanded || state.isCollapsing {
-                // The surface and its mask share expansionProgress. Content
-                // has one delayed opacity phase, so it enters after the shape
-                // makes room and leaves ahead of the shrinking edge.
+                // The surface, its mask and the content's opacity all read the
+                // same animated expansionProgress, so content appears once the
+                // shape has made room, leaves ahead of the shrinking edge, and
+                // a reversal retraces the curve with no delay to restart.
                 expandedContent
                     .mask(growingSurfaceMask(progress: state.expansionProgress))
-                    .opacity(Double(state.expansionProgress))
-                    .animation(contentFadeAnimation, value: state.expansionProgress)
+                    .modifier(SurfaceReveal(progress: state.expansionProgress))
                     .transition(.identity)
             } else if !collapsedChips.isEmpty {
                 collapsedContent
-                    .mask(growingSurfaceMask(progress: 1))
-                    .transition(.opacity)
+                    .mask(compactContentMask)
+                    .transition(Self.chipTransition(reduceMotion: reduceMotion))
             }
         }
-        // Scoped to the overlay, not the outer layout — the note above about a
-        // sideways pop still stands, and this must not reach the frame.
-        //
-        // Without it the collapsed chips were *also* removed instantly, so
-        // pairing them with a card that now fades in left a gap of empty pill
-        // between the two. With it they fade out on the same curve the card
-        // fades in on, and the swap becomes a crossfade.
-        .animation(contentFadeAnimation, value: state.isExpanded)
+        // Without the cross-fade the collapsed chips were removed instantly,
+        // leaving a gap of empty pill before the card arrived. It wraps the
+        // surface as well as the overlay, so the surface curve is layered
+        // inside it: collapse changes both values at once, and the innermost
+        // animation is the one SwiftUI uses.
+        .modifier(HoverTransactions(progress: state.expansionProgress,
+                                    isExpanded: state.isExpanded,
+                                    surface: expandAnimation,
+                                    crossfade: contentFadeAnimation))
         .overlay {
             VStack(spacing: 8) {
                 if settings.showVolumeHUD, let level = state.volumeLevel {
@@ -205,11 +239,10 @@ struct NotchRootView: View {
 
     private func updateProgressContent(_ progress: UpdateProgress) -> some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: metrics.notchHeight)
+            Color.clear.frame(height: surfaceTop)
             UpdateProgressView(progress: progress)
-                .padding(.top, metrics.topGap + 2)
                 .frame(width: frameSize.width,
-                       height: frameSize.height - metrics.notchHeight - metrics.topGap,
+                       height: surfaceContentHeight,
                        alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
@@ -217,18 +250,13 @@ struct NotchRootView: View {
 
     private func replyComposeContent(_ compose: ReplyComposeState) -> some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: metrics.notchHeight)
+            Color.clear.frame(height: surfaceTop)
             ReplyComposeView(state: state, compose: compose, actions: actions)
-                .padding(.top, metrics.topGap + 2)
                 .frame(width: frameSize.width,
-                       height: frameSize.height - metrics.notchHeight - metrics.topGap,
+                       height: surfaceContentHeight,
                        alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
-    }
-
-    private var collapsedBottomRadius: CGFloat {
-        collapsedChips.isEmpty ? max(8, metrics.notchHeight / 2) : 12
     }
 
     /// Expanded pill: a single, softly shouldered surface growing from the
@@ -238,54 +266,54 @@ struct NotchRootView: View {
     /// Deliberately the same geometry `expandedBackground` draws — if the two
     /// drifted, the text would be clipped to a shape that is not the pill.
     private var growingPeekMask: some View {
-        growingSurfaceMask(progress: state.devReadyPresentation)
+        growingSurfaceMask(progress: surfaceProgress)
     }
 
-    /// One silhouette for fill and content. Peek, expanded deck and collapsed
-    /// chips all clip to this so nothing paints past the rim.
+    /// A final canvas with growth owned entirely by the shape. Shrinking its
+    /// frame as well would apply progress twice and misalign the content mask.
     private func growingSurfaceMask(progress: CGFloat) -> some View {
-        let width = metrics.notchWidth + (frameSize.width - metrics.notchWidth) * progress
-        let height = metrics.notchHeight + (frameSize.height - metrics.notchHeight) * progress
+        ExpandedNotchShape(notchWidth: metrics.notchWidth,
+                          notchHeight: metrics.notchHeight,
+                          progress: progress,
+                          hasPhysicalNotch: metrics.hasPhysicalNotch,
+                          wrapsHardwareNotch: true)
+            .fill(Color.black)
+            .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+            // A replacement peek can have a new final canvas with progress
+            // already at one. Its mask must follow the background's size curve.
+            .animation(peekReplacementAnimation, value: frameSize)
+    }
+
+    /// Preserve the compact row's existing clipping and chip handoff. Its
+    /// shallow canvas is independent of expanded content's shoulder clearance.
+    private var compactContentMask: some View {
         let floating = !metrics.hasPhysicalNotch
-        let inset = floating ? 4 * progress : 0
+        let inset = floating ? ExpandedNotchShape.floatingGap : 0
         return NotchShape(bottomRadius: 22, topRadius: floating ? 22 : 0)
             .fill(Color.black)
-            .frame(width: width, height: max(0, height - inset))
+            .frame(width: frameSize.width, height: max(0, frameSize.height - inset))
             .padding(.top, inset)
             .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
     }
 
     private var expandedBackground: some View {
-        // Match the intended island silhouette: a single compact black surface
-        // that begins as the notch and grows outward from its centre.
-        let progress: CGFloat
-        if !state.renderedDevReadyAlerts.isEmpty {
-            progress = state.devReadyPresentation
-        } else {
-            progress = (state.isExpanded || state.isCollapsing) ? state.expansionProgress : 1
-        }
-        let width = metrics.notchWidth + (frameSize.width - metrics.notchWidth) * progress
-        let height = metrics.notchHeight + (frameSize.height - metrics.notchHeight) * progress
-        // With no cutout above it, the surface needs its own top: rounded
-        // corners, and a few points of daylight under the menu bar so it reads
-        // as an island rather than as something that failed to dock.
-        let floating = !metrics.hasPhysicalNotch
-        let inset = floating ? 4 * progress : 0
-        let shape = NotchShape(bottomRadius: 22, topRadius: floating ? 22 : 0)
-        return PillSurface(bottomRadius: 22, topRadius: floating ? 22 : 0)
-            .overlay {
+        ExpandedPillSurface(notchWidth: metrics.notchWidth,
+                            notchHeight: metrics.notchHeight,
+                            progress: surfaceProgress,
+                            hasPhysicalNotch: metrics.hasPhysicalNotch,
+                          wrapsHardwareNotch: true) {
+            // The surface draws its rim over this, so the artwork never
+            // hides it and it is not stroked a second time here.
+            ZStack {
                 if let selectedMedia {
                     MediaBackdrop(nowPlaying: selectedMedia,
-                                  size: CGSize(width: width, height: max(0, height - inset)))
-                        .clipShape(shape)
+                                  size: frameSize)
                         .transition(.opacity)
                 }
             }
             .animation(reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.20),
                        value: selectedMedia?.trackKey)
-            .overlay { shape.stroke(NotchIslandChrome.rim, lineWidth: 0.5) }
-            .frame(width: width, height: max(0, height - inset))
-            .padding(.top, inset)
+        }
             .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
             // Growing from the notch is already smooth, because `progress`
             // animates from 0. A peek *replacing* another one is not: dictate
@@ -293,16 +321,12 @@ struct NotchRootView: View {
             // at 1, so the surface jumps straight to the new width. Scoped to
             // while a peek is on screen so the hover curve, which drives its own
             // progress, is left exactly as it was.
-            .animation(state.renderedDevReadyAlerts.isEmpty
-                       ? nil
-                       : .timingCurve(0.32, 0.72, 0.15, 1,
-                                      duration: state.devReadyMotionDuration),
-                       value: frameSize)
+            .animation(peekReplacementAnimation, value: frameSize)
     }
 
     private var expandedContent: some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: metrics.notchHeight)
+            Color.clear.frame(height: surfaceTop)
             ExpandedView(
                 state: state,
                 shelf: shelf,
@@ -312,8 +336,7 @@ struct NotchRootView: View {
                 readability: readabilityScale,
                 textScale: textScale
             )
-                .padding(.top, metrics.topGap + 4)
-                .frame(width: frameSize.width, height: frameSize.height - metrics.notchHeight - metrics.topGap,
+                .frame(width: frameSize.width, height: surfaceContentHeight,
                        alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
@@ -330,7 +353,7 @@ struct NotchRootView: View {
 
     private func devReadyContent(alerts: [DevReadyAlert]) -> some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: metrics.notchHeight)
+            Color.clear.frame(height: surfaceTop)
             DevReadyPeekListView(
                 alerts: alerts,
                 actions: actions,
@@ -350,8 +373,7 @@ struct NotchRootView: View {
                 titleLines: NotchContentLayout
                     .peekTitleLayout(metrics: metrics, alerts: alerts).lines
             )
-                .padding(.top, metrics.topGap + 2)
-                .frame(width: frameSize.width, height: frameSize.height - metrics.notchHeight - metrics.topGap,
+                .frame(width: frameSize.width, height: surfaceContentHeight,
                        alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
@@ -495,7 +517,7 @@ struct UpdateProgressView: View {
 /// One artwork wash for the entire expanded silhouette, including the space
 /// above the media controls. Painting this inside the card leaves a black band
 /// between the menu bar and the card's content origin.
-private struct MediaBackdrop: View {
+struct MediaBackdrop: View {
     let nowPlaying: NowPlaying
     let size: CGSize
 
@@ -520,290 +542,22 @@ private struct MediaBackdrop: View {
     }
 }
 
-struct ExpandedView: View {
-    @ObservedObject var settings = AppSettings.shared
-    @ObservedObject var state: NotchState
-    @ObservedObject var shelf: ShelfStore
-    @ObservedObject var tokens: TokenUsageStore = .shared
-    /// Observed for its side effect on the deck: `expandedActivities` reads
-    /// `ClipboardStore.shared`, and without a dependency here a new copy
-    /// never redraws the card.
-    @ObservedObject var clipboard: ClipboardStore = .shared
-    @ObservedObject var timer: TimerStore
-    let actions: NotchActions
-    let activities: [ExpandedActivity]
-    var readability: CGFloat = 1.0
-    var textScale: CGFloat = 1.0
-    @State private var pageDragOffset: CGFloat = 0
-    @State private var swipeGeneration = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        Group {
-            if activities.isEmpty {
-                VStack(spacing: NotchSpace.snug * readability) {
-                    Image(systemName: "rectangle.inset.filled")
-                        .font(.system(size: NotchType.display * textScale, weight: .medium))
-                        .foregroundStyle(.white.opacity(NotchOpacity.hairline))
-                    Text("Nothing on the island")
-                        .font(.system(size: NotchType.body * textScale, weight: .semibold))
-                        .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
-                    Text("Turn on cards in Settings")
-                        .font(.system(size: NotchType.caption * textScale, weight: .medium))
-                        .foregroundStyle(.white.opacity(NotchOpacity.hairline))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                activityDeck
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .clipped()
-        // Keyed on the track, not the whole value. `NowPlaying` carries
-        // `isPlaying`, so animating on it made pause reflow the entire deck —
-        // the sideways slide that reads as "skipped to the next song". Play and
-        // pause are now a local symbol morph instead; see `mediaCard`.
-        .animation(.easeOut(duration: 0.16), value: state.nowPlaying?.trackKey)
-        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: state.appSwitchHint)
-        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: state.frontmostApp)
-        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: state.systemVolume)
-        // Keyed on contents, not identity. Identity drives the page slide (see
-        // `ExpandedActivity.id`); this only smooths a card growing or shrinking
-        // around what changed inside it.
-        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: activities.map(\.contentKey))
-        .onChange(of: activityKinds) { _, kinds in
-            swipeGeneration += 1
-            pageDragOffset = 0
-            state.reconcileExpandedDeck(kinds: kinds)
-        }
-    }
-
-    /// Keep one full-width stage for every page. Each tray card gets its own
-    /// insets, while media paints edge to edge; this lets a neighboring page
-    /// follow a drag without changing its size at the end of the swipe.
-    private var activityDeck: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .bottom) {
-                pageCard(width: geo.size.width, height: geo.size.height)
-                if NotchContentLayout.showsDeckChrome(for: activities) {
-                    deckChrome
-                        .padding(.horizontal, NotchSpace.base * readability)
-                        .padding(.bottom, NotchSpace.base * readability)
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .contentShape(Rectangle())
-            .gesture(pageSwipeGesture(width: geo.size.width))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    @ViewBuilder
-    private func pageCard(width: CGFloat, height: CGFloat) -> some View {
-        ZStack(alignment: .top) {
-            if pageDragOffset > 0, activities.indices.contains(clampedPage - 1) {
-                activityCard(at: clampedPage - 1, width: width, height: height)
-                    .offset(x: -width + pageDragOffset)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-            if pageDragOffset < 0, activities.indices.contains(clampedPage + 1) {
-                activityCard(at: clampedPage + 1, width: width, height: height)
-                    .offset(x: width + pageDragOffset)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-            if activities.indices.contains(clampedPage) {
-                activityCard(at: clampedPage, width: width, height: height)
-                    .id(activities[clampedPage].id)
-                    .offset(x: pageDragOffset)
-                    .transition(pageTransition)
-            }
-        }
-        .frame(width: width, height: height, alignment: .top)
-    }
-
-    private func activityCard(at index: Int, width: CGFloat, height: CGFloat) -> some View {
-        let isMedia: Bool = {
-            if case .media = activities[index] { return true }
-            return false
-        }()
-        let horizontalInset = isMedia ? 0 : NotchSpace.section * readability
-        let topInset = isMedia ? 0 : NotchSpace.base * readability
-        let bottomInset = isMedia ? 0 : NotchSpace.base * readability
-            + NotchContentLayout.deckChromeHeight
-        return ExpandedActivityCard(
-                activity: activities[index],
-                appIcon: state.frontmostAppIcon,
-                actions: actions,
-                onCancelTimer: { timer.cancel() },
-                readability: readability,
-                textScale: textScale,
-                expandToFill: true,
-                bottomChromeHeight: isMedia
-                    ? NotchContentLayout.deckChromeHeight + NotchSpace.base * 2 : 0,
-                tokenUsage: settings.showTokenUsage ? tokens.summary : nil,
-                tokenPeriod: settings.resolvedTokenPeriod
-            )
-            .frame(width: max(0, width - horizontalInset * 2),
-                   height: max(0, height - topInset - bottomInset), alignment: .top)
-            .padding(.horizontal, horizontalInset)
-            .padding(.top, topInset)
-            .padding(.bottom, bottomInset)
-            .frame(width: width, height: height, alignment: .top)
-            .background {
-                // The root paints the selected media page. A page entering
-                // during a drag needs its own wash (or black tray) until it
-                // becomes selected, so the background follows the card.
-                if index != clampedPage {
-                    if case .media(let nowPlaying) = activities[index] {
-                        MediaBackdrop(nowPlaying: nowPlaying,
-                                      size: CGSize(width: width, height: height))
-                    } else {
-                        Color.black
-                    }
-                }
-            }
-    }
-
-    private func pageSwipeGesture(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 18)
-            .onChanged { value in
-                guard !reduceMotion, activities.count > 1,
-                      abs(value.translation.width) > abs(value.translation.height) * 1.1 else { return }
-                // A new drag takes ownership from any page settle still in
-                // flight; its completion must not change the page afterward.
-                swipeGeneration += 1
-                let distance = value.translation.width
-                let hasNeighbor = activities.indices.contains(clampedPage + (distance < 0 ? 1 : -1))
-                // A small resistant movement at either end acknowledges the
-                // gesture without suggesting that another page exists.
-                pageDragOffset = hasNeighbor
-                    ? min(width * 0.95, max(-width * 0.95, distance))
-                    : min(18, max(-18, distance * 0.15))
-            }
-            .onEnded { value in
-                guard activities.count > 1,
-                      abs(value.translation.width) > abs(value.translation.height) * 1.1 else {
-                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) { pageDragOffset = 0 }
-                    return
-                }
-                let direction = value.translation.width < 0 ? 1 : -1
-                let target = clampedPage + direction
-                let projected = value.predictedEndTranslation.width
-                let commits = abs(value.translation.width) > width * 0.22 ||
-                    abs(projected) > width * 0.42
-                guard activities.indices.contains(target), commits else {
-                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) { pageDragOffset = 0 }
-                    return
-                }
-                if reduceMotion {
-                    state.selectExpandedDeckPage(target, kinds: activityKinds)
-                    return
-                }
-                swipeGeneration += 1
-                let generation = swipeGeneration
-                let targetKind = activities[target].kind
-                withAnimation(NotchMotion.page(reduceMotion: false), completionCriteria: .logicallyComplete) {
-                    pageDragOffset = CGFloat(-direction) * width
-                } completion: {
-                    guard swipeGeneration == generation,
-                          activities.indices.contains(target),
-                          activities[target].kind == targetKind else { return }
-                    var transaction = Transaction(animation: nil)
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        state.selectExpandedDeckPage(target, kinds: activityKinds)
-                        pageDragOffset = 0
-                    }
-                }
-            }
-    }
-
-    /// One compact page control for every kind of activity. Each card already
-    /// names itself, so this footer only needs to show position and navigation.
-    private var deckChrome: some View {
-        HStack(spacing: NotchSpace.snug * readability) {
-            ForEach(Array(activities.indices), id: \.self) { index in
-                Button {
-                    swipeGeneration += 1
-                    pageDragOffset = 0
-                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) {
-                        state.selectExpandedDeckPage(index, kinds: activityKinds)
-                    }
-                } label: {
-                    Capsule()
-                        .fill(index == clampedPage
-                              ? Color.white.opacity(NotchOpacity.primary)
-                              : .white.opacity(NotchOpacity.highlight))
-                        .frame(width: (index == clampedPage ? NotchSpace.base : NotchSpace.tight * 2) * readability,
-                               height: NotchSpace.tight * 2 * readability)
-                        .frame(width: NotchSpace.mark * readability, height: NotchSpace.mark * readability)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Show \(activityLabel(activities[index]))")
-            }
-        }
-        .frame(height: NotchSpace.mark * readability)
-        .contentShape(Rectangle())
-        .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
-    }
-
-    private var clampedPage: Int {
-        state.resolvedExpandedDeckPage(for: activityKinds)
-    }
-
-    private var activityKinds: [String] { activities.map(\.kind) }
-
-    private var pageTransition: AnyTransition {
-        let entering: Edge = state.expandedDeckDirection >= 0 ? .trailing : .leading
-        let leaving: Edge = state.expandedDeckDirection >= 0 ? .leading : .trailing
-        let scale = NotchMotion.pageScale
-        return .asymmetric(
-            insertion: .move(edge: entering)
-                .combined(with: .opacity)
-                .combined(with: .scale(scale: scale)),
-            removal: .move(edge: leaving)
-                .combined(with: .opacity)
-                .combined(with: .scale(scale: scale))
-        )
-    }
-
-    private func activityLabel(_ activity: ExpandedActivity) -> String {
-        switch activity.kind {
-        // Two deliberate departures from `kindLabel`: on the card footer these
-        // read better as what you are looking *at* than as the settings row's
-        // name for the toggle.
-        case "codexQuota": return "Codex usage"
-        case "recentAlerts": return "Recent notifications"
-        // Everything else takes the model's own label.
-        //
-        // The default used to be `kind.capitalized`, and `kind` is camelCase —
-        // so `claudeQuota` rendered as "Claudequota". Swift's `capitalized`
-        // uppercases the first letter of each *word* and lowercases the rest,
-        // and a camelCase identifier is one word to it. Same bug on
-        // `cursorQuota`, `activeApp`, `systemStats`, and `ci` ("Ci"). Deriving
-        // display text from an identifier was the mistake; `kindLabel` exists
-        // for exactly this and is written by hand.
-        default: return activity.kindLabel
-        }
-    }
-
-    private func activityIcon(_ activity: ExpandedActivity) -> String {
-        switch activity.kind {
-        case "agents": return "terminal"
-        case "commands": return "hammer"
-        case "codexQuota": return "chevron.left.forwardslash.chevron.right"
-        case "openCodeUsage": return "curlybraces"
-        case "ci": return "checkmark.seal"
-        case "recentAlerts": return "bell"
-        case "media": return "music.note"
-        case "calendar": return "calendar"
-        case "timer": return "timer"
-        case "battery": return "battery.100"
-        case "systemStats": return "gauge.with.dots.needle.50percent"
-        default: return "circle.grid.2x2"
-        }
+/// Chooses whether artwork may paint behind the expanded surface. Alerts and
+/// reply/update overlays own the surface even while a media page is selected.
+enum MediaBackdropSelection {
+    static func resolve(isExpanded: Bool,
+                        isCollapsing: Bool,
+                        hasDevReadyAlerts: Bool,
+                        hasReplyCompose: Bool,
+                        hasUpdateProgress: Bool,
+                        activities: [ExpandedActivity],
+                        selectedPage: Int) -> NowPlaying? {
+        guard (isExpanded || isCollapsing),
+              !hasDevReadyAlerts,
+              !hasReplyCompose,
+              !hasUpdateProgress,
+              activities.indices.contains(selectedPage),
+              case .media(let nowPlaying) = activities[selectedPage] else { return nil }
+        return nowPlaying
     }
 }
