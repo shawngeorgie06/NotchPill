@@ -129,9 +129,9 @@ struct ProcessRunnerDescendantTests {
         let leader = try #require(probe.pid("leader"))
         let descendant = try #require(probe.pid("descendant"))
         let deadline = Date().addingTimeInterval(2)
-        while probe.anyAlive && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
-        #expect(kill(leader, 0) != 0)
-        #expect(kill(descendant, 0) != 0)
+        while probe.anyRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+        #expect(!probe.isRunning(leader))
+        #expect(!probe.isRunning(descendant))
     }
 
     @Test("async timeout kills descendants even after the leader exits", arguments: [false, true])
@@ -151,7 +151,7 @@ struct ProcessRunnerDescendantTests {
         #expect(leader != getpgrp())
         if leaderExitsEarly {
             try await probe.waitUntilGone(leader, seconds: 0.4)
-            #expect(kill(descendant, 0) == 0, "the descendant must still hold the pipes open")
+            #expect(probe.isRunning(descendant), "the descendant must still hold the pipes open")
         }
         do {
             _ = try await task.value
@@ -208,7 +208,7 @@ struct ProcessRunnerDescendantTests {
         // Wait beyond both the deadline and escalation window: a completed
         // success must cancel the timer rather than kill the background child.
         try await Task.sleep(for: .milliseconds(800))
-        #expect(kill(descendant, 0) == 0)
+        #expect(probe.isRunning(descendant))
     }
 }
 
@@ -240,8 +240,23 @@ private struct DescendantProbe: Sendable {
         return pid_t(raw.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    var anyAlive: Bool {
-        [pid("leader"), pid("descendant")].compactMap { $0 }.contains { kill($0, 0) == 0 }
+    var anyRunning: Bool {
+        [pid("leader"), pid("descendant")].compactMap { $0 }.contains(where: isRunning)
+    }
+
+    func isRunning(_ pid: pid_t) -> Bool {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else {
+            // `proc_pidinfo` can fail transiently or for an access reason. Only
+            // ESRCH proves absence; conservatively count every other result as
+            // existing so the test cannot pass on an indeterminate probe.
+            return kill(pid, 0) == 0 || errno != ESRCH
+        }
+        // kill(pid, 0) succeeds for zombies too. They are already dead and
+        // cannot retain a pipe or execute work, even if launchd has not reaped
+        // them yet.
+        return info.pbi_status != UInt32(SZOMB)
     }
 
     func waitUntilReady() async throws {
@@ -255,10 +270,10 @@ private struct DescendantProbe: Sendable {
 
     func waitUntilGone(_ pid: pid_t, seconds: TimeInterval) async throws {
         let deadline = Date().addingTimeInterval(seconds)
-        while kill(pid, 0) == 0 && Date() < deadline {
+        while isRunning(pid) && Date() < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
-        #expect(kill(pid, 0) != 0)
+        #expect(!isRunning(pid))
     }
 
     func cleanup() {
@@ -274,7 +289,7 @@ private struct DescendantProbe: Sendable {
             kill(pid, SIGKILL)
         }
         let deadline = Date().addingTimeInterval(2)
-        while anyAlive && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+        while anyRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
         try? FileManager.default.removeItem(at: directory)
     }
 }

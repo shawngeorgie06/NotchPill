@@ -845,7 +845,6 @@ struct NotchSurfaceMotionTests {
     }
 
     private final class ProbeLog { var samples: [CGFloat] = [] }
-
     private final class HoverModel: ObservableObject {
         @Published var progress: CGFloat = 1
         @Published var isExpanded = true
@@ -879,7 +878,7 @@ struct NotchSurfaceMotionTests {
     }
 
     @MainActor
-    @Test("collapse completion fades only returning chips, with a short Reduce Motion floor",
+    @Test("collapse completion restores only chips with the configured return curve",
           arguments: [false, true])
     func chipsFadeAfterFinalisation(reduceMotion: Bool) async throws {
         let model = HoverModel()
@@ -927,11 +926,12 @@ struct NotchSurfaceMotionTests {
             let color = try pixel()
             reds.append(color.redComponent / opaqueChips.redComponent)
         }
-        if reduceMotion {
-            #expect(reds.prefix(5).contains { $0 > 0.98 }, "Reduce Motion retained the full return fade")
-        } else {
-            #expect(reds.contains { $0 > 0.02 && $0 < 0.98 }, "chips popped directly to opaque: \(reds)")
-        }
+        let expectedReturnAnimation = reduceMotion
+            ? Animation.linear(duration: 0.01) : Animation.easeIn(duration: 0.14)
+        #expect(NotchMotion.chipsReturn(reduceMotion: reduceMotion) == expectedReturnAnimation)
+        // cacheDisplay captures AppKit's model bitmap, not guaranteed
+        // Core Animation presentation frames. Do not infer animation timing
+        // from that bitmap; its final state remains a useful rendering check.
         let returned = try pixel()
         #expect(abs(returned.redComponent - opaqueChips.redComponent) < 0.01,
                 "returned red \(returned.redComponent), baseline \(opaqueChips.redComponent), samples \(reds)")
