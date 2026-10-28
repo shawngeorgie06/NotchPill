@@ -21,6 +21,10 @@ struct NotchRootView: View {
         NotchContentSnapshot.collapsedChips(state: state, shelf: shelf, timer: timer, settings: settings)
     }
 
+    private var agentStrip: AgentStrip? {
+        NotchContentSnapshot.agentStrip(state: state, settings: settings)
+    }
+
     private var expandedActivities: [ExpandedActivity] {
         NotchContentSnapshot.expandedActivities(state: state, shelf: shelf, timer: timer, settings: settings)
     }
@@ -61,7 +65,8 @@ struct NotchRootView: View {
             return NotchContentLayout.expandedDeckLayout(
                 metrics: metrics, activities: expandedActivities)
         }
-        return NotchContentLayout.collapsedLayout(metrics: metrics, chips: collapsedChips)
+        return NotchContentLayout.collapsedLayout(metrics: metrics, chips: collapsedChips,
+                                                  showsAgentStrip: agentStrip != nil)
     }
 
     private var frameSize: CGSize { contentLayout.size }
@@ -95,8 +100,9 @@ struct NotchRootView: View {
             settings.showCollapsedSystemStats, settings.showCollapsedBattery, settings.showCollapsedClock,
             settings.showExpandedMedia, settings.showExpandedActiveApp, settings.showExpandedVolume,
             settings.showExpandedClock, settings.showExpandedCalendar, settings.showExpandedTimer,
-            settings.showExpandedSystemStats, settings.showExpandedBattery, settings.showExpandedShelf
-        ].map { $0 ? "1" : "0" }.joined()
+            settings.showExpandedSystemStats, settings.showExpandedBattery, settings.showExpandedShelf,
+            settings.showAgentStrip
+        ].map { $0 ? "1" : "0" }.joined() + settings.agentStripReading
     }
 
     private var expandAnimation: Animation {
@@ -163,6 +169,10 @@ struct NotchRootView: View {
         ZStack(alignment: .top) {
             if state.isExpanded || state.isCollapsing || !state.renderedDevReadyAlerts.isEmpty || state.updateProgress != nil || state.replyCompose != nil {
                 expandedBackground
+            } else if agentStrip != nil {
+                // The wings sit beside the camera, so this surface wraps the
+                // hardware notch instead of hanging below it.
+                agentStripSurface
             } else if !collapsedChips.isEmpty {
                 // The physical notch itself is already black. Only draw the
                 // compact island that grows from its lower edge.
@@ -211,7 +221,7 @@ struct NotchRootView: View {
                     .animation(expandAnimation, value: state.expansionProgress)
                     .mask(growingSurfaceMask(progress: state.expansionProgress))
                     .transition(.identity)
-            } else if !collapsedChips.isEmpty {
+            } else if !collapsedChips.isEmpty || agentStrip != nil {
                 collapsedContent
                     .mask(compactContentMask)
                     .transition(Self.chipTransition(reduceMotion: reduceMotion))
@@ -310,6 +320,19 @@ struct NotchRootView: View {
 
     /// Preserve the compact row's existing clipping and chip handoff. Its
     /// shallow canvas is independent of expanded content's shoulder clearance.
+    /// One rounded slab across the notch and both wings, plus the chip row
+    /// when chips are on. Without a notch it floats like the chip pill does.
+    private var agentStripSurface: some View {
+        let floating = !metrics.hasPhysicalNotch
+        let inset = floating ? ExpandedNotchShape.floatingGap : 0
+        let radius = min(collapsedChips.isEmpty ? 12 : 22, (frameSize.height - inset) / 2)
+        return NotchShape(bottomRadius: radius, topRadius: floating ? radius : 0)
+            .fill(Color.black)
+            .frame(width: frameSize.width, height: max(0, frameSize.height - inset))
+            .padding(.top, inset)
+            .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+    }
+
     private var compactContentMask: some View {
         let floating = !metrics.hasPhysicalNotch
         let inset = floating ? ExpandedNotchShape.floatingGap : 0
@@ -374,9 +397,18 @@ struct NotchRootView: View {
 
     private var collapsedContent: some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: metrics.notchHeight)
-            CollapsedIndicatorsRow(chips: collapsedChips, readability: readabilityScale, textScale: textScale)
-                .padding(.top, 6)
+            if let strip = agentStrip {
+                AgentStripView(strip: strip, notchWidth: metrics.notchWidth,
+                               notchHeight: metrics.notchHeight)
+                    .frame(width: frameSize.width)
+                    .transition(.opacity)
+            } else {
+                Color.clear.frame(height: metrics.notchHeight)
+            }
+            if !collapsedChips.isEmpty {
+                CollapsedIndicatorsRow(chips: collapsedChips, readability: readabilityScale, textScale: textScale)
+                    .padding(.top, 6)
+            }
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
     }

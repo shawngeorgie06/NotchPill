@@ -383,15 +383,7 @@ struct AgentSession: Equatable, Identifiable {
     ///
     /// Nil for an agent we do not know, rather than a stand-in glyph: a
     /// wrong-but-confident mark is worse than none, and the name still shows.
-    var vendorSymbol: String? {
-        switch knownAgent {
-        case .claudeCode: return "asterisk"
-        case .codex: return "chevron.left.forwardslash.chevron.right"
-        case .cursor: return "cursorarrow"
-        case .openCode: return "curlybraces"
-        case nil: return nil
-        }
-    }
+    var vendorSymbol: String? { knownAgent?.symbol }
 
     /// Trims a prompt to something that fits one notch row.
     ///
@@ -431,14 +423,7 @@ struct AgentSession: Equatable, Identifiable {
     /// first. Distinct from `fallbackAppBundleIds`, which is where a tap
     /// *goes*: Claude Code is a CLI and a tap has nowhere to send you, but the
     /// Claude app's icon is still the honest mark for it if the app is here.
-    var iconBundleIds: [String] {
-        switch knownAgent {
-        case .claudeCode: return ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
-        case .codex: return ["com.openai.codex", "com.openai.chat"]
-        case .cursor: return ["com.todesktop.230313mzl4w4u92"]
-        case .openCode, nil: return []
-        }
-    }
+    var iconBundleIds: [String] { knownAgent?.iconBundleIds ?? [] }
 
     /// The vendor's own icon, when the vendor's app is installed. The tile
     /// wore an SF Symbol before — an asterisk for Claude, a cursor arrow for

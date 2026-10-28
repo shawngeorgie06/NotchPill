@@ -626,16 +626,9 @@ struct DevReadyAlert: Equatable, Codable, Identifiable {
     /// the agent has no app installed — Claude Code is usually a CLI with no
     /// bundle to look up, which is what `ClaudeMark` draws instead.
     var agentAppIcon: NSImage? {
-        let candidates: [String]
-        switch displayAgent {
-        case .claudeCode: candidates = ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
-        case .codex: candidates = ["com.openai.codex", "com.openai.chat"]
-        // Cursor pings already carry Cursor's own bundle id, so `appIcon` covers
-        // it — no need to look the app up a second time here.
-        // OpenCode is a CLI with no app bundle to look up.
-        case .cursor, .openCode, nil: return nil
-        }
-        return AppIconCache.shared.icon(forAnyOf: candidates)
+        // Cursor included: a `cursor-agent` turn run in a terminal carries the
+        // terminal's bundle id, not Cursor's.
+        displayAgent?.appIcon
     }
 
     static func parse(from data: Data) -> DevReadyAlert? {

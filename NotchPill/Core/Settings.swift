@@ -62,6 +62,16 @@ final class AppSettings: ObservableObject {
     @Published var showCollapsedAgents: Bool {
         didSet { defaults.set(showCollapsedAgents, forKey: Keys.showCollapsedAgents) }
     }
+    /// The working agent's logo beside the camera, with a reading on the other
+    /// side. Independent of `showCollapsedActivity`: it only appears while an
+    /// agent is working or waiting, so it does not cost the blank rest state.
+    @Published var showAgentStrip: Bool {
+        didSet { defaults.set(showAgentStrip, forKey: Keys.showAgentStrip) }
+    }
+    /// `AgentStrip.ReadingKind` raw value.
+    @Published var agentStripReading: String {
+        didSet { defaults.set(agentStripReading, forKey: Keys.agentStripReading) }
+    }
 
     // MARK: - Expanded status cards
 
@@ -423,6 +433,8 @@ final class AppSettings: ObservableObject {
         static let showCollapsedBattery = "showCollapsedBattery"
         static let showCollapsedClock = "showCollapsedClock"
         static let showCollapsedAgents = "showCollapsedAgents"
+        static let showAgentStrip = "showAgentStrip"
+        static let agentStripReading = "agentStripReading"
         static let showExpandedMedia = "showExpandedMedia"
         static let showExpandedActiveApp = "showExpandedActiveApp"
         static let showExpandedVolume = "showExpandedVolume"
@@ -484,6 +496,8 @@ final class AppSettings: ObservableObject {
             Keys.showCollapsedBattery: false,
             Keys.showCollapsedClock: true,
             Keys.showCollapsedAgents: true,
+            Keys.showAgentStrip: true,
+            Keys.agentStripReading: AgentStrip.ReadingKind.tightestLimit.rawValue,
             Keys.showExpandedMedia: true,
             Keys.showExpandedActiveApp: true,
             Keys.showExpandedVolume: true,
@@ -542,6 +556,9 @@ final class AppSettings: ObservableObject {
         showCollapsedBattery = defaults.bool(forKey: Keys.showCollapsedBattery)
         showCollapsedClock = defaults.bool(forKey: Keys.showCollapsedClock)
         showCollapsedAgents = defaults.object(forKey: Keys.showCollapsedAgents) as? Bool ?? true
+        showAgentStrip = defaults.object(forKey: Keys.showAgentStrip) as? Bool ?? true
+        agentStripReading = defaults.string(forKey: Keys.agentStripReading)
+            ?? AgentStrip.ReadingKind.tightestLimit.rawValue
         showExpandedMedia = defaults.bool(forKey: Keys.showExpandedMedia)
         showExpandedActiveApp = defaults.bool(forKey: Keys.showExpandedActiveApp)
         showExpandedVolume = defaults.bool(forKey: Keys.showExpandedVolume)
@@ -622,6 +639,8 @@ final class AppSettings: ObservableObject {
             Keys.showCollapsedBattery: false,
             Keys.showCollapsedClock: true,
             Keys.showCollapsedAgents: true,
+            Keys.showAgentStrip: true,
+            Keys.agentStripReading: AgentStrip.ReadingKind.tightestLimit.rawValue,
             Keys.showExpandedMedia: true,
             Keys.showExpandedActiveApp: true,
             Keys.showExpandedVolume: true,
@@ -669,6 +688,8 @@ final class AppSettings: ObservableObject {
         showCollapsedBattery = false
         showCollapsedClock = true
         showCollapsedAgents = true
+        showAgentStrip = true
+        agentStripReading = AgentStrip.ReadingKind.tightestLimit.rawValue
         showExpandedMedia = true
         showExpandedActiveApp = true
         showExpandedVolume = true

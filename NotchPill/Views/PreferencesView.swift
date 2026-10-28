@@ -149,6 +149,17 @@ struct PreferencesView: View {
                     Toggle("Battery", isOn: $settings.showCollapsedBattery)
                 }
             }
+            Toggle("Show working agents beside the camera", isOn: $settings.showAgentStrip)
+                .help("While an agent works or waits for you, its logo sits left "
+                      + "of the camera and a reading sits right of it. Hidden "
+                      + "when no agent is active.")
+            if settings.showAgentStrip {
+                Picker("Right of the camera", selection: $settings.agentStripReading) {
+                    ForEach(AgentStrip.ReadingKind.allCases) { kind in
+                        Text(kind.title).tag(kind.rawValue)
+                    }
+                }
+            }
             Text("Browser tabs beside the notch stay clickable.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
