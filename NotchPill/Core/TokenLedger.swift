@@ -84,25 +84,40 @@ enum TokenLedger {
         return buckets
     }
 
+    /// Where a Codex transcript's running total stood after the last read, so
+    /// the next read can continue from the new bytes alone.
+    struct CodexProgress: Codable, Equatable {
+        var model: String?
+        var last = TokenTally()
+    }
+
     /// Codex reports a *running total* for the session rather than per-turn
     /// deltas, so summing the records would multiply a session by its number
-    /// of turns. Each day instead gets the growth of the total across that
-    /// day: a session resumed today counts only today's work today, rather
-    /// than moving everything it ever did onto the day it last reported.
+    /// of turns. Each record instead contributes how far the total grew since
+    /// the one before, on the day it was written: a session resumed today
+    /// counts only today's work today, rather than moving everything it ever
+    /// did onto the day it last reported.
     ///
     /// The model is named in a session record, not in the token record, so it
     /// is carried across from wherever it appears.
     static func codexBuckets(in text: String) -> Buckets {
-        var model: String?
-        // The last running total seen on each day, in transcript order.
-        var closing: [(day: String, tally: TokenTally)] = []
+        codexBuckets(in: text, continuing: CodexProgress()).buckets
+    }
+
+    static func codexBuckets(in text: String, continuing start: CodexProgress)
+        -> (buckets: Buckets, progress: CodexProgress) {
+        var progress = start
+        var grownByDay: [String: TokenTally] = [:]
 
         for line in text.split(separator: "\n") {
+            // Most of a rollout is conversation. Skip it before paying for JSON.
+            guard line.contains("token_count")
+                    || (progress.model == nil && line.contains("\"model\"")) else { continue }
             guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8))
                     as? [String: Any],
                   let payload = object["payload"] as? [String: Any] else { continue }
-            if model == nil, let named = payload["model"] as? String, !named.isEmpty {
-                model = named
+            if progress.model == nil, let named = payload["model"] as? String, !named.isEmpty {
+                progress.model = named
             }
             guard payload["type"] as? String == "token_count",
                   let info = payload["info"] as? [String: Any],
@@ -113,24 +128,16 @@ enum TokenLedger {
                                    cacheWrite: int(totals["cache_write_input_tokens"]),
                                    cacheRead: int(totals["cached_input_tokens"]))
             guard tally.total > 0 || tally.cacheRead > 0 else { continue }
-            if closing.last?.day == day {
-                closing[closing.count - 1].tally = tally
-            } else {
-                closing.append((day, tally))
-            }
+            let grown = tally.growth(since: progress.last)
+            progress.last = tally
+            guard grown.total > 0 || grown.cacheRead > 0 else { continue }
+            grownByDay[day] = (grownByDay[day] ?? TokenTally()) + grown
         }
 
-        let name = model ?? "codex"
+        let name = progress.model ?? "codex"
         var buckets: Buckets = [:]
-        var previous = TokenTally()
-        for entry in closing {
-            let grown = entry.tally.growth(since: previous)
-            previous = entry.tally
-            guard grown.total > 0 || grown.cacheRead > 0 else { continue }
-            buckets[entry.day, default: [:]][name, default: TokenTally()] =
-                (buckets[entry.day]?[name] ?? TokenTally()) + grown
-        }
-        return buckets
+        for (day, tally) in grownByDay { buckets[day] = [name: tally] }
+        return (buckets, progress)
     }
 
     /// Sums the buckets falling inside a period.

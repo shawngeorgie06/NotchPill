@@ -245,6 +245,35 @@ struct AgentUsageReviewFixTests {
         #expect(buckets[dayB]?["gpt-6.1-sol"]?.total == 10)
     }
 
+    private static func record(_ day: String, _ input: Int) -> String {
+        "{\"timestamp\":\"\(day)T12:00:00.000Z\",\"payload\":{\"type\":\"token_count\","
+            + "\"info\":{\"total_token_usage\":{\"input_tokens\":\(input)}}}}"
+    }
+
+    /// Every record counts, middle days included, and reading a transcript in
+    /// two pieces gives the same answer as reading it whole.
+    @Test func codexReadsContinueAcrossChunks() throws {
+        let first = [Self.record("2026-08-22", 300)].joined(separator: "\n")
+        let rest = [Self.record("2026-08-23", 500), Self.record("2026-08-23", 700),
+                    Self.record("2026-08-24", 1_000)].joined(separator: "\n")
+        let whole = TokenLedger.codexBuckets(in: first + "\n" + rest)
+        let (a, progress) = TokenLedger.codexBuckets(in: first, continuing: .init())
+        let (b, _) = TokenLedger.codexBuckets(in: rest, continuing: progress)
+        #expect(TokenLedger.merge(a, b) == whole)
+        let days = ["2026-08-22", "2026-08-23", "2026-08-24"]
+            .map { TokenLedger.day(from: "\($0)T12:00:00.000Z") }
+        #expect(days.map { whole[$0 ?? ""]?["codex"]?.input } == [300, 400, 300])
+    }
+
+    /// A total that restarts partway through a day keeps the work done
+    /// before the restart.
+    @Test func aRestartWithinADayKeepsEarlierWork() throws {
+        let text = [Self.record("2026-08-23", 1_000), Self.record("2026-08-24", 1_200),
+                    Self.record("2026-08-24", 50)].joined(separator: "\n")
+        let today = try #require(TokenLedger.day(from: "2026-08-24T12:00:00.000Z"))
+        #expect(TokenLedger.codexBuckets(in: text)[today]?["codex"]?.input == 250)
+    }
+
     @Test func aRestartedTotalCountsAsFreshWork() {
         let earlier = TokenTally(input: 500, output: 50)
         let restarted = TokenTally(input: 20, output: 60)

@@ -1461,6 +1461,15 @@ final class NotchController {
         // each prompt is distinct. They now receive their own short timer below.
         if alert.kind == .waiting {
             if let id = alert.sessionId, !id.isEmpty { waitingCount[id, default: 0] += 1 }
+            // A finished peek still in the 120ms batch is older than this
+            // question. Flushed afterwards, it would retire the question as
+            // answered — so the question wins and the stale finish is dropped.
+            let before = pendingDevReadyAlerts.count
+            pendingDevReadyAlerts.removeAll { $0.isSameSession(as: alert) }
+            if pendingDevReadyAlerts.count != before {
+                LogStore.log("peek", "dropped queued finish (session asked again) "
+                    + "session=\(alert.sessionId?.prefix(8) ?? "-")")
+            }
             state.enqueueWaiting(alert)   // replace-per-session, no fingerprint dedup
             enrichAgentMessage(for: alert)
             scheduleWaitingDismiss(for: alert)
