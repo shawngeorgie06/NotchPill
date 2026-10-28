@@ -397,11 +397,19 @@ struct NotchRootView: View {
 
     private var collapsedContent: some View {
         VStack(spacing: 0) {
-            if let strip = agentStrip {
-                AgentStripView(strip: strip, notchWidth: metrics.notchWidth,
-                               notchHeight: metrics.notchHeight)
-                    .frame(width: frameSize.width)
-                    .transition(.opacity)
+            if agentStrip != nil {
+                // Whether the strip shows depends only on sessions, but its
+                // reading also ages: a cached limit can pass its reset or go
+                // stale while nothing new is published. Re-read it on a clock.
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    if let strip = NotchContentSnapshot.agentStrip(state: state, settings: settings,
+                                                                   now: context.date) {
+                        AgentStripView(strip: strip, notchWidth: metrics.notchWidth,
+                                       notchHeight: metrics.notchHeight)
+                    }
+                }
+                .frame(width: frameSize.width, height: metrics.notchHeight)
+                .transition(.opacity)
             } else {
                 Color.clear.frame(height: metrics.notchHeight)
             }

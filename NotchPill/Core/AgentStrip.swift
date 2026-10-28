@@ -161,7 +161,11 @@ struct AgentStrip: Equatable {
             add(.codex, codex.weeklyPercent, resetsAt: codex.weeklyResetsAt, updatedAt: codex.updatedAt)
         }
         if let cursor, !cursor.isUnlimited {
-            add(.cursor, cursor.percentUsed, resetsAt: cursor.cycleEnd, updatedAt: cursor.updatedAt)
+            // Auto and API are separate pools with their own ceilings; either
+            // can run out while the blended total still looks comfortable.
+            for percent in [cursor.percentUsed, cursor.autoPercentUsed, cursor.apiPercentUsed] {
+                add(.cursor, percent, resetsAt: cursor.cycleEnd, updatedAt: cursor.updatedAt)
+            }
         }
         return windows
     }

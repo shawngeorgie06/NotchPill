@@ -29,9 +29,10 @@ struct AgentStripTests {
                    creditBalance: nil, updatedAt: now.addingTimeInterval(-updated))
     }
 
-    private func cursor(_ percent: Int, unlimited: Bool = false) -> CursorQuota {
+    private func cursor(_ percent: Int, unlimited: Bool = false,
+                        auto: Int? = nil, api: Int? = nil) -> CursorQuota {
         CursorQuota(used: percent, limit: 100, included: nil, bonus: nil, percentUsed: percent,
-                    autoPercentUsed: nil, apiPercentUsed: nil,
+                    autoPercentUsed: auto, apiPercentUsed: api,
                     cycleEnd: now.addingTimeInterval(86_400), membership: nil,
                     isUnlimited: unlimited, onDemandEnabled: false, updatedAt: now)
     }
@@ -111,6 +112,27 @@ struct AgentStripTests {
     func unlimitedCursorSkipped() {
         #expect(AgentStrip.usageWindows(claude: nil, codex: nil, cursor: cursor(80, unlimited: true),
                                         now: now).isEmpty)
+    }
+
+    @Test("Cursor's auto and API pools count on their own")
+    func cursorPools() {
+        let strip = resolve([session("cursor", .working)], codex: codex(60),
+                            cursor: cursor(30, auto: 12, api: 95))
+        #expect(strip?.reading == .limit(.init(agent: .cursor, percent: 95, isStale: false)))
+        let own = resolve([session("cursor", .working)], codex: codex(60),
+                          cursor: cursor(30, auto: 12, api: 95), reading: .agentLimit)
+        #expect(own?.reading == .limit(.init(agent: .cursor, percent: 95, isStale: false)))
+    }
+
+    @Test("the same quota reads differently once time passes its reset or freshness")
+    func readingAgesWithTime() {
+        let sessions = [session("claude-code", .working)]
+        let quota = claude(session: 80, week: 10)
+        let later = now.addingTimeInterval(3600 + 60)
+        let aged = AgentStrip.resolve(sessions: sessions, claude: quota, codex: nil, cursor: nil,
+                                      readingKind: .tightestLimit, now: later)
+        // The session window reset at +1h; only the stale weekly reading remains.
+        #expect(aged?.reading == .limit(.init(agent: .claudeCode, percent: 10, isStale: true)))
     }
 
     @Test("on a tie the agent being shown wins")
