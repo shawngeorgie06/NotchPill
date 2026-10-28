@@ -40,6 +40,9 @@ final class NotchController {
     /// Most-recent finished-agent alert, kept so the reply hotkey can target it
     /// even after its peek has auto-dismissed.
     private var lastFinishedAlert: DevReadyAlert?
+    /// Counts each session's questions, so a finished peek held back to time
+    /// its turn can tell that the session has since asked something new.
+    private var waitingCount: [String: Int] = [:]
 
     // Hover.
     private var collapseWorkItem: DispatchWorkItem?
@@ -1457,6 +1460,7 @@ final class NotchController {
         // Waiting alerts still bypass finished-event dedup and batching, because
         // each prompt is distinct. They now receive their own short timer below.
         if alert.kind == .waiting {
+            if let id = alert.sessionId, !id.isEmpty { waitingCount[id, default: 0] += 1 }
             state.enqueueWaiting(alert)   // replace-per-session, no fingerprint dedup
             enrichAgentMessage(for: alert)
             scheduleWaitingDismiss(for: alert)
@@ -1469,31 +1473,50 @@ final class NotchController {
             return
         }
 
-        if devReadyDedup.shouldSuppress(alert) { return }
-
         // Timing a turn means reading its transcript, so only pay for that
         // when the filter is on, and only for the agents whose transcripts
         // say when a turn began.
         let minimum = AppSettings.shared.minimumTurnSeconds
         if minimum > 0, let sessionId = alert.sessionId, !sessionId.isEmpty,
            alert.knownAgent == .claudeCode || alert.knownAgent == .codex {
+            // Checked now but recorded only if the peek survives: a turn the
+            // filter drops must not, through dedup, also silence the host
+            // app's own peek for it.
+            if devReadyDedup.wouldSuppress(alert) { return }
             let finishedAt = alert.date
+            let questionsBefore = waitingCount[sessionId, default: 0]
             Task { [weak self] in
                 guard let self else { return }
                 let startedAt = await agentSessions.turnStart(sessionId: sessionId)
                 await MainActor.run {
+                    // The session asked something while the transcript was
+                    // read. That question is newer than this turn, and letting
+                    // the finished peek through would retire it.
+                    if self.waitingCount[sessionId, default: 0] != questionsBefore {
+                        LogStore.log("peek", "dropped (session asked again while timing) "
+                            + "session=\(sessionId.prefix(8))")
+                        return
+                    }
                     if Self.isQuickTurn(startedAt: startedAt, finishedAt: finishedAt,
                                         minimum: TimeInterval(minimum)) {
                         let seconds = startedAt.map { Int(finishedAt.timeIntervalSince($0)) } ?? -1
                         LogStore.log("peek", "suppressed (turn took \(seconds)s, "
                             + "under \(minimum)s) session=\(sessionId.prefix(8))")
+                        // Not announced, but still finished: an answered
+                        // question must not keep offering its buttons.
+                        for waiting in self.state.devReadyAlerts
+                        where waiting.kind == .waiting && waiting.isSameSession(as: alert) {
+                            self.dismissPeek(id: waiting.id)
+                        }
                         return
                     }
+                    if self.devReadyDedup.shouldSuppress(alert) { return }
                     self.queueFinished(alert)
                 }
             }
             return
         }
+        if devReadyDedup.shouldSuppress(alert) { return }
         queueFinished(alert)
     }
 
@@ -2082,6 +2105,12 @@ struct DevReadyDedup {
     /// which is well under a second in practice.
     var hostWindow: TimeInterval = 5
     private var recentHosts: [((host: String, agent: String), Date)] = []
+
+    /// The same answer as `shouldSuppress`, without recording the alert.
+    func wouldSuppress(_ alert: DevReadyAlert, now: Date = Date()) -> Bool {
+        var probe = self
+        return probe.shouldSuppress(alert, now: now)
+    }
 
     mutating func shouldSuppress(_ alert: DevReadyAlert, now: Date = Date()) -> Bool {
         guard alert.kind == .finished else { return false }

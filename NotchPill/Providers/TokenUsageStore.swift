@@ -118,7 +118,9 @@ final class TokenUsageStore: ObservableObject {
 
     private static var cacheURL: URL {
         let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".notchpill")
-        return dir.appendingPathComponent("token-cache-v2.json")
+        // v3: Codex buckets became per-day growth rather than the whole
+        // session on its last day, so older entries must be re-read.
+        return dir.appendingPathComponent("token-cache-v3.json")
     }
 
     init() { loadCache() }
@@ -255,6 +257,9 @@ final class TokenUsageStore: ObservableObject {
     // MARK: - Cache persistence
 
     private func loadCache() {
+        // The superseded cache is never read again; leave nothing stale behind.
+        try? FileManager.default.removeItem(
+            at: Self.cacheURL.deletingLastPathComponent().appendingPathComponent("token-cache-v2.json"))
         guard let data = try? Data(contentsOf: Self.cacheURL),
               let decoded = try? JSONDecoder().decode([String: FileState].self, from: data)
         else { return }

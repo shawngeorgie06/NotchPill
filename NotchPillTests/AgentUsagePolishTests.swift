@@ -225,3 +225,48 @@ struct UsageHistoryTests {
         #expect(ExpandedActivity.usageHistory(history).kindLabel == "Usage history")
     }
 }
+
+@Suite("Review fixes: Codex day split and filtered dedup")
+struct AgentUsageReviewFixTests {
+    /// A resumed Codex session reports one running total. Yesterday's work
+    /// must stay on yesterday, and today gets only what today added.
+    @Test func codexTotalsSplitAcrossDays() throws {
+        let yesterday = "2026-08-23T12:00:00.000Z"
+        let today = "2026-08-24T12:00:00.000Z"
+        let text = """
+        {"timestamp":"\(yesterday)","payload":{"type":"session_meta","model":"gpt-6.1-sol"}}
+        {"timestamp":"\(yesterday)","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":900,"output_tokens":100}}}}
+        {"timestamp":"\(today)","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":905,"output_tokens":105}}}}
+        """
+        let buckets = TokenLedger.codexBuckets(in: text)
+        let dayA = try #require(TokenLedger.day(from: yesterday))
+        let dayB = try #require(TokenLedger.day(from: today))
+        #expect(buckets[dayA]?["gpt-6.1-sol"]?.total == 1_000)
+        #expect(buckets[dayB]?["gpt-6.1-sol"]?.total == 10)
+    }
+
+    @Test func aRestartedTotalCountsAsFreshWork() {
+        let earlier = TokenTally(input: 500, output: 50)
+        let restarted = TokenTally(input: 20, output: 60)
+        let grown = restarted.growth(since: earlier)
+        #expect(grown.input == 20)
+        #expect(grown.output == 10)
+    }
+
+    /// Checking a peek against dedup before the turn filter has decided must
+    /// not record it: a dropped Claude turn would otherwise silence the host
+    /// app's own peek for the same turn.
+    @Test func probingDedupRecordsNothing() {
+        var dedup = DevReadyDedup()
+        let claude = DevReadyAlert(title: "bid-no-bid", subtitle: "finished · main",
+                                   source: "Cursor", agent: "claude-code",
+                                   bundleId: "com.todesktop.230313mzl4w4u92",
+                                   sessionId: "1573ad8b")
+        let cursor = DevReadyAlert(title: "Question for you", subtitle: "regenerate the memo?",
+                                   source: "Cursor", agent: "cursor",
+                                   bundleId: "com.todesktop.230313mzl4w4u92")
+        #expect(dedup.wouldSuppress(claude) == false)
+        #expect(dedup.shouldSuppress(cursor) == false)
+        #expect(dedup.shouldSuppress(claude) == true)
+    }
+}

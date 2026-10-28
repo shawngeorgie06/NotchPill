@@ -27,6 +27,16 @@ struct TokenTally: Equatable, Codable {
                    cacheWrite: lhs.cacheWrite + rhs.cacheWrite,
                    cacheRead: lhs.cacheRead + rhs.cacheRead)
     }
+
+    /// How much a running total grew since an earlier one. A field that went
+    /// down means the total restarted, so the new value is all fresh work.
+    func growth(since earlier: TokenTally) -> TokenTally {
+        func grown(_ now: Int, _ then: Int) -> Int { now >= then ? now - then : now }
+        return TokenTally(input: grown(input, earlier.input),
+                          output: grown(output, earlier.output),
+                          cacheWrite: grown(cacheWrite, earlier.cacheWrite),
+                          cacheRead: grown(cacheRead, earlier.cacheRead))
+    }
 }
 
 /// Reads token usage out of agent transcripts, bucketed by day and model.
@@ -75,14 +85,17 @@ enum TokenLedger {
     }
 
     /// Codex reports a *running total* for the session rather than per-turn
-    /// deltas, so the newest `token_count` is the whole session and summing
-    /// them would multiply it by the number of turns.
+    /// deltas, so summing the records would multiply a session by its number
+    /// of turns. Each day instead gets the growth of the total across that
+    /// day: a session resumed today counts only today's work today, rather
+    /// than moving everything it ever did onto the day it last reported.
     ///
     /// The model is named in a session record, not in the token record, so it
     /// is carried across from wherever it appears.
     static func codexBuckets(in text: String) -> Buckets {
         var model: String?
-        var newest: (day: String, tally: TokenTally)?
+        // The last running total seen on each day, in transcript order.
+        var closing: [(day: String, tally: TokenTally)] = []
 
         for line in text.split(separator: "\n") {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8))
@@ -99,13 +112,25 @@ enum TokenLedger {
                                    output: int(totals["output_tokens"]),
                                    cacheWrite: int(totals["cache_write_input_tokens"]),
                                    cacheRead: int(totals["cached_input_tokens"]))
-            if tally.total > 0 || tally.cacheRead > 0 { newest = (day, tally) }
+            guard tally.total > 0 || tally.cacheRead > 0 else { continue }
+            if closing.last?.day == day {
+                closing[closing.count - 1].tally = tally
+            } else {
+                closing.append((day, tally))
+            }
         }
 
-        guard let newest else { return [:] }
-        // A session running past midnight lands entirely on the day it last
-        // reported. Splitting it would mean trusting deltas Codex does not give.
-        return [newest.day: [model ?? "codex": newest.tally]]
+        let name = model ?? "codex"
+        var buckets: Buckets = [:]
+        var previous = TokenTally()
+        for entry in closing {
+            let grown = entry.tally.growth(since: previous)
+            previous = entry.tally
+            guard grown.total > 0 || grown.cacheRead > 0 else { continue }
+            buckets[entry.day, default: [:]][name, default: TokenTally()] =
+                (buckets[entry.day]?[name] ?? TokenTally()) + grown
+        }
+        return buckets
     }
 
     /// Sums the buckets falling inside a period.
