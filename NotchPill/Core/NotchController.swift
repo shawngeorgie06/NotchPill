@@ -40,11 +40,10 @@ final class NotchController {
     /// Most-recent finished-agent alert, kept so the reply hotkey can target it
     /// even after its peek has auto-dismissed.
     private var lastFinishedAlert: DevReadyAlert?
-    /// Recent questions, numbered in arrival order, so a finished peek held
-    /// back to time its turn can tell that its session has since asked
-    /// something new — matched the same way a finish retires a question.
-    private var questionSerial = 0
-    private var recentQuestions: [(serial: Int, alert: DevReadyAlert)] = []
+    /// Finished peeks held back while their turn is timed. A question from
+    /// the same session — matched the way a finish retires a question —
+    /// marks the hold stale, so the older finish cannot retire it.
+    private var heldFinishes: [UUID: (alert: DevReadyAlert, stale: Bool)] = [:]
 
     // Hover.
     private var collapseWorkItem: DispatchWorkItem?
@@ -1462,9 +1461,9 @@ final class NotchController {
         // Waiting alerts still bypass finished-event dedup and batching, because
         // each prompt is distinct. They now receive their own short timer below.
         if alert.kind == .waiting {
-            questionSerial += 1
-            recentQuestions.append((questionSerial, alert))
-            if recentQuestions.count > 32 { recentQuestions.removeFirst(recentQuestions.count - 32) }
+            for (token, held) in heldFinishes where held.alert.isSameSession(as: alert) {
+                heldFinishes[token]?.stale = true
+            }
             // A finished peek still in the 120ms batch is older than this
             // question. Flushed afterwards, it would retire the question as
             // answered — so the question wins and the stale finish is dropped.
@@ -1497,7 +1496,8 @@ final class NotchController {
             // app's own peek for it.
             if devReadyDedup.wouldSuppress(alert) { return }
             let finishedAt = alert.date
-            let questionsBefore = questionSerial
+            let hold = UUID()
+            heldFinishes[hold] = (alert, false)
             Task { [weak self] in
                 guard let self else { return }
                 let startedAt = await agentSessions.turnStart(sessionId: sessionId)
@@ -1505,9 +1505,8 @@ final class NotchController {
                     // The session asked something while the transcript was
                     // read. That question is newer than this turn, and letting
                     // the finished peek through would retire it.
-                    if self.recentQuestions.contains(where: {
-                        $0.serial > questionsBefore && $0.alert.isSameSession(as: alert)
-                    }) {
+                    let stale = self.heldFinishes.removeValue(forKey: hold)?.stale ?? false
+                    if stale {
                         LogStore.log("peek", "dropped (session asked again while timing) "
                             + "session=\(sessionId.prefix(8))")
                         return
