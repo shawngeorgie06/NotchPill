@@ -116,6 +116,11 @@ final class AgentSessionsProvider {
         await scanner.lastAgentMessage(sessionId: sessionId)
     }
 
+    /// When a session's current turn began, for the minimum-turn filter.
+    func turnStart(sessionId: String) async -> Date? {
+        await scanner.turnStart(sessionId: sessionId)
+    }
+
     /// Called when a peek says a session is blocked (or has stopped being).
     func noteWaiting(sessionId: String?, waiting: Bool) {
         guard let id = sessionId, !id.isEmpty else { return }

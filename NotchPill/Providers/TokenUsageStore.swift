@@ -6,6 +6,10 @@ struct TokenUsageSummary: Equatable {
     /// Tool → model → tally, already filtered to the chosen period.
     var byTool: [String: [String: TokenTally]] = [:]
 
+    /// Day (`yyyy-MM-dd`) → tool → full-price tokens, for the history card.
+    /// Independent of the period: a history is the days before it.
+    var daily: [String: [String: Int]] = [:]
+
     /// Full-price tokens: fresh prompt, generation, and cache writes.
     func total(for tool: String) -> Int {
         (byTool[tool] ?? [:]).values.reduce(0) { $0 + $1.total }
@@ -107,14 +111,17 @@ final class TokenUsageStore: ObservableObject {
     struct FileState: Codable {
         var size: Int
         var buckets: TokenLedger.Buckets
-        /// Codex reports running totals, so its buckets are replaced on each
-        /// read rather than extended.
+        /// Codex reports running totals, so each read continues from where
+        /// the last one left the total.
         var isCumulative: Bool
+        var codex: TokenLedger.CodexProgress?
     }
 
     private static var cacheURL: URL {
         let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".notchpill")
-        return dir.appendingPathComponent("token-cache-v2.json")
+        // v3: Codex buckets became per-day growth rather than the whole
+        // session on its last day, so older entries must be re-read.
+        return dir.appendingPathComponent("token-cache-v3.json")
     }
 
     init() { loadCache() }
@@ -142,14 +149,20 @@ final class TokenUsageStore: ObservableObject {
     func recompute(period: TokenUsagePeriod) {
         let cutoff = period.cutoff(launchedAt: launchedAt)
         var byTool: [String: [String: TokenTally]] = [:]
+        var daily: [String: [String: Int]] = [:]
+        let historyStart = TokenLedger.day(from: UsageHistory.firstDay())
         for (path, state) in cache {
             let tool = path.contains("/.codex/") ? TokenUsageSummary.codex : TokenUsageSummary.claude
             for (model, tally) in TokenLedger.total(state.buckets, since: cutoff) {
                 byTool[tool, default: [:]][model, default: TokenTally()] =
                     (byTool[tool]?[model] ?? TokenTally()) + tally
             }
+            for (day, models) in state.buckets where day >= historyStart {
+                let tokens = models.values.reduce(0) { $0 + $1.total }
+                if tokens > 0 { daily[day, default: [:]][tool, default: 0] += tokens }
+            }
         }
-        let fresh = TokenUsageSummary(byTool: byTool)
+        let fresh = TokenUsageSummary(byTool: byTool, daily: daily)
         if fresh != summary { summary = fresh }
     }
 
@@ -179,13 +192,26 @@ final class TokenUsageStore: ObservableObject {
         for url in codex {
             let path = url.path
             let size = fileSize(url)
-            if let cached = out[path], cached.size == size { continue }
-            // Running totals: the answer is in the newest records, and the
-            // model is named at the top, so both ends are read.
-            guard let text = readEnds(url) else { continue }
-            out[path] = FileState(size: size,
-                                  buckets: TokenLedger.codexBuckets(in: text),
-                                  isCumulative: true)
+            if let cached = out[path], cached.size == size, cached.codex != nil { continue }
+            let previous = out[path]
+            // Append-only like Claude's, so only the new bytes need parsing. A
+            // file that shrank was replaced, and is read again from the top.
+            let resumable = previous?.codex != nil && (previous?.size ?? 0) <= size
+            let offset = resumable ? previous?.size ?? 0 : 0
+            guard let (text, consumed) = read(url, from: offset) else { continue }
+            let (fresh, progress) = TokenLedger.codexBuckets(
+                in: text, continuing: resumable ? previous?.codex ?? .init() : .init())
+            var base = resumable ? previous?.buckets ?? [:] : [:]
+            // Work read before the model was named went under the fallback
+            // label. Name it now, so the answer does not depend on where
+            // one read happened to stop.
+            if previous?.codex?.model == nil, let model = progress.model {
+                base = TokenLedger.relabel(base, from: "codex", to: model)
+            }
+            out[path] = FileState(size: offset + consumed,
+                                  buckets: TokenLedger.merge(base, fresh),
+                                  isCumulative: true,
+                                  codex: progress)
         }
 
         // Forget files that are gone, so a cleared history stops being counted.
@@ -222,29 +248,12 @@ final class TokenUsageStore: ObservableObject {
         return (String(decoding: complete, as: UTF8.self), complete.count)
     }
 
-    /// First and last 256KB: enough for the session header and the newest
-    /// totals without reading a 100MB rollout in full.
-    nonisolated private static func readEnds(_ url: URL, window: Int = 262_144) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        let size = fileSize(url)
-        guard size > 0 else { return nil }
-        var text = ""
-        if let head = try? handle.read(upToCount: min(window, size)) {
-            text += String(decoding: head, as: UTF8.self)
-        }
-        if size > window * 2 {
-            try? handle.seek(toOffset: UInt64(size - window))
-            if let tail = try? handle.readToEnd() {
-                text += "\n" + String(decoding: tail, as: UTF8.self)
-            }
-        }
-        return text
-    }
-
     // MARK: - Cache persistence
 
     private func loadCache() {
+        // The superseded cache is never read again; leave nothing stale behind.
+        try? FileManager.default.removeItem(
+            at: Self.cacheURL.deletingLastPathComponent().appendingPathComponent("token-cache-v2.json"))
         guard let data = try? Data(contentsOf: Self.cacheURL),
               let decoded = try? JSONDecoder().decode([String: FileState].self, from: data)
         else { return }

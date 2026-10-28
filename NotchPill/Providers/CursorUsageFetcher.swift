@@ -29,6 +29,8 @@ struct CursorQuota: Equatable {
     /// Pay-as-you-go past the included pool, when the user has enabled it.
     var onDemandEnabled: Bool
     var updatedAt: Date?
+    /// When the billing cycle began, for the meter's pace tick.
+    var cycleStart: Date? = nil
 
     var remaining: Int { max(0, limit - used) }
 
@@ -169,7 +171,8 @@ enum CursorUsageFetcher {
             membership: root["membershipType"] as? String,
             isUnlimited: unlimited,
             onDemandEnabled: (onDemand?["enabled"] as? Bool) ?? false,
-            updatedAt: now)
+            updatedAt: now,
+            cycleStart: (root["billingCycleStart"] as? String).flatMap(parseTimestamp))
     }
 
     private static func unlimitedQuota(_ root: [String: Any], now: Date) -> CursorQuota {

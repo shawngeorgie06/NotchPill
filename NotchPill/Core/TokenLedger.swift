@@ -27,6 +27,16 @@ struct TokenTally: Equatable, Codable {
                    cacheWrite: lhs.cacheWrite + rhs.cacheWrite,
                    cacheRead: lhs.cacheRead + rhs.cacheRead)
     }
+
+    /// How much a running total grew since an earlier one. A field that went
+    /// down means the total restarted, so the new value is all fresh work.
+    func growth(since earlier: TokenTally) -> TokenTally {
+        func grown(_ now: Int, _ then: Int) -> Int { now >= then ? now - then : now }
+        return TokenTally(input: grown(input, earlier.input),
+                          output: grown(output, earlier.output),
+                          cacheWrite: grown(cacheWrite, earlier.cacheWrite),
+                          cacheRead: grown(cacheRead, earlier.cacheRead))
+    }
 }
 
 /// Reads token usage out of agent transcripts, bucketed by day and model.
@@ -74,22 +84,40 @@ enum TokenLedger {
         return buckets
     }
 
+    /// Where a Codex transcript's running total stood after the last read, so
+    /// the next read can continue from the new bytes alone.
+    struct CodexProgress: Codable, Equatable {
+        var model: String?
+        var last = TokenTally()
+    }
+
     /// Codex reports a *running total* for the session rather than per-turn
-    /// deltas, so the newest `token_count` is the whole session and summing
-    /// them would multiply it by the number of turns.
+    /// deltas, so summing the records would multiply a session by its number
+    /// of turns. Each record instead contributes how far the total grew since
+    /// the one before, on the day it was written: a session resumed today
+    /// counts only today's work today, rather than moving everything it ever
+    /// did onto the day it last reported.
     ///
     /// The model is named in a session record, not in the token record, so it
     /// is carried across from wherever it appears.
     static func codexBuckets(in text: String) -> Buckets {
-        var model: String?
-        var newest: (day: String, tally: TokenTally)?
+        codexBuckets(in: text, continuing: CodexProgress()).buckets
+    }
+
+    static func codexBuckets(in text: String, continuing start: CodexProgress)
+        -> (buckets: Buckets, progress: CodexProgress) {
+        var progress = start
+        var grownByDay: [String: TokenTally] = [:]
 
         for line in text.split(separator: "\n") {
+            // Most of a rollout is conversation. Skip it before paying for JSON.
+            guard line.contains("token_count")
+                    || (progress.model == nil && line.contains("\"model\"")) else { continue }
             guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8))
                     as? [String: Any],
                   let payload = object["payload"] as? [String: Any] else { continue }
-            if model == nil, let named = payload["model"] as? String, !named.isEmpty {
-                model = named
+            if progress.model == nil, let named = payload["model"] as? String, !named.isEmpty {
+                progress.model = named
             }
             guard payload["type"] as? String == "token_count",
                   let info = payload["info"] as? [String: Any],
@@ -99,13 +127,30 @@ enum TokenLedger {
                                    output: int(totals["output_tokens"]),
                                    cacheWrite: int(totals["cache_write_input_tokens"]),
                                    cacheRead: int(totals["cached_input_tokens"]))
-            if tally.total > 0 || tally.cacheRead > 0 { newest = (day, tally) }
+            // A zero total still counts as a reading: it is where a restart
+            // begins, and skipping it would hide that the total went down.
+            let grown = tally.growth(since: progress.last)
+            progress.last = tally
+            guard grown.total > 0 || grown.cacheRead > 0 else { continue }
+            grownByDay[day] = (grownByDay[day] ?? TokenTally()) + grown
         }
 
-        guard let newest else { return [:] }
-        // A session running past midnight lands entirely on the day it last
-        // reported. Splitting it would mean trusting deltas Codex does not give.
-        return [newest.day: [model ?? "codex": newest.tally]]
+        let name = progress.model ?? "codex"
+        var buckets: Buckets = [:]
+        for (day, tally) in grownByDay { buckets[day] = [name: tally] }
+        return (buckets, progress)
+    }
+
+    /// Moves every tally filed under one model name to another.
+    static func relabel(_ buckets: Buckets, from old: String, to new: String) -> Buckets {
+        guard old != new else { return buckets }
+        var out = buckets
+        for (day, models) in buckets {
+            guard let tally = models[old] else { continue }
+            out[day]?[old] = nil
+            out[day]?[new] = (models[new] ?? TokenTally()) + tally
+        }
+        return out
     }
 
     /// Sums the buckets falling inside a period.

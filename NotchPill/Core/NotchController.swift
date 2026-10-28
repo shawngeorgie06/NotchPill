@@ -40,6 +40,10 @@ final class NotchController {
     /// Most-recent finished-agent alert, kept so the reply hotkey can target it
     /// even after its peek has auto-dismissed.
     private var lastFinishedAlert: DevReadyAlert?
+    /// Finished peeks held back while their turn is timed. A question from
+    /// the same session — matched the way a finish retires a question —
+    /// marks the hold stale, so the older finish cannot retire it.
+    private var heldFinishes: [UUID: (alert: DevReadyAlert, stale: Bool)] = [:]
 
     // Hover.
     private var collapseWorkItem: DispatchWorkItem?
@@ -1457,6 +1461,18 @@ final class NotchController {
         // Waiting alerts still bypass finished-event dedup and batching, because
         // each prompt is distinct. They now receive their own short timer below.
         if alert.kind == .waiting {
+            for (token, held) in heldFinishes where held.alert.isSameSession(as: alert) {
+                heldFinishes[token]?.stale = true
+            }
+            // A finished peek still in the 120ms batch is older than this
+            // question. Flushed afterwards, it would retire the question as
+            // answered — so the question wins and the stale finish is dropped.
+            let before = pendingDevReadyAlerts.count
+            pendingDevReadyAlerts.removeAll { $0.isSameSession(as: alert) }
+            if pendingDevReadyAlerts.count != before {
+                LogStore.log("peek", "dropped queued finish (session asked again) "
+                    + "session=\(alert.sessionId?.prefix(8) ?? "-")")
+            }
             state.enqueueWaiting(alert)   // replace-per-session, no fingerprint dedup
             enrichAgentMessage(for: alert)
             scheduleWaitingDismiss(for: alert)
@@ -1469,8 +1485,66 @@ final class NotchController {
             return
         }
 
+        // Timing a turn means reading its transcript, so only pay for that
+        // when the filter is on, and only for the agents whose transcripts
+        // say when a turn began.
+        let minimum = AppSettings.shared.minimumTurnSeconds
+        if minimum > 0, let sessionId = alert.sessionId, !sessionId.isEmpty,
+           alert.knownAgent == .claudeCode || alert.knownAgent == .codex {
+            // Checked now but recorded only if the peek survives: a turn the
+            // filter drops must not, through dedup, also silence the host
+            // app's own peek for it.
+            if devReadyDedup.wouldSuppress(alert) { return }
+            let finishedAt = alert.date
+            let hold = UUID()
+            heldFinishes[hold] = (alert, false)
+            Task { [weak self] in
+                guard let self else { return }
+                let startedAt = await agentSessions.turnStart(sessionId: sessionId)
+                await MainActor.run {
+                    // The session asked something while the transcript was
+                    // read. That question is newer than this turn, and letting
+                    // the finished peek through would retire it.
+                    let stale = self.heldFinishes.removeValue(forKey: hold)?.stale ?? false
+                    if stale {
+                        LogStore.log("peek", "dropped (session asked again while timing) "
+                            + "session=\(sessionId.prefix(8))")
+                        return
+                    }
+                    if Self.isQuickTurn(startedAt: startedAt, finishedAt: finishedAt,
+                                        minimum: TimeInterval(minimum)) {
+                        let seconds = startedAt.map { Int(finishedAt.timeIntervalSince($0)) } ?? -1
+                        LogStore.log("peek", "suppressed (turn took \(seconds)s, "
+                            + "under \(minimum)s) session=\(sessionId.prefix(8))")
+                        // Not announced, but still finished: an answered
+                        // question must not keep offering its buttons.
+                        for waiting in self.state.devReadyAlerts
+                        where waiting.kind == .waiting && waiting.isSameSession(as: alert) {
+                            self.dismissPeek(id: waiting.id)
+                        }
+                        return
+                    }
+                    if self.devReadyDedup.shouldSuppress(alert) { return }
+                    self.queueFinished(alert)
+                }
+            }
+            return
+        }
         if devReadyDedup.shouldSuppress(alert) { return }
+        queueFinished(alert)
+    }
 
+    /// Whether a turn was too short to announce. An unknown start is never
+    /// quick: a peek that might have mattered is shown rather than lost.
+    nonisolated static func isQuickTurn(startedAt: Date?, finishedAt: Date,
+                                        minimum: TimeInterval) -> Bool {
+        guard minimum > 0, let startedAt else { return false }
+        let duration = finishedAt.timeIntervalSince(startedAt)
+        guard duration >= 0 else { return false }
+        return duration < minimum
+    }
+
+    private func queueFinished(_ alert: DevReadyAlert) {
         lastFinishedAlert = alert
         pendingDevReadyAlerts.append(alert)
         devReadyCoalesceItem?.cancel()
@@ -2045,6 +2119,12 @@ struct DevReadyDedup {
     /// which is well under a second in practice.
     var hostWindow: TimeInterval = 5
     private var recentHosts: [((host: String, agent: String), Date)] = []
+
+    /// The same answer as `shouldSuppress`, without recording the alert.
+    func wouldSuppress(_ alert: DevReadyAlert, now: Date = Date()) -> Bool {
+        var probe = self
+        return probe.shouldSuppress(alert, now: now)
+    }
 
     mutating func shouldSuppress(_ alert: DevReadyAlert, now: Date = Date()) -> Bool {
         guard alert.kind == .finished else { return false }

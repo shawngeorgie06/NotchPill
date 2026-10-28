@@ -58,7 +58,9 @@ struct ExpandedActivityCard: View {
             if let updatedAt {
                 Spacer(minLength: s(NotchSpace.tight))
                 HStack(spacing: s(NotchSpace.tight)) {
-                    Text(Date().timeIntervalSince(updatedAt) > 3600 ? "Cached" : "Updated")
+                    // Same threshold the tiles fade at, so the word and the faded
+                    // meters agree about whether this is current.
+                    Text(UsageFreshness.isStale(updatedAt) ? "Cached" : "Updated")
                     Text(updatedAt, style: .relative)
                         .monospacedDigit()
                 }
@@ -86,16 +88,27 @@ struct ExpandedActivityCard: View {
 
     /// Keep usage tiles quiet: the bar carries the semantic colour while the
     /// number and label sit on a neutral surface.
-    private func meterTile(percent: Int, label: String, footnote: String? = nil) -> some View {
+    ///
+    /// A usage window passes its `agent` colour, how far through the window
+    /// it is (`pace`), and whether the reading has gone `stale`. A stale tile
+    /// keeps its number but drops colour and tick: the figure is the last one
+    /// known, not a statement about now.
+    private func meterTile(percent: Int, label: String, footnote: String? = nil,
+                           pace: Double? = nil, agent: Color? = nil,
+                           stale: Bool = false) -> some View {
         let radius = s(NotchRadius.tile)
+        let tint = stale ? neutralTint
+            : agent.map { AgentTint.meter(percent: percent, agent: $0) } ?? quotaColor(percent)
+        let shownPace = stale ? nil : pace
         return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
             Text("\(percent)%")
                 .font(font(size: NotchType.hero, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white.opacity(NotchOpacity.primary))
+                .foregroundStyle(.white.opacity(stale ? NotchOpacity.secondary : NotchOpacity.primary))
                 .contentTransition(.numericText())
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            meterBar(percent: percent, tint: quotaColor(percent))
+            MeterBar(percent: percent, tint: tint, thickness: s(NotchSpace.bar),
+                     reduceMotion: reduceMotion, pace: shownPace)
             Text(footnote.map { "\(label) · \($0)" } ?? label)
                 .font(font(size: NotchType.caption, weight: .medium))
                 .monospacedDigit()
@@ -113,9 +126,18 @@ struct ExpandedActivityCard: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .padding(s(NotchSpace.base))
-        .background(NotchPaintedFill(tint: quotaColor(percent), lit: false,
+        .background(NotchPaintedFill(tint: tint, lit: false,
                                      cornerRadius: radius))
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(Self.paceDescription(percent: percent, pace: shownPace) ?? "")
+    }
+
+    /// Spoken beside the figure, since the tick itself has no words.
+    static func paceDescription(percent: Int, pace: Double?) -> String? {
+        guard let pace else { return nil }
+        return UsagePace.isAhead(percent: percent, elapsed: pace)
+            ? "ahead of an even pace" : "within an even pace"
     }
 
     /// The bar on its own, for cards that lay their own figure beside it.
@@ -133,6 +155,9 @@ struct ExpandedActivityCard: View {
         let tint: Color
         let thickness: CGFloat
         let reduceMotion: Bool
+        /// How far through its window the meter is, 0…1. Draws a tick where
+        /// an even spend would have the fill by now.
+        var pace: Double? = nil
 
         private var fraction: CGFloat {
             CGFloat(min(100, max(0, percent))) / 100
@@ -148,6 +173,21 @@ struct ExpandedActivityCard: View {
                         .scaleEffect(x: fraction, y: 1, anchor: .leading)
                 }
                 .frame(height: thickness)
+                // Taller than the bar so it reads over either side of the
+                // fill, and dark-edged so it shows on a light fill too.
+                .overlay {
+                    if let pace {
+                        GeometryReader { geo in
+                            Capsule()
+                                .fill(.white.opacity(NotchOpacity.primary))
+                                .frame(width: max(1.5, thickness * 0.45), height: thickness * 2.2)
+                                .shadow(color: .black.opacity(0.5), radius: 0.5)
+                                .position(x: geo.size.width * CGFloat(min(1, max(0, pace))),
+                                          y: geo.size.height / 2)
+                        }
+                        .allowsHitTesting(false)
+                    }
+                }
                 .animation(NotchMotion.paint(reduceMotion: reduceMotion), value: percent)
         }
     }
@@ -203,6 +243,8 @@ struct ExpandedActivityCard: View {
                 usageFit { claudeQuotaCard(quota) }
             case .cursorQuota(let quota):
                 usageFit { cursorQuotaCard(quota) }
+            case .usageHistory(let history):
+                usageFit { usageHistoryCard(history) }
             case .ci(let runs):
                 VStack(alignment: .leading, spacing: s(NotchSpace.base)) {
                     NotchCardHeading(title: "Repository checks", symbol: "checkmark.seal", count: runs.count,
@@ -311,6 +353,14 @@ struct ExpandedActivityCard: View {
                         RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous)
                             .fill(.black.opacity(NotchOpacity.badge))
                     )
+                    // The agent's own colour, the same one its usage meters and
+                    // history bars wear, so a row and its card read as one.
+                    .overlay {
+                        if let tint = AgentTint.color(for: session.knownAgent) {
+                            RoundedRectangle(cornerRadius: s(NotchRadius.card), style: .continuous)
+                                .strokeBorder(tint.opacity(0.6), lineWidth: max(1, s(1)))
+                        }
+                    }
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: s(NotchSpace.tight)) {
                     Text(session.displayName)
@@ -393,7 +443,8 @@ struct ExpandedActivityCard: View {
     /// Codex meters session and week side by side when the API reports both
     /// windows — the same layout as Claude Code beside it.
     private func codexQuotaCard(_ quota: CodexQuota) -> some View {
-        VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+        let stale = UsageFreshness.isStale(quota.updatedAt)
+        return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
             quotaProviderHeader(
                 "Codex",
                 bundleIds: ["com.openai.codex", "com.openai.chat"],
@@ -402,16 +453,25 @@ struct ExpandedActivityCard: View {
             if let weekly = quota.weeklyPercent {
                 HStack(spacing: s(NotchSpace.snug)) {
                     meterTile(percent: quota.usedPercent, label: "session",
-                              footnote: ClaudeQuota.resetClock(for: quota.resetsAt))
+                              footnote: ClaudeQuota.resetClock(for: quota.resetsAt),
+                              pace: UsagePace.elapsed(resetsAt: quota.resetsAt,
+                                                      length: quota.sessionWindow),
+                              agent: AgentTint.codex, stale: stale)
                         .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
                     meterTile(percent: weekly, label: "week",
-                              footnote: ClaudeQuota.resetClock(for: quota.weeklyResetsAt))
+                              footnote: ClaudeQuota.resetClock(for: quota.weeklyResetsAt),
+                              pace: UsagePace.elapsed(resetsAt: quota.weeklyResetsAt,
+                                                      length: quota.weeklyWindow),
+                              agent: AgentTint.codex, stale: stale)
                         .notchReveal(1, scale: readability, reduceMotion: reduceMotion)
                 }
                 .geometryGroup()
             } else {
                 meterTile(percent: quota.usedPercent, label: quota.resetLabel,
-                          footnote: quota.updatedLabel)
+                          footnote: quota.updatedLabel,
+                          pace: UsagePace.elapsed(resetsAt: quota.resetsAt,
+                                                  length: quota.sessionWindow),
+                          agent: AgentTint.codex, stale: stale)
                     .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
             }
             if let credits = quota.creditsLabel {
@@ -502,7 +562,8 @@ struct ExpandedActivityCard: View {
     }
 
     private func claudeQuotaCard(_ quota: ClaudeQuota) -> some View {
-        VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+        let stale = UsageFreshness.isStale(quota.updatedAt)
+        return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
             quotaProviderHeader(
                 "Claude Code",
                 bundleIds: ["com.anthropic.claudefordesktop", "com.anthropic.claude"],
@@ -511,10 +572,16 @@ struct ExpandedActivityCard: View {
                 updatedAt: quota.updatedAt)
             HStack(spacing: s(NotchSpace.snug)) {
                 meterTile(percent: quota.sessionPercent, label: "session",
-                          footnote: ClaudeQuota.resetClock(for: quota.sessionResetsAt))
+                          footnote: ClaudeQuota.resetClock(for: quota.sessionResetsAt),
+                          pace: UsagePace.elapsed(resetsAt: quota.sessionResetsAt,
+                                                  length: UsagePace.claudeSession),
+                          agent: AgentTint.claude, stale: stale)
                     .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
                 meterTile(percent: quota.weeklyPercent, label: "week",
-                          footnote: ClaudeQuota.resetClock(for: quota.weeklyResetsAt))
+                          footnote: ClaudeQuota.resetClock(for: quota.weeklyResetsAt),
+                          pace: UsagePace.elapsed(resetsAt: quota.weeklyResetsAt,
+                                                  length: UsagePace.claudeWeek),
+                          agent: AgentTint.claude, stale: stale)
                     .notchReveal(1, scale: readability, reduceMotion: reduceMotion)
             }
             .geometryGroup()
@@ -534,8 +601,108 @@ struct ExpandedActivityCard: View {
     /// One meter, not two: Cursor meters a single pool per cycle rather than
     /// Claude's session/week pair. The raw counts sit under the bar because the
     /// percentage alone cannot distinguish "100% of 500" from "100% of 9201".
+    /// Two weeks of bars, stacked by agent, beside a quarter of daily
+    /// activity. The bars answer "how heavy was this week"; the grid answers
+    /// "is this normal for me".
+    private func usageHistoryCard(_ history: UsageHistory) -> some View {
+        let days = history.lastDays()
+        let tools = [TokenUsageSummary.claude, TokenUsageSummary.codex]
+        let totals = tools.map { tool in
+            (tool: tool, tokens: days.reduce(0) { $0 + (history.tokens(on: $1)[tool] ?? 0) })
+        }
+        let peak = max(1, days.map(history.total(on:)).max() ?? 0)
+        let grid = history.grid()
+        let gridValues = grid.flatMap { $0 }.compactMap { $0 }.map(history.total(on:))
+        let cell = s(8)
+        let gap = s(NotchSpace.tight)
+        let chartHeight = cell * 7 + gap * 6
+        return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+            HStack(spacing: s(NotchSpace.snug)) {
+                NotchCardHeading(title: "Usage history", symbol: "chart.bar.xaxis",
+                                 scale: readability, textScale: textScale)
+                Spacer(minLength: s(NotchSpace.tight))
+                Text("\(Self.compactTokens(totals.reduce(0) { $0 + $1.tokens })) · 14d")
+                    .font(font(size: NotchType.caption, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            HStack(alignment: .bottom, spacing: s(NotchSpace.base)) {
+                HStack(alignment: .bottom, spacing: gap) {
+                    ForEach(days, id: \.self) { day in
+                        let byTool = history.tokens(on: day)
+                        VStack(spacing: 0) {
+                            ForEach(tools.reversed(), id: \.self) { tool in
+                                let tokens = byTool[tool] ?? 0
+                                if tokens > 0 {
+                                    Rectangle()
+                                        .fill(AgentTint.color(forTool: tool).opacity(0.85))
+                                        .frame(height: max(1, chartHeight * CGFloat(tokens) / CGFloat(peak)))
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 1, alignment: .bottom)
+                        .background(alignment: .bottom) {
+                            Rectangle().fill(.white.opacity(NotchOpacity.hairline)).frame(height: 1)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: s(1.5), style: .continuous))
+                    }
+                }
+                .frame(height: chartHeight, alignment: .bottom)
+                .frame(maxWidth: .infinity)
+                HStack(alignment: .top, spacing: gap) {
+                    ForEach(grid.indices, id: \.self) { week in
+                        VStack(spacing: gap) {
+                            ForEach(0..<7, id: \.self) { weekday in
+                                RoundedRectangle(cornerRadius: s(1), style: .continuous)
+                                    .fill(Self.historyShade(grid[week][weekday], in: history,
+                                                            among: gridValues))
+                                    .frame(width: cell, height: cell)
+                            }
+                        }
+                    }
+                }
+                .fixedSize()
+            }
+            HStack(spacing: s(NotchSpace.base)) {
+                ForEach(totals, id: \.tool) { entry in
+                    HStack(spacing: s(NotchSpace.snug)) {
+                        Circle().fill(AgentTint.color(forTool: entry.tool)).frame(width: s(5), height: s(5))
+                        Text(entry.tool)
+                            .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
+                        Text(Self.compactTokens(entry.tokens))
+                            .monospacedDigit()
+                            .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+                    }
+                    .font(font(size: NotchType.caption))
+                    .lineLimit(1)
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Usage history")
+        .accessibilityValue(totals.map { "\($0.tool) \(Self.compactTokens($0.tokens)) tokens" }
+            .joined(separator: ", ") + " in the last 14 days")
+    }
+
+    /// A grid day's colour: the agent that did most of the work that day, at a
+    /// strength set by how busy the day was against the rest of the quarter.
+    private static func historyShade(_ day: Date?, in history: UsageHistory,
+                                     among values: [Int]) -> Color {
+        guard let day else { return .clear }
+        let tokens = history.tokens(on: day)
+        let level = UsageHistory.level(tokens.values.reduce(0, +), among: values)
+        guard level > 0, let lead = tokens.max(by: { $0.value < $1.value })?.key else {
+            return .white.opacity(NotchOpacity.hairline)
+        }
+        return AgentTint.color(forTool: lead).opacity([0, 0.3, 0.5, 0.72, 0.95][level])
+    }
+
     private func cursorQuotaCard(_ quota: CursorQuota) -> some View {
-        VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
+        let stale = UsageFreshness.isStale(quota.updatedAt)
+        let pace = UsagePace.elapsed(start: quota.cycleStart, end: quota.cycleEnd)
+        return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
             quotaProviderHeader(
                 "Cursor",
                 bundleIds: ["com.todesktop.230313mzl4w4u92"],
@@ -565,14 +732,17 @@ struct ExpandedActivityCard: View {
             } else if let auto = quota.autoPercentUsed, let api = quota.apiPercentUsed,
                       auto > 0 || api > 0 {
                 HStack(spacing: s(NotchSpace.snug)) {
-                    meterTile(percent: auto, label: "auto")
+                    meterTile(percent: auto, label: "auto", pace: pace,
+                              agent: AgentTint.cursor, stale: stale)
                         .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
-                    meterTile(percent: api, label: "API")
+                    meterTile(percent: api, label: "API", pace: pace,
+                              agent: AgentTint.cursor, stale: stale)
                         .notchReveal(1, scale: readability, reduceMotion: reduceMotion)
                 }
                 .geometryGroup()
             } else {
-                meterTile(percent: quota.percentUsed, label: quota.usageLabel)
+                meterTile(percent: quota.percentUsed, label: quota.usageLabel, pace: pace,
+                          agent: AgentTint.cursor, stale: stale)
                     .notchReveal(0, scale: readability, reduceMotion: reduceMotion)
             }
 

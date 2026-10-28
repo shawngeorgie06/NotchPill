@@ -92,6 +92,8 @@ enum CodexUsageFetcher {
     struct Window: Equatable {
         var usedPercent: Int
         var resetsAt: Date?
+        /// How long the window lasts, when the payload says.
+        var length: TimeInterval? = nil
     }
 
     /// Parses `primary_window` / `secondary_window` (API) or `primary` /
@@ -105,8 +107,12 @@ enum CodexUsageFetcher {
             ?? (dict["reset_at"] as? NSNumber)?.doubleValue
             ?? (dict["resets_at"] as? Double)
             ?? (dict["resets_at"] as? NSNumber)?.doubleValue
+        // The API names the length in seconds, the transcript in minutes.
+        let length = ((dict["limit_window_seconds"] as? NSNumber)?.doubleValue)
+            ?? ((dict["window_minutes"] as? NSNumber)?.doubleValue).map { $0 * 60 }
         return Window(usedPercent: min(100, max(0, Int(used.rounded()))),
-                      resetsAt: resetSeconds.map(Date.init(timeIntervalSince1970:)))
+                      resetsAt: resetSeconds.map(Date.init(timeIntervalSince1970:)),
+                      length: length.flatMap { $0 > 0 ? $0 : nil })
     }
 
     /// Maps the usage payload onto the model the card already renders.
@@ -143,6 +149,8 @@ enum CodexUsageFetcher {
                           weeklyPercent: secondary?.usedPercent,
                           weeklyResetsAt: secondary?.resetsAt,
                           creditBalance: balance,
+                          sessionWindow: primary.length,
+                          weeklyWindow: secondary?.length,
                           // Live from the provider, so "now" is honest — unlike
                           // the transcript, where this was the age of a cached
                           // number.

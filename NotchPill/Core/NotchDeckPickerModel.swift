@@ -36,6 +36,7 @@ struct NotchDeckPickerItem: Equatable, Identifiable {
         "codexQuota": "sparkles",
         "claudeQuota": "hexagon.fill",
         "cursorQuota": "cursorarrow",
+        "usageHistory": "chart.bar.xaxis",
         "ci": "checkmark.seal",
         "recentAlerts": "bell",
         "media": "music.note",

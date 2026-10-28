@@ -18,6 +18,7 @@ protocol ExpandedContentSettings: UsageCardSettings {
     var showExpandedRecentActivity: Bool { get }
     var showClipboard: Bool { get }
     var showTerminal: Bool { get }
+    var showTokenUsage: Bool { get }
     var resolvedCardOrder: [String] { get }
     var pinnedActivityKind: String { get }
 }
@@ -86,6 +87,8 @@ enum NotchContentSnapshot {
             codexQuota: state.codexQuota,
             claudeQuota: settings.showClaudeUsage ? state.claudeQuota : nil,
             cursorQuota: settings.showCursorUsage ? state.cursorQuota : nil,
+            usageHistory: settings.showTokenUsage
+                ? UsageHistory(daily: TokenUsageStore.shared.summary.daily) : nil,
             ciRuns: state.ciRuns,
             recentAlerts: state.recentDevReadyAlerts,
             showMedia: settings.showExpandedMedia,
