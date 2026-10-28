@@ -3021,6 +3021,7 @@ private final class IsolatedUsageSettings: ExpandedContentSettings {
     var showExpandedRecentActivity: Bool { false }
     var showClipboard: Bool { false }
     var showTerminal: Bool { false }
+    var showTokenUsage: Bool { false }
     var resolvedCardOrder: [String] { [] }
     var pinnedActivityKind: String { "" }
 }

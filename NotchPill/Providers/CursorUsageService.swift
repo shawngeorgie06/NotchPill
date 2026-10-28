@@ -63,7 +63,9 @@ actor CursorUsageService {
                            membership: raw["membership"] as? String,
                            isUnlimited: (raw["unlimited"] as? Bool) ?? false,
                            onDemandEnabled: (raw["onDemand"] as? Bool) ?? false,
-                           updatedAt: Date(timeIntervalSince1970: stamp))
+                           updatedAt: Date(timeIntervalSince1970: stamp),
+                           cycleStart: (raw["cycleStart"] as? Double)
+                               .map(Date.init(timeIntervalSince1970:)))
     }
 
     private func persist(_ quota: CursorQuota) {
@@ -77,6 +79,7 @@ actor CursorUsageService {
         if let bonus = quota.bonus { payload["bonus"] = bonus }
         if let membership = quota.membership { payload["membership"] = membership }
         if let cycleEnd = quota.cycleEnd { payload["cycleEnd"] = cycleEnd.timeIntervalSince1970 }
+        if let cycleStart = quota.cycleStart { payload["cycleStart"] = cycleStart.timeIntervalSince1970 }
         store?.set(payload, forKey: Self.cacheKey)
     }
 

@@ -181,6 +181,9 @@ final class AppSettings: ObservableObject {
         // These two have no switch of their own: they appear when there is a
         // quota to show, so the honest answer is that they can.
         case "claudeQuota", "cursorQuota": return true
+        // Read from the same transcripts as the token lines, so it follows
+        // their switch as well as the agents one.
+        case "usageHistory": return showExpandedAgents && showTokenUsage
         case "ci": return showExpandedCI
         case "commands": return showExpandedCommands
         case "recentAlerts": return showExpandedRecentActivity
@@ -314,6 +317,12 @@ final class AppSettings: ObservableObject {
     @Published var devReadyPlaySound: Bool {
         didSet { defaults.set(devReadyPlaySound, forKey: Keys.devReadyPlaySound) }
     }
+    /// Skip the "finished" peek for agent turns shorter than this, in seconds.
+    /// Zero shows every one. A quick answer you were watching arrive does not
+    /// need announcing; a long task you walked away from does.
+    @Published var minimumTurnSeconds: Int {
+        didSet { defaults.set(minimumTurnSeconds, forKey: Keys.minimumTurnSeconds) }
+    }
     @Published var devReadySound: String {
         didSet { defaults.set(devReadySound, forKey: Keys.devReadySound) }
     }
@@ -444,6 +453,7 @@ final class AppSettings: ObservableObject {
         static let captionScale = "captionScale"
         static let devReadyDuration = "devReadyDuration"
         static let devReadyPlaySound = "devReadyPlaySound"
+        static let minimumTurnSeconds = "minimumTurnSeconds"
         static let devReadySound = "devReadySound"
         static let followUpReminders = "followUpReminders"
         static let quietWhenLocked = "quietWhenLocked"
@@ -501,6 +511,7 @@ final class AppSettings: ObservableObject {
             Keys.captionScale: 1.0,
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
+            Keys.minimumTurnSeconds: 0,
             Keys.devReadySound: DevReadySound.glass.rawValue,
             Keys.retractFullScreenChrome: false,
             Keys.notchVolumeControl: true,
@@ -567,6 +578,7 @@ final class AppSettings: ObservableObject {
         let storedDuration = defaults.double(forKey: Keys.devReadyDuration)
         devReadyDuration = storedDuration > 0 ? storedDuration : AppSettings.defaultDevReadyDuration
         devReadyPlaySound = defaults.object(forKey: Keys.devReadyPlaySound) as? Bool ?? true
+        minimumTurnSeconds = max(0, defaults.integer(forKey: Keys.minimumTurnSeconds))
         let storedSound = defaults.string(forKey: Keys.devReadySound) ?? DevReadySound.glass.rawValue
         devReadySound = DevReadySound(rawValue: storedSound)?.rawValue ?? DevReadySound.glass.rawValue
         retractFullScreenChrome = defaults.object(forKey: Keys.retractFullScreenChrome) as? Bool ?? false
@@ -634,6 +646,7 @@ final class AppSettings: ObservableObject {
             Keys.captionScale: 1.0,
             Keys.devReadyDuration: AppSettings.defaultDevReadyDuration,
             Keys.devReadyPlaySound: true,
+            Keys.minimumTurnSeconds: 0,
             Keys.devReadySound: DevReadySound.glass.rawValue,
             Keys.retractFullScreenChrome: false,
             Keys.notchVolumeControl: true,
@@ -680,6 +693,7 @@ final class AppSettings: ObservableObject {
         showDevReadyPings = true
         devReadyDuration = AppSettings.defaultDevReadyDuration
         devReadyPlaySound = true
+        minimumTurnSeconds = 0
         devReadySound = DevReadySound.glass.rawValue
         retractFullScreenChrome = false
         notchVolumeControl = true

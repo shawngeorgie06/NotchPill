@@ -800,6 +800,9 @@ struct CodexQuota: Equatable {
     var weeklyResetsAt: Date?
     /// Opaque balance recorded by Codex desktop for credit-backed plans.
     var creditBalance: Decimal?
+    /// Window lengths as Codex reports them; nil on a payload that does not.
+    var sessionWindow: TimeInterval? = nil
+    var weeklyWindow: TimeInterval? = nil
     var updatedAt: Date?
 
     var remainingPercent: Int { max(0, 100 - usedPercent) }

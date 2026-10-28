@@ -1471,6 +1471,43 @@ final class NotchController {
 
         if devReadyDedup.shouldSuppress(alert) { return }
 
+        // Timing a turn means reading its transcript, so only pay for that
+        // when the filter is on, and only for the agents whose transcripts
+        // say when a turn began.
+        let minimum = AppSettings.shared.minimumTurnSeconds
+        if minimum > 0, let sessionId = alert.sessionId, !sessionId.isEmpty,
+           alert.knownAgent == .claudeCode || alert.knownAgent == .codex {
+            let finishedAt = alert.date
+            Task { [weak self] in
+                guard let self else { return }
+                let startedAt = await agentSessions.turnStart(sessionId: sessionId)
+                await MainActor.run {
+                    if Self.isQuickTurn(startedAt: startedAt, finishedAt: finishedAt,
+                                        minimum: TimeInterval(minimum)) {
+                        let seconds = startedAt.map { Int(finishedAt.timeIntervalSince($0)) } ?? -1
+                        LogStore.log("peek", "suppressed (turn took \(seconds)s, "
+                            + "under \(minimum)s) session=\(sessionId.prefix(8))")
+                        return
+                    }
+                    self.queueFinished(alert)
+                }
+            }
+            return
+        }
+        queueFinished(alert)
+    }
+
+    /// Whether a turn was too short to announce. An unknown start is never
+    /// quick: a peek that might have mattered is shown rather than lost.
+    nonisolated static func isQuickTurn(startedAt: Date?, finishedAt: Date,
+                                        minimum: TimeInterval) -> Bool {
+        guard minimum > 0, let startedAt else { return false }
+        let duration = finishedAt.timeIntervalSince(startedAt)
+        guard duration >= 0 else { return false }
+        return duration < minimum
+    }
+
+    private func queueFinished(_ alert: DevReadyAlert) {
         lastFinishedAlert = alert
         pendingDevReadyAlerts.append(alert)
         devReadyCoalesceItem?.cancel()

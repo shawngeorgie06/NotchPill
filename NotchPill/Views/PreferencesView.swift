@@ -728,6 +728,21 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            VStack(alignment: .leading, spacing: 2) {
+                Picker("Only announce turns longer than", selection: $settings.minimumTurnSeconds) {
+                    Text("Off").tag(0)
+                    Text("30 seconds").tag(30)
+                    Text("1 minute").tag(60)
+                    Text("2 minutes").tag(120)
+                    Text("5 minutes").tag(300)
+                }
+                .pickerStyle(.menu)
+                .disabled(!settings.showDevReadyPings)
+                Text("Claude Code and Codex only. A quick answer you watched arrive gets no peek. Questions that need you, and turns NotchPill cannot time, always peek.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Toggle("Stay quiet while the Mac is locked", isOn: $settings.quietWhenLocked)
             Toggle("Remind me about what I missed", isOn: $settings.followUpReminders)
             Text("If a peek times out without you touching it, you get one reminder five minutes later — never a second. Dismissing a peek counts as dealing with it.")

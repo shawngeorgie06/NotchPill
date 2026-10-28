@@ -790,6 +790,7 @@ enum ExpandedActivity: Equatable, Identifiable {
     case codexQuota(CodexQuota)
     case claudeQuota(ClaudeQuota)
     case cursorQuota(CursorQuota)
+    case usageHistory(UsageHistory)
     case ci([CIRun])
     case recentAlerts([DevReadyAlert])
     case clipboard([ClipboardEntry], searching: Bool)
@@ -816,6 +817,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .codexQuota: return "codexQuota"
         case .claudeQuota: return "claudeQuota"
         case .cursorQuota: return "cursorQuota"
+        case .usageHistory: return "usageHistory"
         case .ci: return "ci"
         case .recentAlerts: return "recentAlerts"
         case .clipboard: return "clipboard"
@@ -857,6 +859,10 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .claudeQuota(let quota):
             return "claude-quota-\(quota.sessionPercent)-\(quota.weeklyPercent)"
         case .cursorQuota(let quota): return "cursor-quota-\(quota.used)-\(quota.limit)"
+        case .usageHistory(let history):
+            return "history-" + history.daily.keys.sorted().map {
+                "\($0):\(history.daily[$0]?.values.reduce(0, +) ?? 0)"
+            }.joined(separator: ",")
         case .ci(let runs): return "ci-" + runs.map { $0.id + $0.statusLabel }.joined(separator: ",")
         case .recentAlerts(let alerts): return "recent-" + alerts.map(\.id).joined(separator: ",")
         case .clipboard(let items, let searching):
@@ -887,6 +893,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         ("codexQuota", "Codex quota"),
         ("claudeQuota", "Claude quota"),
         ("cursorQuota", "Cursor quota"),
+        ("usageHistory", "Usage history"),
         ("ci", "CI status"),
         ("recentAlerts", "Recent activity"),
         ("media", "Now playing"),
@@ -918,6 +925,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .codexQuota: return "Codex quota"
         case .claudeQuota: return "Claude quota"
         case .cursorQuota: return "Cursor quota"
+        case .usageHistory: return "Usage history"
         case .ci: return "CI status"
         case .recentAlerts: return "Recent activity"
         case .clipboard: return "Clipboard"
@@ -963,6 +971,7 @@ enum ExpandedActivity: Equatable, Identifiable {
         case .codexQuota: return "codexQuota"
         case .claudeQuota: return "claudeQuota"
         case .cursorQuota: return "cursorQuota"
+        case .usageHistory: return "usageHistory"
         case .ci: return "ci"
         case .recentAlerts: return "recentAlerts"
         case .clipboard: return "clipboard"

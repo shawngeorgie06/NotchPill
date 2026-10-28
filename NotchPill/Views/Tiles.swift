@@ -913,6 +913,7 @@ enum ExpandedActivityBuilder {
         codexQuota: CodexQuota? = nil,
         claudeQuota: ClaudeQuota? = nil,
         cursorQuota: CursorQuota? = nil,
+        usageHistory: UsageHistory? = nil,
         ciRuns: [CIRun] = [],
         recentAlerts: [DevReadyAlert] = [],
         showMedia: Bool,
@@ -954,6 +955,9 @@ enum ExpandedActivityBuilder {
         // Keychain prompt, so it appears only when explicitly asked for.
         if let claudeQuota { items.append(.claudeQuota(claudeQuota)) }
         if let cursorQuota { items.append(.cursorQuota(cursorQuota)) }
+        if showAgents, let usageHistory, !usageHistory.isEmpty {
+            items.append(.usageHistory(usageHistory))
+        }
         if showCI, !ciRuns.isEmpty { items.append(.ci(ciRuns)) }
         if showRecentAlerts, !recentAlerts.isEmpty { items.append(.recentAlerts(recentAlerts)) }
         if showMedia, let np = nowPlaying, !np.isEmpty { items.append(.media(np)) }

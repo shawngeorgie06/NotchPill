@@ -6,6 +6,10 @@ struct TokenUsageSummary: Equatable {
     /// Tool → model → tally, already filtered to the chosen period.
     var byTool: [String: [String: TokenTally]] = [:]
 
+    /// Day (`yyyy-MM-dd`) → tool → full-price tokens, for the history card.
+    /// Independent of the period: a history is the days before it.
+    var daily: [String: [String: Int]] = [:]
+
     /// Full-price tokens: fresh prompt, generation, and cache writes.
     func total(for tool: String) -> Int {
         (byTool[tool] ?? [:]).values.reduce(0) { $0 + $1.total }
@@ -142,14 +146,20 @@ final class TokenUsageStore: ObservableObject {
     func recompute(period: TokenUsagePeriod) {
         let cutoff = period.cutoff(launchedAt: launchedAt)
         var byTool: [String: [String: TokenTally]] = [:]
+        var daily: [String: [String: Int]] = [:]
+        let historyStart = TokenLedger.day(from: UsageHistory.firstDay())
         for (path, state) in cache {
             let tool = path.contains("/.codex/") ? TokenUsageSummary.codex : TokenUsageSummary.claude
             for (model, tally) in TokenLedger.total(state.buckets, since: cutoff) {
                 byTool[tool, default: [:]][model, default: TokenTally()] =
                     (byTool[tool]?[model] ?? TokenTally()) + tally
             }
+            for (day, models) in state.buckets where day >= historyStart {
+                let tokens = models.values.reduce(0) { $0 + $1.total }
+                if tokens > 0 { daily[day, default: [:]][tool, default: 0] += tokens }
+            }
         }
-        let fresh = TokenUsageSummary(byTool: byTool)
+        let fresh = TokenUsageSummary(byTool: byTool, daily: daily)
         if fresh != summary { summary = fresh }
     }
 

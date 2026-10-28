@@ -722,6 +722,55 @@ actor AgentSessionScanner {
         return nil
     }
 
+    /// When the turn that just ended began: the latest thing the person sent.
+    ///
+    /// Claude Code writes tool results as `user` records too, so only a
+    /// prompt counts — string content, or a part that is not a tool result —
+    /// and harness-injected `isMeta` records are skipped. Codex marks a turn
+    /// with `task_started`; an older transcript without one falls back to the
+    /// user's message. Nil when neither is in the text read.
+    nonisolated static func turnStart(in text: String, isCodex: Bool) -> Date? {
+        for line in text.split(separator: "\n").reversed() {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8))
+                    as? [String: Any] else { continue }
+            if isCodex {
+                guard let payload = object["payload"] as? [String: Any] else { continue }
+                let type = object["type"] as? String
+                let isStart = type == "event_msg" && payload["type"] as? String == "task_started"
+                let isPrompt = type == "response_item"
+                    && payload["type"] as? String == "message"
+                    && payload["role"] as? String == "user"
+                guard isStart || isPrompt else { continue }
+            } else {
+                guard object["type"] as? String == "user",
+                      object["isMeta"] as? Bool != true,
+                      let message = object["message"] as? [String: Any] else { continue }
+                if let parts = message["content"] as? [[String: Any]] {
+                    guard parts.contains(where: { $0["type"] as? String != "tool_result" })
+                    else { continue }
+                } else if !(message["content"] is String) {
+                    continue
+                }
+            }
+            if let raw = object["timestamp"] as? String,
+               let date = CodexUsageFetcher.parseTimestamp(raw) { return date }
+        }
+        return nil
+    }
+
+    /// When the current turn of a session began, found the same way as its
+    /// last message.
+    func turnStart(sessionId: String, now: Date = Date()) -> Date? {
+        for url in transcripts(now: now) {
+            let isCodex = url.path.contains("/.codex/")
+            let name = url.deletingPathExtension().lastPathComponent
+            guard name == sessionId || (isCodex && name.hasSuffix(sessionId)) else { continue }
+            guard let text = text(of: url, tail: 262_144) else { return nil }
+            return Self.turnStart(in: text, isCodex: isCodex)
+        }
+        return nil
+    }
+
     /// Trimmed, redacted, and cut to something a notch row can hold.
     private nonisolated static func clean(_ raw: String?) -> String? {
         guard let raw else { return nil }
@@ -995,14 +1044,17 @@ actor AgentSessionScanner {
             let balance = balanceText.flatMap {
                 Decimal(string: $0, locale: Locale(identifier: "en_US_POSIX"))
             }
-            let updatedAt = (object["timestamp"] as? String).flatMap {
-                ISO8601DateFormatter().date(from: $0)
-            }
+            // Codex stamps carry milliseconds; the plain parser rejected
+            // every one, so a transcript reading never had an age.
+            let updatedAt = (object["timestamp"] as? String)
+                .flatMap(CodexUsageFetcher.parseTimestamp)
             return CodexQuota(usedPercent: primary.usedPercent,
                               resetsAt: primary.resetsAt,
                               weeklyPercent: secondary?.usedPercent,
                               weeklyResetsAt: secondary?.resetsAt,
                               creditBalance: balance,
+                              sessionWindow: primary.length,
+                              weeklyWindow: secondary?.length,
                               updatedAt: updatedAt)
         }
         return nil
