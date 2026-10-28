@@ -960,6 +960,23 @@ struct HitRuleTests {
         #expect(!accepts(NSPoint(x: 250, y: cardBottom - 12)))
     }
 
+    // The window-level decision must agree. A padded hover rect here kept
+    // the window opaque to clicks across the whole overshoot room.
+    @Test("the window lets clicks in the overshoot room through")
+    func windowPassesOvershootRoom() {
+        let body = CGRect(x: 100, y: 500, width: 400, height: 200)
+        func captures(_ point: NSPoint) -> Bool {
+            NotchController.capturesClick(containerAccepts: false, largeContent: true,
+                                          bodyRect: body, point: point)
+        }
+        #expect(captures(NSPoint(x: 300, y: 510)))
+        #expect(!captures(NSPoint(x: 300, y: 492)))
+        #expect(!captures(NSPoint(x: 92, y: 600)))
+        #expect(!captures(NSPoint(x: 508, y: 600)))
+        #expect(!NotchController.capturesClick(containerAccepts: false, largeContent: false,
+                                               bodyRect: body, point: NSPoint(x: 300, y: 600)))
+    }
+
     // A rect list that disagrees with the accept rule is how the two paths
     // drifted apart the first time.
     @Test("every interactive rect's centre is accepted")
