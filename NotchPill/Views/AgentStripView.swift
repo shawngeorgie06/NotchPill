@@ -128,7 +128,7 @@ struct AgentStripView: View {
         if strip.activeCount > 1 { text += ", \(strip.activeCount) agents active" }
         switch strip.reading {
         case .limit(let window):
-            text += ", closest plan limit \(window.percent) percent used"
+            text += ", \(window.agent == strip.agent ? "its" : "closest") plan limit \(window.percent) percent used"
             if window.isStale { text += ", cached" }
         case .count, nil: break
         }

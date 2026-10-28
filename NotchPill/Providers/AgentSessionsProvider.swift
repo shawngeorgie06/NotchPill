@@ -134,7 +134,8 @@ final class AgentSessionsProvider {
         guard AppSettings.shared.showExpandedAgents
             || usageSettings.showClaudeUsage
             || usageSettings.showCursorUsage
-            || AppSettings.shared.showExpandedCI else {
+            || AppSettings.shared.showExpandedCI
+            || AppSettings.shared.showAgentStrip else {
             if !lastPublished.isEmpty { lastPublished = []; onUpdate?([]) }
             if lastOpenCodeUsage != nil { lastOpenCodeUsage = nil; onOpenCodeUsageUpdate?(nil) }
             if lastCodexQuota != nil { lastCodexQuota = nil; onCodexQuotaUpdate?(nil) }
@@ -143,9 +144,12 @@ final class AgentSessionsProvider {
             return
         }
         let wantsAgents = AppSettings.shared.showExpandedAgents
+        // The closed-notch strip shows the working agent and the Codex limit,
+        // so it needs both even with the agents card turned off.
+        let wantsStrip = AppSettings.shared.showAgentStrip
         // CI uses the same discovered project paths as the agent shelf, but
         // must still work when the agents card itself is turned off.
-        let wantsSessions = wantsAgents || AppSettings.shared.showExpandedCI
+        let wantsSessions = wantsAgents || wantsStrip || AppSettings.shared.showExpandedCI
         if AppSettings.shared.showTokenUsage {
             // Keep the local Codex/Claude token lines current while the app is
             // running. TokenUsageStore performs its own incremental rate limit.
@@ -174,8 +178,9 @@ final class AgentSessionsProvider {
             // number from your last request: it expires with the two-hour
             // liveness window, and it was measured showing "4% used · 0 credits"
             // while the account was actually at 100% with a $298 balance.
-            var quota = wantsAgents ? await self.codexUsage.quota(now: now) : nil
-            if wantsAgents, quota == nil { quota = await scanner.codexQuota(now: now) }
+            let wantsCodex = wantsAgents || wantsStrip
+            var quota = wantsCodex ? await self.codexUsage.quota(now: now) : nil
+            if wantsCodex, quota == nil { quota = await scanner.codexQuota(now: now) }
             // Ask Claude Code for its own usage only when this card is enabled.
             let claude = wantsClaude ? await self.claudeUsage.quota(now: now) : nil
             let cursor = wantsCursor ? await self.cursorUsage.quota(now: now) : nil

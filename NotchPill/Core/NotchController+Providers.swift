@@ -98,6 +98,8 @@ extension NotchController {
                            AppSettings.shared.$showCursorUsage,
                            AppSettings.shared.$showExpandedCI)
             .map { $0 || $1 || $2 || $3 }
+            .combineLatest(AppSettings.shared.$showAgentStrip)
+            .map { $0 || $1 }
             .removeDuplicates()
             .sink { [weak self] enabled in
                 guard let self else { return }
