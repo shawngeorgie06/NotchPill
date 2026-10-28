@@ -274,6 +274,20 @@ struct AgentUsageReviewFixTests {
         #expect(TokenLedger.codexBuckets(in: text)[today]?["codex"]?.input == 250)
     }
 
+    @Test func aZeroTotalMarksARestart() throws {
+        let text = [Self.record("2026-08-24", 100), Self.record("2026-08-24", 0),
+                    Self.record("2026-08-24", 150)].joined(separator: "\n")
+        let today = try #require(TokenLedger.day(from: "2026-08-24T12:00:00.000Z"))
+        #expect(TokenLedger.codexBuckets(in: text)[today]?["codex"]?.input == 250)
+    }
+
+    @Test func relabellingMovesFallbackWorkToTheModel() {
+        let buckets: TokenLedger.Buckets = ["2026-08-24": ["codex": TokenTally(input: 100),
+                                                          "gpt-6.1-sol": TokenTally(input: 50)]]
+        let named = TokenLedger.relabel(buckets, from: "codex", to: "gpt-6.1-sol")
+        #expect(named == ["2026-08-24": ["gpt-6.1-sol": TokenTally(input: 150)]])
+    }
+
     @Test func aRestartedTotalCountsAsFreshWork() {
         let earlier = TokenTally(input: 500, output: 50)
         let restarted = TokenTally(input: 20, output: 60)

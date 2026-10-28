@@ -127,7 +127,8 @@ enum TokenLedger {
                                    output: int(totals["output_tokens"]),
                                    cacheWrite: int(totals["cache_write_input_tokens"]),
                                    cacheRead: int(totals["cached_input_tokens"]))
-            guard tally.total > 0 || tally.cacheRead > 0 else { continue }
+            // A zero total still counts as a reading: it is where a restart
+            // begins, and skipping it would hide that the total went down.
             let grown = tally.growth(since: progress.last)
             progress.last = tally
             guard grown.total > 0 || grown.cacheRead > 0 else { continue }
@@ -138,6 +139,18 @@ enum TokenLedger {
         var buckets: Buckets = [:]
         for (day, tally) in grownByDay { buckets[day] = [name: tally] }
         return (buckets, progress)
+    }
+
+    /// Moves every tally filed under one model name to another.
+    static func relabel(_ buckets: Buckets, from old: String, to new: String) -> Buckets {
+        guard old != new else { return buckets }
+        var out = buckets
+        for (day, models) in buckets {
+            guard let tally = models[old] else { continue }
+            out[day]?[old] = nil
+            out[day]?[new] = (models[new] ?? TokenTally()) + tally
+        }
+        return out
     }
 
     /// Sums the buckets falling inside a period.

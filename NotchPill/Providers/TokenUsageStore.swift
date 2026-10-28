@@ -201,9 +201,15 @@ final class TokenUsageStore: ObservableObject {
             guard let (text, consumed) = read(url, from: offset) else { continue }
             let (fresh, progress) = TokenLedger.codexBuckets(
                 in: text, continuing: resumable ? previous?.codex ?? .init() : .init())
+            var base = resumable ? previous?.buckets ?? [:] : [:]
+            // Work read before the model was named went under the fallback
+            // label. Name it now, so the answer does not depend on where
+            // one read happened to stop.
+            if previous?.codex?.model == nil, let model = progress.model {
+                base = TokenLedger.relabel(base, from: "codex", to: model)
+            }
             out[path] = FileState(size: offset + consumed,
-                                  buckets: TokenLedger.merge(resumable ? previous?.buckets ?? [:] : [:],
-                                                             fresh),
+                                  buckets: TokenLedger.merge(base, fresh),
                                   isCumulative: true,
                                   codex: progress)
         }
