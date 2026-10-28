@@ -58,6 +58,19 @@ enum NotchContentSnapshot {
         )
     }
 
+    /// The closed-notch agent strip, or nil when it is off or nothing is
+    /// working or waiting.
+    static func agentStrip(state: NotchState, settings: AppSettings, now: Date = Date()) -> AgentStrip? {
+        guard settings.showAgentStrip else { return nil }
+        return AgentStrip.resolve(
+            sessions: state.agentSessions,
+            claude: state.claudeQuota,
+            codex: state.codexQuota,
+            cursor: state.cursorQuota,
+            readingKind: AgentStrip.ReadingKind(rawValue: settings.agentStripReading) ?? .tightestLimit,
+            now: now)
+    }
+
     static func expandedActivities(
         state: NotchState,
         shelf: ShelfStore,

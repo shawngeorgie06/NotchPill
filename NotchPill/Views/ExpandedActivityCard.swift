@@ -447,7 +447,7 @@ struct ExpandedActivityCard: View {
         return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
             quotaProviderHeader(
                 "Codex",
-                bundleIds: ["com.openai.codex", "com.openai.chat"],
+                bundleIds: DevReadyAlert.KnownAgent.codex.iconBundleIds,
                 symbol: "chevron.left.forwardslash.chevron.right",
                 updatedAt: quota.updatedAt)
             if let weekly = quota.weeklyPercent {
@@ -566,7 +566,7 @@ struct ExpandedActivityCard: View {
         return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
             quotaProviderHeader(
                 "Claude Code",
-                bundleIds: ["com.anthropic.claudefordesktop", "com.anthropic.claude"],
+                bundleIds: DevReadyAlert.KnownAgent.claudeCode.iconBundleIds,
                 symbol: "asterisk",
                 mark: "ClaudeMark",
                 updatedAt: quota.updatedAt)
@@ -705,7 +705,7 @@ struct ExpandedActivityCard: View {
         return VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
             quotaProviderHeader(
                 "Cursor",
-                bundleIds: ["com.todesktop.230313mzl4w4u92"],
+                bundleIds: DevReadyAlert.KnownAgent.cursor.iconBundleIds,
                 symbol: "cursorarrow",
                 updatedAt: quota.updatedAt)
             if quota.isUnlimited {

@@ -16,6 +16,23 @@ struct NotchContentLayoutMetrics {
 enum NotchContentLayout {
     // MARK: - Collapsed
 
+    /// Width of each wing the agent strip adds beside the camera. Both wings
+    /// are the same width so the hardware notch stays centred in the pill.
+    static let agentStripWingWidth: CGFloat = 56
+
+    /// The closed pill when the agent strip is up: the notch plus a wing on
+    /// each side, at the notch's own height. With chips below as well, the
+    /// pill takes whichever is wider and the chips' own height and scale.
+    static func collapsedLayout(metrics: NotchMetrics, chips: [CollapsedChip],
+                                showsAgentStrip: Bool) -> NotchContentLayoutMetrics {
+        var layout = collapsedLayout(metrics: metrics, chips: chips)
+        guard showsAgentStrip else { return layout }
+        let stripWidth = metrics.notchWidth + 2 * agentStripWingWidth
+        layout.size.width = max(layout.size.width, stripWidth)
+        layout.size.height = max(layout.size.height, metrics.notchHeight)
+        return layout
+    }
+
     static func collapsedLayout(metrics: NotchMetrics, chips: [CollapsedChip]) -> NotchContentLayoutMetrics {
         guard !chips.isEmpty else {
             return NotchContentLayoutMetrics(size: metrics.collapsedSize, readability: 1, textScale: 1)
