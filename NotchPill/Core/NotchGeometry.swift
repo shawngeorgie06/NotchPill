@@ -352,10 +352,11 @@ struct NotchGeometry {
 
     /// Pure core of `windowFrame`, taking the screen's scale as a plain value so
     /// it is testable without a display. The window hangs from the top of the
-    /// screen, centred on the notch, with a little padding around the content.
+    /// screen, centred on the notch, with room beside and below the content
+    /// for the island's springs to swing past its edge (`NotchMotion.overshootRoom`).
     static func windowFrame(notchMidX: CGFloat, screenMaxY: CGFloat,
                             contentSize: CGSize, scale: CGFloat) -> CGRect {
-        let pad: CGFloat = 2
+        let pad = NotchMotion.overshootRoom
         let width = contentSize.width + pad * 2
         let height = contentSize.height + pad
         return pixelAligned(CGRect(x: notchMidX - width / 2,

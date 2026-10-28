@@ -43,34 +43,85 @@ enum NotchMotion {
         reduceMotion ? floor : .easeIn(duration: 0.16)
     }
 
-    /// Seconds for the hover surface's spring to complete one undamped period.
-    static let surfaceResponse: TimeInterval = 0.21
+    /// The side of the island a surface spring carries.
+    enum SurfaceAxis { case width, height }
 
-    /// Critical damping: no overshoot, because progress above 1 would draw the
-    /// pill wider than the window that clips it, and it is still a spring, so
-    /// retargeting mid-flight keeps the current velocity.
-    static let surfaceDamping: Double = 1
+    // The island's sides each follow their own spring, as Apple's Dynamic
+    // Island does. Growing, the bottom drops a little ahead of the sides and
+    // both swing past their size before they settle; shrinking, the bottom
+    // pulls up ahead of the sides and neither passes its target, which for a
+    // closing island is the hardware notch it hugs. Duration and bounce are
+    // SwiftUI's perceptual spring parameters. Tuning follows Vorssaint's
+    // island (github.com/vorssaint/vorssaint-utils, `NotchMotion`).
+    static let growingWidth = Spring(duration: 0.44, bounce: 0.25)
+    static let growingHeight = Spring(duration: 0.38, bounce: 0.22)
+    static let shrinkingWidth = Spring(duration: 0.30, bounce: 0)
+    static let shrinkingHeight = Spring(duration: 0.26, bounce: 0)
 
-    /// When the surface spring has covered all but the last half point of a
-    /// full-width travel. A critically damped spring leaves
-    /// `(1 + wt) * e^(-wt)` of the travel, with `w = 2 pi / response`; 1.7
-    /// responses is wt of about 10.7, ~0.0003 remaining. Collapse finalisation
-    /// and the window's deferred shrink both wait for this one number, so the
-    /// curve can be retuned without them drifting.
-    static let surfaceSettleDuration: TimeInterval = surfaceResponse * 1.7
+    /// The farthest a side may swing past its target, in points. A fixed
+    /// bounce over a caption peek's ~900pt of travel would swing ~25pt; the
+    /// bounce is cut back per move so the swing stays within this.
+    static let overshootLimit: CGFloat = 12
 
-    /// The hover surface growing out of, and shrinking back into, the notch.
+    /// The margin the window and the surface's canvas keep around the card
+    /// for that swing. A point over the limit so pixel rounding never clips it.
+    static let overshootRoom: CGFloat = overshootLimit + 1
+
+    /// How far a spring from rest swings past its target, as a share of its
+    /// travel: the damped oscillator's first peak.
+    static func overshoot(bounce: Double) -> Double {
+        guard bounce > 0 else { return 0 }
+        let damping = 1 - bounce
+        return exp(-Double.pi * damping / (1 - damping * damping).squareRoot())
+    }
+
+    /// `spring`, with only as much bounce as keeps a move of `travel` points
+    /// within `overshootLimit`. Inverts `overshoot(bounce:)`.
+    static func limited(_ spring: Spring, travel: CGFloat) -> Spring {
+        let travel = Double(abs(travel))
+        let limit = Double(overshootLimit)
+        guard spring.bounce > 0, travel > 0, travel * overshoot(bounce: spring.bounce) > limit else {
+            return spring
+        }
+        let share = log(limit / travel)
+        let bounce = 1 + share / (Double.pi * Double.pi + share * share).squareRoot()
+        return Spring(duration: spring.duration, bounce: max(0, bounce))
+    }
+
+    /// The spring carrying one side of the surface over `travel` points.
+    static func surfaceSpring(_ axis: SurfaceAxis, growing: Bool, travel: CGFloat) -> Spring {
+        let spring: Spring = switch (axis, growing) {
+        case (.width, true): growingWidth
+        case (.height, true): growingHeight
+        case (.width, false): shrinkingWidth
+        case (.height, false): shrinkingHeight
+        }
+        return limited(spring, travel: travel)
+    }
+
+    /// One side of the island surface growing out of, or shrinking back into,
+    /// the notch.
     ///
     /// A spring rather than a fixed timing curve: a curve retargeted by a
     /// reversal restarts from rest, so hover in, out, in jerks to a stop and
     /// sets off again. A spring carries its velocity into the new target.
-    static func surface(reduceMotion: Bool) -> Animation {
-        reduceMotion ? floor : .spring(surfaceSpring)
+    static func surface(_ axis: SurfaceAxis, growing: Bool, travel: CGFloat,
+                        reduceMotion: Bool) -> Animation {
+        reduceMotion ? floor : .spring(surfaceSpring(axis, growing: growing, travel: travel))
     }
 
-    /// The spring itself, so timings derived from it (the reveal window, the
-    /// chips' cross-fade) are read off SwiftUI's own curve, not a model of it.
-    static let surfaceSpring = Spring(response: surfaceResponse, dampingRatio: surfaceDamping)
+    /// The spring an opening card's reveal is read against: its width, which
+    /// is the slower side and the one `SurfaceReveal` follows. Before any
+    /// limit, which only trims the swing on long travel, not the rise.
+    static let surfaceSpring = growingWidth
+
+    /// When a closing surface has covered all but the last half point of a
+    /// full-width travel, including a close that interrupts an opening and
+    /// inherits its outward velocity. Collapse finalisation and the window's
+    /// deferred shrink both wait for this one number, so the springs can be
+    /// retuned without them drifting; a test holds it to the springs.
+    static let surfaceSettleDuration: TimeInterval =
+        max(shrinkingWidth.duration, shrinkingHeight.duration) * 1.9
 
     /// Seconds into an opening at which the surface reaches `progress`.
     static func surfaceTime(reaching progress: Double) -> TimeInterval {
@@ -99,6 +150,21 @@ enum NotchMotion {
     static func contentOpacity(surfaceProgress: CGFloat) -> Double {
         let t = min(1, max(0, (surfaceProgress - revealStart) / (revealEnd - revealStart)))
         return Double(t * t * (3 - 2 * t))
+    }
+
+    /// How blurred, in points, an arriving card starts.
+    static let arrivalBlur: CGFloat = 12
+
+    /// The scale an arriving card grows from.
+    static let arrivalScale: CGFloat = 0.86
+
+    /// How far an arriving card has come into focus, 0 to 1, for a given
+    /// surface progress. It begins with the surface rather than with the
+    /// fade, so the card is already sharpening when it becomes visible, and
+    /// eases out so the last of it lands gently.
+    static func contentFocus(surfaceProgress: CGFloat) -> CGFloat {
+        let t = min(1, max(0, surfaceProgress / revealEnd))
+        return 1 - pow(1 - t, 3)
     }
 
     /// The collapsed chips leaving as the expanded card arrives.
@@ -154,8 +220,14 @@ enum NotchMotion {
 /// interpolate opacity linearly between them; exposing progress as animatable
 /// data makes SwiftUI feed each in-flight sample through `f`, so the fade is
 /// shaped by the surface's real position.
+///
+/// The card also comes into focus as it arrives: it starts blurred and a
+/// little small, hung from the notch, and sharpens and fills out as the
+/// surface makes room, so it reads as surfacing from the island rather than
+/// fading in over it. Reduce Motion keeps only the fade.
 struct SurfaceReveal: ViewModifier, Animatable {
     var progress: CGFloat
+    var reduceMotion = false
 
     var animatableData: CGFloat {
         get { progress }
@@ -163,7 +235,62 @@ struct SurfaceReveal: ViewModifier, Animatable {
     }
 
     func body(content: Content) -> some View {
-        content.opacity(NotchMotion.contentOpacity(surfaceProgress: progress))
+        let focus = reduceMotion ? 1 : NotchMotion.contentFocus(surfaceProgress: progress)
+        content
+            .scaleEffect(NotchMotion.arrivalScale + (1 - NotchMotion.arrivalScale) * focus,
+                         anchor: .top)
+            // Always applied, at zero once settled: adding and removing the
+            // modifier would change the view's identity and reset its state.
+            .blur(radius: NotchMotion.arrivalBlur * (1 - focus))
+            .opacity(NotchMotion.contentOpacity(surfaceProgress: progress))
+    }
+}
+
+/// Exposes one animated value to `content`. Nesting two lets a single target
+/// drive two sides of the island on two different springs: each level picks
+/// up its own `.animation(_:value:)`, the innermost winning for the level
+/// inside it.
+private struct AnimatedValue<Content: View>: View, Animatable {
+    var value: CGFloat
+    let content: (CGFloat) -> Content
+
+    var animatableData: CGFloat {
+        get { value }
+        set { value = newValue }
+    }
+
+    var body: some View { content(value) }
+}
+
+/// The island surface's two sides, each on its own spring.
+///
+/// `progress` is the logical target, 0 at the notch and 1 open. `content`
+/// is handed the width's and the height's in-flight progress. Which springs
+/// run is decided by where the target went, so an interrupted opening that
+/// turns back to close switches to the closing springs and carries its
+/// velocity into them.
+struct IslandSurfaceMotion<Content: View>: View {
+    let progress: CGFloat
+    /// The distance each side covers between the notch and the open card,
+    /// which caps its overshoot.
+    let travel: CGSize
+    let reduceMotion: Bool
+    @ViewBuilder let content: (_ width: CGFloat, _ height: CGFloat) -> Content
+
+    var body: some View {
+        let target = progress
+        let growing = target >= 0.5
+        AnimatedValue(value: target) { width in
+            AnimatedValue(value: target) { height in
+                content(width, height)
+            }
+            .animation(NotchMotion.surface(.height, growing: growing, travel: travel.height,
+                                           reduceMotion: reduceMotion),
+                       value: target)
+        }
+        .animation(NotchMotion.surface(.width, growing: growing, travel: travel.width,
+                                       reduceMotion: reduceMotion),
+                   value: target)
     }
 }
 

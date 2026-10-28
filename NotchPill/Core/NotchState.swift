@@ -429,7 +429,10 @@ final class NotchState: ObservableObject {
             self.isDismissingDevReady = false
         }
         devReadyExitWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: item)
+        // The peek's text leaves on `duration`, but its surface closes on the
+        // island's springs; keep drawing it until both have finished.
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(duration, NotchMotion.surfaceSettleDuration),
+                                      execute: item)
     }
 
     private func animateDevReadyIn() {

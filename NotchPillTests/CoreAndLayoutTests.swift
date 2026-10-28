@@ -844,6 +844,22 @@ struct WindowPixelAlignmentTests {
         }
     }
 
+    @Test("leaves room beside and below the card for the island's overshoot")
+    func leavesOvershootRoom() {
+        // The springs swing the surface up to `overshootLimit` past the card;
+        // the window is the clip rect, so without the room it is cut off.
+        let room = NotchMotion.overshootRoom
+        #expect(room > NotchMotion.overshootLimit)
+        for scale in [CGFloat(2), 1] {
+            for size in contentSizes {
+                let f = frame(size, scale: scale)
+                #expect(f.width >= size.width + 2 * room)
+                #expect(f.height >= size.height + room)
+                #expect(f.maxY == screenTop, "nothing swings above the screen's edge")
+            }
+        }
+    }
+
     @Test("stays centred on the notch within half a device pixel")
     func staysCentred() {
         for scale in [CGFloat(2), 1] {

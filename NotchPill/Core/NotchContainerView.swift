@@ -74,8 +74,9 @@ final class NotchContainerView: NSView {
 
         let size = expandedContentSizeProvider()
         let pw = min(size.width, w)
+        let ph = min(size.height, h)
         let pillX = (w - pw) / 2
-        let body = CGRect(x: pillX, y: 0, width: pw, height: max(0, h - nh))
+        let body = CGRect(x: pillX, y: h - ph, width: pw, height: max(0, ph - nh))
         let notchColumn = CGRect(x: notchLeft, y: h - nh, width: nw, height: nh)
         return [body, notchColumn]
     }
@@ -162,8 +163,11 @@ final class NotchContainerView: NSView {
             return [CGRect(x: (w - collapsedSize.width) / 2, y: h - collapsedSize.height,
                            width: collapsedSize.width, height: collapsedSize.height)]
         }
+        // The window leaves room below the card for the island's overshoot;
+        // that margin is not the pill, so the body starts at the card's edge.
         let pw = min(expandedSize.width, w)
-        return [CGRect(x: (w - pw) / 2, y: 0, width: pw, height: max(0, h - notchHeight)),
+        let ph = min(expandedSize.height, h)
+        return [CGRect(x: (w - pw) / 2, y: h - ph, width: pw, height: max(0, ph - notchHeight)),
                 CGRect(x: (w - notchWidth) / 2, y: h - notchHeight,
                        width: notchWidth, height: notchHeight)]
     }

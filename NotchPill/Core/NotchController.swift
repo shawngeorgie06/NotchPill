@@ -973,6 +973,27 @@ final class NotchController {
         return rect.insetBy(dx: -pad, dy: -pad).contains(point)
     }
 
+    /// Whether a click belongs to the pill. Unlike hover, this gets no padding:
+    /// the window carries transparent overshoot room around the card, and a
+    /// padded rect would swallow clicks meant for whatever is beneath it.
+    private func isPointerOnPillBody(_ point: NSPoint) -> Bool {
+        Self.capturesClick(
+            containerAccepts: container?.isPointOnInteractivePill(point) == true,
+            largeContent: geometry != nil && rendersLargeContent,
+            bodyRect: expandedInteractionRect(),
+            point: point
+        )
+    }
+
+    /// Pure form of `isPointerOnPillBody`. The container's rects are
+    /// authoritative when current; the body rect covers a peek that has just
+    /// arrived and is not in them yet.
+    nonisolated static func capturesClick(containerAccepts: Bool, largeContent: Bool,
+                              bodyRect: CGRect, point: NSPoint) -> Bool {
+        if containerAccepts { return true }
+        return largeContent && bodyRect.contains(point)
+    }
+
     /// Live answer for a key action: geometry and the movement latch. The
     /// event tap reads its cached hover state; queued actions reach this on main.
     @discardableResult
@@ -1243,14 +1264,13 @@ final class NotchController {
         // just-arrived peek may not be in yet) declared them click-through.
         // That is the whole of "the ✕ doesn't work sometimes".
         if NotchGeometry.pointIsInBrowserFlank(mouse, on: geometry.screen),
-           container.isPointOnInteractivePill(mouse) == false,
-           !isPointerOverPill(mouse) {
+           !isPointerOnPillBody(mouse) {
             window.ignoresMouseEvents = true
             return
         }
 
         // Menu bar strip always passes through (clock, Wi‑Fi, NotchPill icon, etc.).
-        if menuBarStrip.contains(mouse), !isPointerOverPill(mouse) {
+        if menuBarStrip.contains(mouse), !isPointerOnPillBody(mouse) {
             window.ignoresMouseEvents = true
             return
         }
@@ -1264,11 +1284,7 @@ final class NotchController {
             return
         }
 
-        // Same rule as `isPointerOverPill`: the container's tracking rects are
-        // authoritative when they are current, but a peek that has just
-        // appeared may not be in them yet, and a click-through ✕ is the result.
-        let overPill = container.isPointOnInteractivePill(mouse) || isPointerOverPill(mouse)
-        window.ignoresMouseEvents = !overPill
+        window.ignoresMouseEvents = !isPointerOnPillBody(mouse)
     }
 
     // MARK: - Dev ready pings
