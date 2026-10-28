@@ -104,8 +104,22 @@ struct NotchRootView: View {
         // moves, so it can grow cleanly from the physical notch without
         // fighting an AppKit frame animation. A spring, so a hover that
         // reverses mid-flight carries its velocity instead of restarting.
-        NotchMotion.surface(reduceMotion: reduceMotion)
+        // This is the width's spring; the surface and its masks run each side
+        // on its own (`IslandSurfaceMotion`), and the card's reveal follows
+        // the width.
+        NotchMotion.surface(.width, growing: state.expansionProgress >= 0.5,
+                            travel: surfaceTravel.width, reduceMotion: reduceMotion)
     }
+
+    /// How far each side of the surface moves between the notch and the
+    /// finished card.
+    private var surfaceTravel: CGSize {
+        CGSize(width: max(0, frameSize.width - metrics.notchWidth),
+               height: max(0, frameSize.height - metrics.notchHeight))
+    }
+
+    /// The room left around the card for a growing spring to swing into.
+    private var overshootRoom: CGFloat { reduceMotion ? 0 : NotchMotion.overshootRoom }
     /// In-place value changes: activity, volume, brightness, mic mute.
     ///
     /// This was a flat `.easeOut(duration: 0.1)`. At that length with no spring
@@ -188,9 +202,14 @@ struct NotchRootView: View {
                 // same animated expansionProgress, so content appears once the
                 // shape has made room, leaves ahead of the shrinking edge, and
                 // a reversal retraces the curve with no delay to restart.
+                //
+                // The reveal sits inside the mask, so the card's scale and blur
+                // happen within the surface rather than spilling over its edge.
                 expandedContent
+                    .modifier(SurfaceReveal(progress: state.expansionProgress,
+                                            reduceMotion: reduceMotion))
+                    .animation(expandAnimation, value: state.expansionProgress)
                     .mask(growingSurfaceMask(progress: state.expansionProgress))
-                    .modifier(SurfaceReveal(progress: state.expansionProgress))
                     .transition(.identity)
             } else if !collapsedChips.isEmpty {
                 collapsedContent
@@ -272,13 +291,18 @@ struct NotchRootView: View {
     /// A final canvas with growth owned entirely by the shape. Shrinking its
     /// frame as well would apply progress twice and misalign the content mask.
     private func growingSurfaceMask(progress: CGFloat) -> some View {
-        ExpandedNotchShape(notchWidth: metrics.notchWidth,
-                          notchHeight: metrics.notchHeight,
-                          progress: progress,
-                          hasPhysicalNotch: metrics.hasPhysicalNotch,
-                          wrapsHardwareNotch: true)
-            .fill(Color.black)
-            .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+        IslandSurfaceMotion(progress: progress, travel: surfaceTravel,
+                            reduceMotion: reduceMotion) { width, height in
+            ExpandedNotchShape(notchWidth: metrics.notchWidth,
+                               notchHeight: metrics.notchHeight,
+                               progress: height,
+                               widthProgress: width,
+                               overflow: overshootRoom,
+                               hasPhysicalNotch: metrics.hasPhysicalNotch,
+                               wrapsHardwareNotch: true)
+                .fill(Color.black)
+        }
+            .modifier(OvershootCanvas(size: frameSize, room: overshootRoom))
             // A replacement peek can have a new final canvas with progress
             // already at one. Its mask must follow the background's size curve.
             .animation(peekReplacementAnimation, value: frameSize)
@@ -297,24 +321,30 @@ struct NotchRootView: View {
     }
 
     private var expandedBackground: some View {
-        ExpandedPillSurface(notchWidth: metrics.notchWidth,
-                            notchHeight: metrics.notchHeight,
-                            progress: surfaceProgress,
-                            hasPhysicalNotch: metrics.hasPhysicalNotch,
-                          wrapsHardwareNotch: true) {
-            // The surface draws its rim over this, so the artwork never
-            // hides it and it is not stroked a second time here.
-            ZStack {
-                if let selectedMedia {
-                    MediaBackdrop(nowPlaying: selectedMedia,
-                                  size: frameSize)
-                        .transition(.opacity)
+        let room = overshootRoom
+        let canvas = CGSize(width: frameSize.width + 2 * room, height: frameSize.height + room)
+        return IslandSurfaceMotion(progress: surfaceProgress, travel: surfaceTravel,
+                                   reduceMotion: reduceMotion) { width, height in
+            ExpandedPillSurface(notchWidth: metrics.notchWidth,
+                                notchHeight: metrics.notchHeight,
+                                progress: height,
+                                widthProgress: width,
+                                overflow: room,
+                                hasPhysicalNotch: metrics.hasPhysicalNotch,
+                                wrapsHardwareNotch: true) {
+                // The surface draws its rim over this, so the artwork never
+                // hides it and it is not stroked a second time here.
+                ZStack {
+                    if let selectedMedia {
+                        MediaBackdrop(nowPlaying: selectedMedia, size: canvas)
+                            .transition(.opacity)
+                    }
                 }
+                .animation(reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.20),
+                           value: selectedMedia?.trackKey)
             }
-            .animation(reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.20),
-                       value: selectedMedia?.trackKey)
         }
-            .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
+            .modifier(OvershootCanvas(size: frameSize, room: room))
             // Growing from the notch is already smooth, because `progress`
             // animates from 0. A peek *replacing* another one is not: dictate
             // twice and the second caption's size arrives with progress already
@@ -380,6 +410,21 @@ struct NotchRootView: View {
         .opacity(state.devReadyPresentation)
         .offset(y: (1 - state.devReadyPresentation) * -8)
         .scaleEffect(0.96 + state.devReadyPresentation * 0.04, anchor: .top)
+    }
+}
+
+/// Lays a surface out at the card's `size` while giving it `room` more on
+/// each side and below to draw into, so a spring swinging past the card's
+/// edge is not clipped. Above is the screen's edge: nothing swings there.
+private struct OvershootCanvas: ViewModifier {
+    let size: CGSize
+    let room: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: size.width + 2 * room, height: size.height + room, alignment: .top)
+            .padding(.horizontal, -room)
+            .padding(.bottom, -room)
     }
 }
 

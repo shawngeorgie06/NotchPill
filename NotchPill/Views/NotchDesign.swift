@@ -127,13 +127,17 @@ struct ExpandedPillSurface<Backdrop: View>: View {
     let notchWidth: CGFloat
     let notchHeight: CGFloat
     let progress: CGFloat
+    var widthProgress: CGFloat? = nil
+    /// See `ExpandedNotchShape.overflow`.
+    var overflow: CGFloat = 0
     var hasPhysicalNotch: Bool = true
     var wrapsHardwareNotch: Bool = false
     @ViewBuilder var backdrop: Backdrop
 
     private var shape: ExpandedNotchShape {
         ExpandedNotchShape(notchWidth: notchWidth, notchHeight: notchHeight,
-                           progress: progress, hasPhysicalNotch: hasPhysicalNotch,
+                           progress: progress, widthProgress: widthProgress, overflow: overflow,
+                           hasPhysicalNotch: hasPhysicalNotch,
                            wrapsHardwareNotch: wrapsHardwareNotch)
     }
 

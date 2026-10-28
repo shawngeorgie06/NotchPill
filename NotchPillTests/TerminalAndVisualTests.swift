@@ -760,22 +760,63 @@ struct NotchMotionTests {
 
 @Suite("NotchMotion surface", .serialized)
 struct NotchSurfaceMotionTests {
-    @Test("the surface spring never overshoots")
-    func surfaceDoesNotOvershoot() {
-        // Progress above 1 would draw the pill wider than the window that
-        // clips it. Critical damping is the only setting that is both
-        // interruptible (a spring keeps its velocity) and exactly bounded.
-        #expect(NotchMotion.surfaceDamping == 1)
+    /// The farthest `spring` carries a move of `travel` points past its
+    /// target, sampled off SwiftUI's own curve rather than the closed form
+    /// `NotchMotion.limited` inverts.
+    private func sampledOvershoot(_ spring: Spring, travel: Double) -> Double {
+        var peak = 0.0
+        for step in 0...400 {
+            let t = Double(step) * 0.005
+            peak = max(peak, (spring.value(target: 1.0, time: t) - 1) * travel)
+        }
+        return peak
     }
 
-    @Test("the surface animation is SwiftUI's own spring with the documented constants")
+    @Test("a growing side swings past its size, but never further than the window leaves room for",
+          arguments: [NotchMotion.SurfaceAxis.width, .height])
+    func growingOvershootIsBounded(axis: NotchMotion.SurfaceAxis) {
+        // From a short label peek to a ~1058pt caption: a fixed bounce over the
+        // long end would swing ~25pt and be clipped by the window.
+        for travel in [24.0, 60, 120, 240, 480, 1100] {
+            let spring = NotchMotion.surfaceSpring(axis, growing: true, travel: travel)
+            let peak = sampledOvershoot(spring, travel: travel)
+            #expect(peak <= Double(NotchMotion.overshootLimit) + 0.05, "travel \(travel) swung \(peak)")
+            #expect(peak < Double(NotchMotion.overshootRoom) - 0.5)
+        }
+        // A short move keeps the full bounce; a long one is trimmed to the limit.
+        let short = NotchMotion.surfaceSpring(axis, growing: true, travel: 24)
+        #expect(short.bounce > 0.2)
+        let long = NotchMotion.surfaceSpring(axis, growing: true, travel: 1100)
+        #expect(long.bounce < short.bounce)
+        #expect(abs(sampledOvershoot(long, travel: 1100) - Double(NotchMotion.overshootLimit)) < 0.5)
+    }
+
+    @Test("a shrinking side never passes the notch it closes onto",
+          arguments: [NotchMotion.SurfaceAxis.width, .height])
+    func shrinkingNeverOvershoots(axis: NotchMotion.SurfaceAxis) {
+        let spring = NotchMotion.surfaceSpring(axis, growing: false, travel: 1100)
+        #expect(spring.bounce == 0)
+        #expect(sampledOvershoot(spring, travel: 1100) <= 0)
+    }
+
+    @Test("the bottom leads the sides opening, and pulls up ahead of them closing")
+    func heightLeads() {
+        #expect(NotchMotion.growingHeight.duration < NotchMotion.growingWidth.duration)
+        #expect(NotchMotion.shrinkingHeight.duration < NotchMotion.shrinkingWidth.duration)
+        #expect(NotchMotion.shrinkingWidth.duration < NotchMotion.growingWidth.duration)
+    }
+
+    @Test("the surface animation is SwiftUI's own spring for each side")
     func surfaceIsTheNamedSpring() {
-        // Every timing below is read off `surfaceSpring`; that only means
-        // anything if it is the curve the view actually animates with.
-        #expect(NotchMotion.surface(reduceMotion: false) == Animation.spring(NotchMotion.surfaceSpring))
-        #expect(NotchMotion.surface(reduceMotion: false)
-                == Animation.spring(response: NotchMotion.surfaceResponse,
-                                    dampingFraction: NotchMotion.surfaceDamping))
+        // Every timing below is read off these springs; that only means
+        // anything if they are the curves the view actually animates with.
+        for axis in [NotchMotion.SurfaceAxis.width, .height] {
+            for growing in [true, false] {
+                #expect(NotchMotion.surface(axis, growing: growing, travel: 300, reduceMotion: false)
+                        == Animation.spring(NotchMotion.surfaceSpring(axis, growing: growing, travel: 300)))
+            }
+        }
+        #expect(NotchMotion.surfaceSpring == NotchMotion.growingWidth)
     }
 
     @Test("the settle duration leaves under half a point of travel, from rest or mid-reversal")
@@ -784,22 +825,25 @@ struct NotchSurfaceMotionTests {
         // the window's deferred shrink) reads this one number. Measured on
         // SwiftUI's `Spring`, not a closed form of it, over the widest travel
         // (a caption peek is ~1058pt; 1100 leaves margin).
-        let spring = NotchMotion.surfaceSpring
         let settle = NotchMotion.surfaceSettleDuration
         let widestTravel = 1100.0
-        #expect((1 - spring.value(target: 1.0, time: settle)) * widestTravel < 0.5)
-        // A leave that interrupts an opening starts with velocity pointing the
-        // wrong way, and finalisation is timed from that leave. Try every
-        // point of the opening to interrupt at.
-        var worst = 0.0
-        for step in 1...80 {
-            let t = Double(step) * 0.005
-            let position = spring.value(target: 1.0, time: t)
-            let velocity = spring.velocity(target: 1.0, time: t)
-            let landing = position + spring.value(target: -position, initialVelocity: velocity, time: settle)
-            worst = max(worst, abs(landing))
+        for (opening, closing) in [(NotchMotion.growingWidth, NotchMotion.shrinkingWidth),
+                                   (NotchMotion.growingHeight, NotchMotion.shrinkingHeight)] {
+            #expect((1 - closing.value(target: 1.0, time: settle)) * widestTravel < 0.5)
+            // A leave that interrupts an opening starts with velocity pointing
+            // the wrong way, and finalisation is timed from that leave. Try
+            // every point of the opening to interrupt at, on the bounciest
+            // (shortest-travel) opening spring.
+            var worst = 0.0
+            for step in 1...160 {
+                let t = Double(step) * 0.005
+                let position = opening.value(target: 1.0, time: t)
+                let velocity = opening.velocity(target: 1.0, time: t)
+                let landing = position + closing.value(target: -position, initialVelocity: velocity, time: settle)
+                worst = max(worst, abs(landing))
+            }
+            #expect(worst * widestTravel < 0.5)
         }
-        #expect(worst * widestTravel < 0.5)
     }
 
     @Test("the reveal window is read off the real spring")
@@ -860,7 +904,7 @@ struct NotchSurfaceMotionTests {
                 .overlay {
                     if model.isExpanded || model.isCollapsing {
                         Color(red: 0, green: 1, blue: 0)
-                            .modifier(SurfaceReveal(progress: model.progress))
+                            .modifier(SurfaceReveal(progress: model.progress, reduceMotion: reduceMotion))
                             .transition(.identity)
                     } else {
                         Color(red: 1, green: 0, blue: 0)
@@ -870,7 +914,8 @@ struct NotchSurfaceMotionTests {
                 .modifier(ProgressProbe(log: geometry, progress: model.progress, changesOpacity: false))
                 .modifier(HoverTransactions(progress: model.progress,
                                             isExpanded: model.isExpanded,
-                                            surface: NotchMotion.surface(reduceMotion: reduceMotion),
+                                            surface: NotchMotion.surface(.width, growing: model.progress >= 0.5,
+                                                                         travel: 300, reduceMotion: reduceMotion),
                                             crossfade: NotchRootView.chipCrossfade(
                                                 opening: model.isExpanded, reduceMotion: reduceMotion)))
                 .frame(width: 40, height: 40)
@@ -961,12 +1006,15 @@ struct NotchSurfaceMotionTests {
             HStack {
                 Color.black.frame(width: 20, height: 20)
                     .modifier(ProgressProbe(log: reference, progress: model.progress))
-                    .animation(NotchMotion.surface(reduceMotion: false), value: model.progress)
+                    .animation(NotchMotion.surface(.width, growing: model.progress >= 0.5,
+                                                   travel: 300, reduceMotion: false),
+                               value: model.progress)
                 Color.black.frame(width: 20, height: 20)
                     .modifier(ProgressProbe(log: layered, progress: model.progress))
                     .modifier(HoverTransactions(progress: model.progress,
                                                 isExpanded: model.isExpanded,
-                                                surface: NotchMotion.surface(reduceMotion: false),
+                                                surface: NotchMotion.surface(.width, growing: model.progress >= 0.5,
+                                                                             travel: 300, reduceMotion: false),
                                                 crossfade: .easeIn(duration: 0.14)))
             }
         }
@@ -1027,8 +1075,78 @@ struct NotchSurfaceMotionTests {
 
     @Test("Reduce Motion keeps the shared floor for the surface")
     func surfaceReduceMotion() {
-        #expect(NotchMotion.surface(reduceMotion: true) == Animation.linear(duration: 0.01))
-        #expect(NotchMotion.surface(reduceMotion: false) != Animation.linear(duration: 0.01))
+        for axis in [NotchMotion.SurfaceAxis.width, .height] {
+            for growing in [true, false] {
+                #expect(NotchMotion.surface(axis, growing: growing, travel: 300, reduceMotion: true)
+                        == Animation.linear(duration: 0.01))
+                #expect(NotchMotion.surface(axis, growing: growing, travel: 300, reduceMotion: false)
+                        != Animation.linear(duration: 0.01))
+            }
+        }
+    }
+
+    @Test("an arriving card comes into focus with the surface and is sharp once open")
+    func focusEnds() {
+        #expect(NotchMotion.contentFocus(surfaceProgress: 0) == 0)
+        #expect(NotchMotion.contentFocus(surfaceProgress: NotchMotion.revealEnd) == 1)
+        #expect(NotchMotion.contentFocus(surfaceProgress: 1.1) == 1)
+        #expect(NotchMotion.contentFocus(surfaceProgress: -0.1) == 0)
+        // Already sharpening by the time it becomes visible.
+        #expect(NotchMotion.contentFocus(surfaceProgress: NotchMotion.revealStart) > 0.5)
+        var previous: CGFloat = 0
+        for step in 0...100 {
+            let value = NotchMotion.contentFocus(surfaceProgress: CGFloat(step) / 100)
+            #expect(value >= previous)
+            previous = value
+        }
+    }
+
+    private final class SideLog { var samples: [(width: CGFloat, height: CGFloat)] = [] }
+
+    private struct SidesHarness: View {
+        @ObservedObject var model: HoverModel
+        let log: SideLog
+        var body: some View {
+            IslandSurfaceMotion(progress: model.progress,
+                                travel: CGSize(width: 300, height: 120),
+                                reduceMotion: false) { width, height in
+                let _ = log.samples.append((width, height))
+                Color.black.frame(width: 20, height: 20)
+            }
+        }
+    }
+
+    @MainActor
+    @Test("the island's sides run on their own springs: the bottom leads, and only growing overshoots")
+    func sidesRunOnTheirOwnSprings() async throws {
+        let model = HoverModel()
+        model.progress = 0
+        let log = SideLog()
+        let host = NSHostingView(rootView: SidesHarness(model: model, log: log))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 40, height: 40),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(100))
+        log.samples.removeAll()
+        model.progress = 1
+        try await Task.sleep(for: .seconds(1.2))
+        let opening = log.samples
+        try #require(opening.count >= 5, "the animation never ticked")
+        #expect(opening.contains { $0.width > 1.001 }, "the sides never swung past their size")
+        #expect(opening.contains { $0.height > $0.width + 0.01 }, "the bottom never led the sides")
+        #expect(opening.allSatisfy { ($0.width - 1) * 300 <= NotchMotion.overshootLimit + 0.05 })
+        #expect(abs(opening.last!.width - 1) < 0.001)
+        log.samples.removeAll()
+        model.progress = 0
+        try await Task.sleep(for: .seconds(NotchMotion.surfaceSettleDuration + 0.2))
+        let closing = log.samples
+        try #require(closing.count >= 5, "the animation never ticked")
+        #expect(closing.allSatisfy { $0.width >= -0.0001 && $0.height >= -0.0001 },
+                "a closing side passed the notch")
+        #expect(closing.contains { $0.height < $0.width - 0.01 }, "the bottom never pulled up first")
     }
 }
 

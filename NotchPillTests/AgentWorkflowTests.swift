@@ -951,6 +951,15 @@ struct HitRuleTests {
         #expect(!accepts(NSPoint(x: 250, y: 80), expanded: false))
     }
 
+    // The window keeps room below the card for the island's overshoot. That
+    // margin is transparent, and a click there belongs to the app beneath.
+    @Test("the overshoot room below the card is not the pill")
+    func overshootRoomPassesThrough() {
+        let cardBottom = bounds.height - expandedSize.height
+        #expect(accepts(NSPoint(x: 250, y: cardBottom + 4)))
+        #expect(!accepts(NSPoint(x: 250, y: cardBottom - 12)))
+    }
+
     // A rect list that disagrees with the accept rule is how the two paths
     // drifted apart the first time.
     @Test("every interactive rect's centre is accepted")

@@ -184,7 +184,17 @@ struct ExpandedNotchShape: InsettableShape {
     var notchHeight: CGFloat
     var bottomRadius: CGFloat = 18
     /// Interpolates from the hardware origin (0) to the finished card (1).
+    /// Drives the height, and the width too unless `widthProgress` is set.
+    /// May pass 1 while a growing spring swings past its size.
     var progress: CGFloat = 1
+    /// The width's own progress, when the sides follow a different spring
+    /// from the bottom edge (see `IslandSurfaceMotion`). Not animatable: the
+    /// driver hands the shape an already-interpolated value every frame.
+    var widthProgress: CGFloat?
+    /// Room around the finished card, left, right and below, that the
+    /// surface may swing into while it overshoots. The card's own size is
+    /// the rect inset by this; zero keeps the card filling the rect.
+    var overflow: CGFloat = 0
     /// When false, no neck and no shoulders: the surface is a plain rounded
     /// capsule hanging below the menu bar. See `freeFloatingPath`.
     var hasPhysicalNotch: Bool = true
@@ -205,12 +215,14 @@ struct ExpandedNotchShape: InsettableShape {
     static let floatingGap: CGFloat = 4
 
     init(notchWidth: CGFloat, notchHeight: CGFloat, bottomRadius: CGFloat = 18,
-         progress: CGFloat = 1, hasPhysicalNotch: Bool = true,
-         wrapsHardwareNotch: Bool = false) {
+         progress: CGFloat = 1, widthProgress: CGFloat? = nil, overflow: CGFloat = 0,
+         hasPhysicalNotch: Bool = true, wrapsHardwareNotch: Bool = false) {
         self.notchWidth = notchWidth
         self.notchHeight = notchHeight
         self.bottomRadius = bottomRadius
         self.progress = progress
+        self.widthProgress = widthProgress
+        self.overflow = max(0, overflow)
         self.hasPhysicalNotch = hasPhysicalNotch
         self.wrapsHardwareNotch = wrapsHardwareNotch
     }
@@ -234,7 +246,12 @@ struct ExpandedNotchShape: InsettableShape {
         return copy
     }
 
-    func path(in rect: CGRect) -> Path {
+    func path(in canvas: CGRect) -> Path {
+        // The finished card's own rect; the canvas around it is only room to
+        // swing into. Everything below sizes from the card, and the surface
+        // is bounded by the canvas.
+        let rect = CGRect(x: canvas.minX + overflow, y: canvas.minY,
+                          width: canvas.width - 2 * overflow, height: canvas.height - overflow)
         let width = max(0, rect.width)
         let height = max(0, rect.height)
         guard width > 0, height > 0 else { return Path() }
@@ -244,10 +261,12 @@ struct ExpandedNotchShape: InsettableShape {
         let expansion = min(1, max(0, progress))
         if hasPhysicalNotch && wrapsHardwareNotch {
             // The starting rectangle is the real notch, including its side
-            // walls. Width and bottom travel use the same progress, so no
-            // narrow neck holds the sides in place while the bottom drops.
-            let surfaceWidth = physicalWidth + (width - physicalWidth) * expansion
-            let surfaceHeight = physicalHeight + (height - physicalHeight) * expansion
+            // walls. Each side travels on its own progress, unclamped above so
+            // a growing spring can carry it past its size and back.
+            let sides = max(0, widthProgress ?? progress)
+            let bottom = max(0, progress)
+            let surfaceWidth = min(canvas.width, physicalWidth + (width - physicalWidth) * sides)
+            let surfaceHeight = min(canvas.height, physicalHeight + (height - physicalHeight) * bottom)
             let box = CGRect(x: rect.midX - surfaceWidth / 2, y: rect.minY,
                              width: surfaceWidth, height: surfaceHeight)
                 .insetBy(dx: insetAmount, dy: insetAmount)
@@ -264,17 +283,20 @@ struct ExpandedNotchShape: InsettableShape {
 
         // No cutout to grow out of: draw something that is meant to float.
         if !hasPhysicalNotch {
+            let swungBodyHeight = min(canvas.maxY - rect.minY - physicalHeight,
+                                      availableBodyHeight * max(0, progress))
             return freeFloatingPath(rect: rect, top: rect.minY + physicalHeight,
-                                    bottom: rect.minY + physicalHeight + outerBodyHeight,
+                                    bottom: rect.minY + physicalHeight + swungBodyHeight,
                                     expansion: expansion,
-                                    fullWidth: width, neckWidth: physicalWidth)
+                                    fullWidth: width, neckWidth: physicalWidth,
+                                    maxWidth: canvas.width)
         }
 
         // Grow downward first, then widen. This avoids the broad horizontal
         // flash that makes a hover surface look like a panel appearing below
         // the notch instead of an expansion of it.
-        let widthProgress = expansion * (0.5 + 0.5 * expansion)
-        let outerSurfaceWidth = physicalWidth + (width - physicalWidth) * widthProgress
+        let sides = widthProgress.map { min(1, max(0, $0)) } ?? expansion * (0.5 + 0.5 * expansion)
+        let outerSurfaceWidth = physicalWidth + (width - physicalWidth) * sides
 
         // The outline is sized from the full rect, *then* pulled in by the
         // inset. Insetting the rect first and growing inside that shrinks the
@@ -353,11 +375,12 @@ struct ExpandedNotchShape: InsettableShape {
     /// clear of the menu bar makes it read as a deliberate island instead.
     private func freeFloatingPath(rect: CGRect, top: CGFloat, bottom: CGFloat,
                                   expansion: CGFloat, fullWidth: CGFloat,
-                                  neckWidth: CGFloat) -> Path {
+                                  neckWidth: CGFloat, maxWidth: CGFloat) -> Path {
         // Same grow-down-then-out feel as the notched pill, so the hover reads
-        // the same on both kinds of display.
-        let widthProgress = expansion * (0.5 + 0.5 * expansion)
-        let surfaceWidth = neckWidth + (fullWidth - neckWidth) * widthProgress
+        // the same on both kinds of display. With its own width spring the
+        // bottom already leads; without one, the width lags by construction.
+        let sides = widthProgress.map { max(0, $0) } ?? expansion * (0.5 + 0.5 * expansion)
+        let surfaceWidth = min(maxWidth, neckWidth + (fullWidth - neckWidth) * sides)
         // A small breath under the menu bar. Flush against it would look like a
         // failed attempt to attach to something.
         let gap = Self.floatingGap * expansion
