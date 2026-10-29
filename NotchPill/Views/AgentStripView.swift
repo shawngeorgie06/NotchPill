@@ -43,10 +43,12 @@ struct AgentStripView: View {
     var body: some View {
         HStack(spacing: 0) {
             leadingWing
-                .frame(width: wing, height: notchHeight)
+                .padding(.leading, 10)
+                .frame(width: wing, height: notchHeight, alignment: .leading)
             Spacer(minLength: notchWidth)
             trailingWing
-                .frame(width: wing, height: notchHeight)
+                .padding(.trailing, 6)
+                .frame(width: wing, height: notchHeight, alignment: .trailing)
         }
         .frame(height: notchHeight)
         .accessibilityElement(children: .ignore)
@@ -105,13 +107,13 @@ struct AgentStripView: View {
                     .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
-            .frame(width: 11, height: 11)
+            .frame(width: 10, height: 10)
             Text("\(window.percent)%")
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(window.isStale ? tint : .white.opacity(NotchOpacity.primary))
                 .lineLimit(1)
-                .fixedSize()
+                .minimumScaleFactor(0.85)
         }
     }
 

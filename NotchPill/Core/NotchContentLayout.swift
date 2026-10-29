@@ -18,7 +18,8 @@ enum NotchContentLayout {
 
     /// Width of each wing the agent strip adds beside the camera. Both wings
     /// are the same width so the hardware notch stays centred in the pill.
-    static let agentStripWingWidth: CGFloat = 56
+    /// Just wide enough for "100%" and its ring, so the pill hugs the camera.
+    static let agentStripWingWidth: CGFloat = 42
 
     /// The closed pill when the agent strip is up: the notch plus a wing on
     /// each side, at the notch's own height. With chips below as well, the
