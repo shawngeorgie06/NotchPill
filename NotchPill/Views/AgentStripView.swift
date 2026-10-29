@@ -38,16 +38,16 @@ struct AgentStripView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var wing: CGFloat { NotchContentLayout.agentStripWingWidth }
-    private var logoSize: CGFloat { min(20, notchHeight * 0.58) }
+    private var logoSize: CGFloat { min(18, notchHeight * 0.56) }
 
     var body: some View {
         HStack(spacing: 0) {
             leadingWing
-                .padding(.leading, 10)
+                .padding(.leading, 7)
                 .frame(width: wing, height: notchHeight, alignment: .leading)
             Spacer(minLength: notchWidth)
             trailingWing
-                .padding(.trailing, 6)
+                .padding(.trailing, 5)
                 .frame(width: wing, height: notchHeight, alignment: .trailing)
         }
         .frame(height: notchHeight)
@@ -99,7 +99,7 @@ struct AgentStripView: View {
             ? Color.white.opacity(NotchOpacity.tertiary)
             : AgentTint.meter(percent: window.percent,
                               agent: AgentTint.color(for: window.agent) ?? .white)
-        return HStack(spacing: 3) {
+        return HStack(spacing: 2) {
             ZStack {
                 Circle().stroke(.white.opacity(0.16), lineWidth: 2)
                 Circle()
@@ -107,13 +107,13 @@ struct AgentStripView: View {
                     .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
-            .frame(width: 10, height: 10)
+            .frame(width: 9, height: 9)
             Text("\(window.percent)%")
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(window.isStale ? tint : .white.opacity(NotchOpacity.primary))
                 .lineLimit(1)
-                .minimumScaleFactor(0.85)
+                .minimumScaleFactor(0.75)
         }
     }
 
