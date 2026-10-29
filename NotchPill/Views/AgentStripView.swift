@@ -43,11 +43,11 @@ struct AgentStripView: View {
     var body: some View {
         HStack(spacing: 0) {
             leadingWing
-                .padding(.leading, 7)
+                .padding(.leading, 8)
                 .frame(width: wing, height: notchHeight, alignment: .leading)
             Spacer(minLength: notchWidth)
             trailingWing
-                .padding(.trailing, 5)
+                .padding(.trailing, 4)
                 .frame(width: wing, height: notchHeight, alignment: .trailing)
         }
         .frame(height: notchHeight)
