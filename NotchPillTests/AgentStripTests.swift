@@ -148,13 +148,13 @@ struct AgentStripTests {
         #expect(resolve(sessions, codex: codex(80), reading: .none)?.reading == nil)
     }
 
-    @Test("wings widen the closed pill at notch height, chips keep their own height")
+    @Test("wings widen the closed pill just past notch height, chips keep their own height")
     func layout() {
         let m = NotchMetrics(notchWidth: 180, notchHeight: 32,
                              designExpandedWidth: 640, designExpandedHeight: 190, scale: 1.0)
         let wing = NotchContentLayout.agentStripWingWidth
         let alone = NotchContentLayout.collapsedLayout(metrics: m, chips: [], showsAgentStrip: true)
-        #expect(alone.size == CGSize(width: 180 + 2 * wing, height: 32))
+        #expect(alone.size == CGSize(width: 180 + 2 * wing, height: 32 + NotchContentLayout.agentStripExtraHeight))
         let off = NotchContentLayout.collapsedLayout(metrics: m, chips: [], showsAgentStrip: false)
         #expect(off.size == m.collapsedSize)
         let chipsOnly = NotchContentLayout.collapsedLayout(metrics: m, chips: [.clock])

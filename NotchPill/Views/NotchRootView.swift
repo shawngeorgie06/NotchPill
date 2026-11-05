@@ -405,10 +405,10 @@ struct NotchRootView: View {
                     if let strip = NotchContentSnapshot.agentStrip(state: state, settings: settings,
                                                                    now: context.date) {
                         AgentStripView(strip: strip, notchWidth: metrics.notchWidth,
-                                       notchHeight: metrics.notchHeight)
+                                       notchHeight: NotchContentLayout.agentStripHeight(metrics: metrics))
                     }
                 }
-                .frame(width: frameSize.width, height: metrics.notchHeight)
+                .frame(width: frameSize.width, height: NotchContentLayout.agentStripHeight(metrics: metrics))
                 .transition(.opacity)
             } else {
                 Color.clear.frame(height: metrics.notchHeight)
