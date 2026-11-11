@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import Foundation
 import Testing
 @testable import NotchPill
@@ -26,7 +28,8 @@ struct AgentStripTests {
     private func codex(_ percent: Int, weekly: Int? = nil, updated: TimeInterval = 0) -> CodexQuota {
         CodexQuota(usedPercent: percent, resetsAt: now.addingTimeInterval(3600),
                    weeklyPercent: weekly, weeklyResetsAt: now.addingTimeInterval(86_400),
-                   creditBalance: nil, updatedAt: now.addingTimeInterval(-updated))
+                   creditBalance: nil, sessionWindow: 5 * 3600, weeklyWindow: 7 * 86_400,
+                   updatedAt: now.addingTimeInterval(-updated))
     }
 
     private func cursor(_ percent: Int, unlimited: Bool = false,
@@ -75,7 +78,7 @@ struct AgentStripTests {
                             claude: claude(session: 20, week: 41),
                             codex: codex(12, weekly: 77),
                             cursor: cursor(30))
-        #expect(strip?.reading == .limit(.init(agent: .codex, percent: 77, isStale: false)))
+        #expect(strip?.reading == .limit(.init(agent: .codex, percent: 77, isStale: false, period: .weekly)))
     }
 
     @Test("this agent's limit ignores the others")
@@ -83,7 +86,7 @@ struct AgentStripTests {
         let strip = resolve([session("claude-code", .working)],
                             claude: claude(session: 20, week: 41),
                             codex: codex(90), reading: .agentLimit)
-        #expect(strip?.reading == .limit(.init(agent: .claudeCode, percent: 41, isStale: false)))
+        #expect(strip?.reading == .limit(.init(agent: .claudeCode, percent: 41, isStale: false, period: .weekly)))
         // OpenCode has no plan to read, so the wing stays empty.
         #expect(resolve([session("opencode", .working)], codex: codex(90),
                         reading: .agentLimit)?.reading == nil)
@@ -95,17 +98,17 @@ struct AgentStripTests {
         let mixed = resolve([session("codex", .working)],
                             claude: claude(session: 95, week: 10, updated: stale),
                             codex: codex(40))
-        #expect(mixed?.reading == .limit(.init(agent: .codex, percent: 40, isStale: false)))
+        #expect(mixed?.reading == .limit(.init(agent: .codex, percent: 40, isStale: false, period: .session)))
         let onlyStale = resolve([session("codex", .working)],
                                 claude: claude(session: 95, week: 10, updated: stale))
-        #expect(onlyStale?.reading == .limit(.init(agent: .claudeCode, percent: 95, isStale: true)))
+        #expect(onlyStale?.reading == .limit(.init(agent: .claudeCode, percent: 95, isStale: true, period: .session)))
     }
 
     @Test("a window whose reset has passed is not shown")
     func resetWindowDropped() {
         let strip = resolve([session("claude-code", .working)],
                             claude: claude(session: 93, week: 12, sessionResets: -60))
-        #expect(strip?.reading == .limit(.init(agent: .claudeCode, percent: 12, isStale: false)))
+        #expect(strip?.reading == .limit(.init(agent: .claudeCode, percent: 12, isStale: false, period: .weekly)))
     }
 
     @Test("an unlimited Cursor plan has no limit to show")
@@ -132,7 +135,7 @@ struct AgentStripTests {
         let aged = AgentStrip.resolve(sessions: sessions, claude: quota, codex: nil, cursor: nil,
                                       readingKind: .tightestLimit, now: later)
         // The session window reset at +1h; only the stale weekly reading remains.
-        #expect(aged?.reading == .limit(.init(agent: .claudeCode, percent: 10, isStale: true)))
+        #expect(aged?.reading == .limit(.init(agent: .claudeCode, percent: 10, isStale: true, period: .weekly)))
     }
 
     @Test("on a tie the agent being shown wins")
@@ -162,6 +165,87 @@ struct AgentStripTests {
         #expect(both.size.height == chipsOnly.size.height)
         #expect(both.size.width == max(chipsOnly.size.width, 180 + 2 * wing))
         #expect(both.readability == chipsOnly.readability)
+    }
+
+
+    @Test("collapsed Codex and Claude limits retain both labeled windows regardless of which is higher")
+    func bothPlanWindows() {
+        for reading in [AgentStrip.ReadingKind.tightestLimit, .agentLimit] {
+            for (sessionPercent, weeklyPercent) in [(12, 77), (91, 20)] {
+                for agent in ["codex", "claude-code"] {
+                    let strip = resolve([session(agent, .working)],
+                                        claude: agent == "claude-code" ? claude(session: sessionPercent, week: weeklyPercent) : nil,
+                                        codex: agent == "codex" ? codex(sessionPercent, weekly: weeklyPercent) : nil,
+                                        reading: reading)
+                    #expect(strip?.planWindows.map(\.period) == [.session, .weekly])
+                    #expect(strip?.planWindows.map(\.percent) == [sessionPercent, weeklyPercent])
+                }
+            }
+        }
+    }
+
+    @Test("a tighter model-specific weekly pool does not hide the standard windows")
+    func modelPoolKeepsFiveHourVisible() {
+        var quota = claude(session: 20, week: 41)
+        quota.modelWindows = [.init(name: "opus", percent: 58, resetsAt: nil)]
+        let strip = resolve([session("claude-code", .working)], claude: quota)
+        let closest = resolve([session("claude-code", .working)], claude: quota, codex: codex(10, weekly: 80))
+        #expect(closest?.planWindows.first?.agent == .codex)
+        #expect(closest?.planWindows.map(\.percent) == [10, 80])
+        #expect(strip?.planWindows.map(\.period) == [.session, .weekly])
+        #expect(strip?.planWindows.map(\.percent) == [20, 41])
+        let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                                   designExpandedWidth: 640, designExpandedHeight: 190, scale: 1)
+        let layout = NotchContentLayout.collapsedLayout(metrics: metrics, chips: [],
+                                                        showsAgentStrip: true, showsPlanWindows: true)
+        #expect(layout.size.width == 180 + 2 * NotchContentLayout.agentStripPlanWingWidth)
+    }
+
+    @Test("Codex labels follow reported window lengths, including single-window plans")
+    func codexWindowLengths() {
+        for (length, expected) in [(TimeInterval(5 * 3600), AgentStrip.UsageWindow.Period.session),
+                                   (TimeInterval(7 * 86_400), .weekly), (TimeInterval(3600), .other)] {
+            var quota = codex(42)
+            quota.sessionWindow = length
+            let strip = resolve([session("codex", .working)], codex: quota)
+            #expect(strip?.planWindows.map(\.period) == [expected])
+        }
+        var unknown = codex(42)
+        unknown.sessionWindow = nil
+        #expect(resolve([session("codex", .working)], codex: unknown)?.planWindows.map(\.period) == [.other])
+    }
+
+    @Test("expired or absent windows are omitted without inventing a second reading")
+    func missingPlanWindow() {
+        let expired = resolve([session("claude-code", .working)],
+                              claude: claude(session: 93, week: 12, sessionResets: -60))
+        #expect(expired?.planWindows.map(\.period) == [.weekly])
+        let single = resolve([session("codex", .working)], codex: codex(42))
+        #expect(single?.planWindows.map(\.period) == [.session])
+        #expect(resolve([session("codex", .working)], codex: codex(42), reading: .activeCount)?.planWindows.isEmpty == true)
+    }
+
+
+    @MainActor
+    @Test("collapsed dual limits render within the notch wings")
+    func renderDualLimits() throws {
+        let strip = try #require(resolve([session("codex", .waiting(since: nil))], codex: codex(100, weekly: 100)))
+        let width = 180 + 2 * NotchContentLayout.agentStripPlanWingWidth
+        let view = AgentStripView(strip: strip, notchWidth: 180, notchHeight: 32)
+            .frame(width: width, height: 32)
+            .background(.black)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 3
+        let image = try #require(renderer.cgImage)
+        #expect(image.width == Int(width * 3))
+        #expect(image.height == 96)
+        if let directory = ProcessInfo.processInfo.environment["NOTCHPILL_VISUAL_FIXTURE_DIR"] {
+            let url = URL(fileURLWithPath: directory)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            try #require(bitmap.representation(using: .png, properties: [:]))
+                .write(to: url.appendingPathComponent("collapsed-agent-dual-limits.png"))
+        }
     }
 
     @Test("every known agent's logo lookup shares one table")

@@ -20,6 +20,7 @@ enum NotchContentLayout {
     /// are the same width so the hardware notch stays centred in the pill.
     /// Barely wider than the logo or the reading, so the pill hugs the camera.
     static let agentStripWingWidth: CGFloat = 38
+    static let agentStripPlanWingWidth: CGFloat = 60
 
     /// The strip runs a little past the reported notch height: macOS reports
     /// the menu bar's height, and the camera housing reaches slightly lower.
@@ -33,10 +34,11 @@ enum NotchContentLayout {
     /// each side, at the notch's own height. With chips below as well, the
     /// pill takes whichever is wider and the chips' own height and scale.
     static func collapsedLayout(metrics: NotchMetrics, chips: [CollapsedChip],
-                                showsAgentStrip: Bool) -> NotchContentLayoutMetrics {
+                                showsAgentStrip: Bool, showsPlanWindows: Bool = false) -> NotchContentLayoutMetrics {
         var layout = collapsedLayout(metrics: metrics, chips: chips)
         guard showsAgentStrip else { return layout }
-        let stripWidth = metrics.notchWidth + 2 * agentStripWingWidth
+        let wing = showsPlanWindows ? agentStripPlanWingWidth : agentStripWingWidth
+        let stripWidth = metrics.notchWidth + 2 * wing
         layout.size.width = max(layout.size.width, stripWidth)
         layout.size.height = max(layout.size.height, agentStripHeight(metrics: metrics))
         return layout
