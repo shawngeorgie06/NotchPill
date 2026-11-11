@@ -25,6 +25,9 @@ struct ClaudeQuota: Equatable {
     /// own allowance arrives as another key. Naming a specific model here would
     /// mean shipping a release to show a window that is already in the payload.
     var modelWindows: [ModelWindow] = []
+    /// Parsers retain absence separately from a genuine zero-percent window.
+    var hasSessionWindow: Bool = true
+    var hasWeeklyWindow: Bool = true
     var updatedAt: Date?
 
     struct ModelWindow: Equatable {
@@ -197,6 +200,8 @@ enum ClaudeUsageFetcher {
                            sessionResetsAt: session?.1,
                            weeklyPercent: weekly?.0 ?? 0,
                            weeklyResetsAt: weekly?.1,
+                           hasSessionWindow: session != nil,
+                           hasWeeklyWindow: weekly != nil,
                            updatedAt: now)
     }
 
@@ -310,6 +315,8 @@ enum ClaudeUsageFetcher {
             extraLimitMinor: limit,
             extraCurrency: currency,
             modelWindows: models,
+            hasSessionWindow: session != nil,
+            hasWeeklyWindow: weekly != nil,
             updatedAt: now)
     }
 

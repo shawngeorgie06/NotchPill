@@ -452,7 +452,7 @@ final class NotchController {
             let initialFrame = geometry.windowFrame(
                 expanded: true,
                 collapsedContentSize: collapsedContentSize(),
-                expandedContentSize: expandedContentSize()
+                expandedContentSize: hostContentSize()
             )
             let win = NotchWindow(contentRect: initialFrame)
             let container = NotchContainerView(metrics: metrics)
@@ -530,8 +530,18 @@ final class NotchController {
         let chips = NotchContentSnapshot.collapsedChips(
             state: state, shelf: shelf, timer: TimerStore.shared, settings: AppSettings.shared
         )
-        if chips.isEmpty { return metrics.collapsedSize }
-        return NotchContentLayout.collapsedSize(metrics: metrics, chips: chips)
+        let strip = NotchContentSnapshot.agentStrip(state: state, settings: AppSettings.shared)
+        return NotchContentLayout.collapsedLayout(metrics: metrics, chips: chips,
+                                                  showsAgentStrip: strip != nil,
+                                                  showsPlanWindows: strip?.showsPlanWindows == true).size
+    }
+
+    private func hostContentSize() -> CGSize {
+        // Reserve the widest strip while active so clock-only provider changes
+        // cannot outgrow the native host between published state updates.
+        let strip = NotchContentSnapshot.agentStrip(state: state, settings: AppSettings.shared)
+        return NotchContentLayout.hostSize(expanded: expandedContentSize(), metrics: metrics,
+                                           reservesAgentStrip: strip != nil)
     }
 
     private func expandedContentSize() -> CGSize {
@@ -579,7 +589,7 @@ final class NotchController {
         let frame = geometry.windowFrame(
             expanded: true,
             collapsedContentSize: collapsedContentSize(),
-            expandedContentSize: expandedContentSize()
+            expandedContentSize: hostContentSize()
         )
         updateHotZones(geometry: geometry, windowFrame: frame)
         // Growing is applied at once — SwiftUI needs the room before it can

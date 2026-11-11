@@ -248,6 +248,48 @@ struct AgentStripTests {
         }
     }
 
+
+    @Test("absent Claude windows are omitted while reported zero usage stays visible")
+    func absentClaudeWindows() throws {
+        for (line, period) in [("Current session: 0% used", AgentStrip.UsageWindow.Period.session),
+                               ("Current week (all models): 0% used", .weekly)] {
+            let data = try JSONSerialization.data(withJSONObject: ["result": line])
+            let quota = try #require(ClaudeUsageFetcher.cliQuota(in: data, now: now))
+            let strip = resolve([session("claude-code", .working)], claude: quota)
+            #expect(strip?.planWindows.map(\.period) == [period])
+            #expect(strip?.planWindows.map(\.percent) == [0])
+        }
+    }
+
+
+    @Test("cached Claude usage preserves a missing five-hour window across relaunch")
+    func cachedClaudeWindowPresence() async throws {
+        let name = "notchpill.window-presence." + UUID().uuidString
+        let store = try #require(UserDefaults(suiteName: name))
+        defer { store.removePersistentDomain(forName: name) }
+        let data = try JSONSerialization.data(withJSONObject: ["result": "Current week (all models): 0% used"])
+        let service = ClaudeUsageService(readCLI: { data }, store: store)
+        _ = try #require(await service.quota(now: now))
+        let restored = try #require(ClaudeUsageService.restore(from: store))
+        #expect(restored.hasSessionWindow == false)
+        #expect(restored.hasWeeklyWindow == true)
+        let strip = resolve([session("claude-code", .working)], claude: restored)
+        #expect(strip?.planWindows.map(\.period) == [.weekly])
+        #expect(strip?.planWindows.map(\.percent) == [0])
+    }
+
+    @Test("small external-display hosts fit the unscaled plan strip")
+    func smallHostFitsPlanStrip() {
+        let metrics = NotchMetrics(notchWidth: 180, notchHeight: 32,
+                                   designExpandedWidth: 340, designExpandedHeight: 190, scale: 0.7,
+                                   hasPhysicalNotch: false)
+        let expanded = CGSize(width: 238, height: 150)
+        let host = NotchContentLayout.hostSize(expanded: expanded, metrics: metrics, reservesAgentStrip: true)
+        #expect(host.width >= 180 + 2 * NotchContentLayout.agentStripPlanWingWidth)
+        #expect(host.height == expanded.height)
+        #expect(NotchContentLayout.hostSize(expanded: expanded, metrics: metrics, reservesAgentStrip: false) == expanded)
+    }
+
     @Test("every known agent's logo lookup shares one table")
     func logoTable() {
         #expect(AgentSession(id: "a", agent: "cursor", project: "", state: .working,

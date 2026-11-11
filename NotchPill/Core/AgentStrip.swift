@@ -183,8 +183,8 @@ struct AgentStrip: Equatable {
                                        isStale: UsageFreshness.isStale(updatedAt, now: now), period: period))
         }
         if let claude {
-            add(.claudeCode, claude.sessionPercent, resetsAt: claude.sessionResetsAt, updatedAt: claude.updatedAt, period: .session)
-            add(.claudeCode, claude.weeklyPercent, resetsAt: claude.weeklyResetsAt, updatedAt: claude.updatedAt, period: .weekly)
+            add(.claudeCode, claude.hasSessionWindow ? claude.sessionPercent : nil, resetsAt: claude.sessionResetsAt, updatedAt: claude.updatedAt, period: .session)
+            add(.claudeCode, claude.hasWeeklyWindow ? claude.weeklyPercent : nil, resetsAt: claude.weeklyResetsAt, updatedAt: claude.updatedAt, period: .weekly)
             for window in claude.modelWindows {
                 add(.claudeCode, window.percent, resetsAt: window.resetsAt, updatedAt: claude.updatedAt)
             }

@@ -22,6 +22,13 @@ enum NotchContentLayout {
     static let agentStripWingWidth: CGFloat = 38
     static let agentStripPlanWingWidth: CGFloat = 60
 
+    /// Transparent host space must also fit the unscaled collapsed readings.
+    static func hostSize(expanded: CGSize, metrics: NotchMetrics, reservesAgentStrip: Bool) -> CGSize {
+        guard reservesAgentStrip else { return expanded }
+        return CGSize(width: max(expanded.width, metrics.notchWidth + 2 * agentStripPlanWingWidth),
+                      height: max(expanded.height, agentStripHeight(metrics: metrics)))
+    }
+
     /// The strip runs a little past the reported notch height: macOS reports
     /// the menu bar's height, and the camera housing reaches slightly lower.
     static let agentStripExtraHeight: CGFloat = 2
