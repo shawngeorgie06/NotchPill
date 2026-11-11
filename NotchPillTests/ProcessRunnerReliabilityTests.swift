@@ -168,7 +168,7 @@ struct ProcessRunnerDescendantTests {
     func cancellationAfterLeaderExit() async throws {
         let probe = try DescendantProbe()
         defer { probe.cleanup() }
-        let arguments = probe.arguments()
+        let arguments = probe.arguments(gracefulLeader: true)
         let task = cancellationMeasuredTask {
             try await ProcessRunner.run(executableURL: URL(fileURLWithPath: "/bin/sh"),
                                         arguments: arguments, timeout: 5)
@@ -182,7 +182,7 @@ struct ProcessRunnerDescendantTests {
         #expect(leader != getpgrp())
         let cancelledAt = ContinuousClock.now
         let leaderExit = cancellationMeasuredTask {
-            await probe.observeGone(leader, deadline: cancelledAt.advanced(by: .milliseconds(400)))
+            await probe.observeGone(leader, deadline: cancelledAt.advanced(by: .seconds(2)))
         }
         let descendantExit = cancellationMeasuredTask {
             await probe.observeGone(descendant, deadline: cancelledAt.advanced(by: .seconds(2)))
@@ -197,8 +197,10 @@ struct ProcessRunnerDescendantTests {
         } catch {
             Issue.record("Unexpected error: \(error)")
         }
-        // The default-TERM leader exits before the 0.5-second KILL escalation.
+        // The marker proves graceful TERM handling. Observing exit may invoke
+        // ps for a zombie, so it uses the same budget as descendant observation.
         #expect(try await leaderExit.value.result.get())
+        #expect(FileManager.default.fileExists(atPath: probe.directory.appendingPathComponent("term-handled").path))
         #expect(try await descendantExit.value.result.get())
     }
 
@@ -228,9 +230,14 @@ private struct DescendantProbe: Sendable {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    func arguments(leaderExitsEarly: Bool = false, closeDescendantPipes: Bool = false) -> [String] {
+    func arguments(leaderExitsEarly: Bool = false, closeDescendantPipes: Bool = false,
+                   gracefulLeader: Bool = false) -> [String] {
         let redirect = closeDescendantPipes ? ">/dev/null 2>&1" : ""
+        // Record graceful TERM handling rather than infer it from a tight
+        // deadline around a potentially slow process-status query.
+        let termination = gracefulLeader ? "trap 'echo handled > \"$1/term-handled\"; exit 0' TERM" : ""
         let script = """
+        \(termination)
         echo $$ > "$1/leader.pid"
         /bin/sh -c 'trap "" TERM; echo $$ > "$1/descendant.pid"; while :; do sleep 0.1; done' descendant "$1" \(redirect) &
         while [ ! -s "$1/descendant.pid" ]; do sleep 0.01; done
