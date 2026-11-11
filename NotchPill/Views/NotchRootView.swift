@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// The overlay's SwiftUI surface. A black notch-shaped background grows from the
 /// physical notch into a pill on hover; content crossfades between states rather
@@ -17,12 +18,15 @@ struct NotchRootView: View {
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private static let usageClock = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    @State private var usageDate = Date()
+
     private var collapsedChips: [CollapsedChip] {
         NotchContentSnapshot.collapsedChips(state: state, shelf: shelf, timer: timer, settings: settings)
     }
 
     private var agentStrip: AgentStrip? {
-        NotchContentSnapshot.agentStrip(state: state, settings: settings)
+        NotchContentSnapshot.agentStrip(state: state, settings: settings, now: usageDate)
     }
 
     private var expandedActivities: [ExpandedActivity] {
@@ -66,7 +70,8 @@ struct NotchRootView: View {
                 metrics: metrics, activities: expandedActivities)
         }
         return NotchContentLayout.collapsedLayout(metrics: metrics, chips: collapsedChips,
-                                                  showsAgentStrip: agentStrip != nil)
+                                                  showsAgentStrip: agentStrip != nil,
+                                                  showsPlanWindows: agentStrip?.showsPlanWindows == true)
     }
 
     private var frameSize: CGSize { contentLayout.size }
@@ -264,6 +269,10 @@ struct NotchRootView: View {
         .animation(contentAnimation, value: state.brightnessLevel)
         .animation(contentAnimation, value: state.microphoneMuted)
         .animation(.easeOut(duration: 0.12), value: state.updateProgress?.fraction)
+        .onReceive(Self.usageClock) { date in
+            // Layout and content age together, including when a reset changes wing width.
+            usageDate = date
+        }
     }
 
     private func updateProgressContent(_ progress: UpdateProgress) -> some View {
@@ -397,19 +406,11 @@ struct NotchRootView: View {
 
     private var collapsedContent: some View {
         VStack(spacing: 0) {
-            if agentStrip != nil {
-                // Whether the strip shows depends only on sessions, but its
-                // reading also ages: a cached limit can pass its reset or go
-                // stale while nothing new is published. Re-read it on a clock.
-                TimelineView(.periodic(from: .now, by: 30)) { context in
-                    if let strip = NotchContentSnapshot.agentStrip(state: state, settings: settings,
-                                                                   now: context.date) {
-                        AgentStripView(strip: strip, notchWidth: metrics.notchWidth,
-                                       notchHeight: NotchContentLayout.agentStripHeight(metrics: metrics))
-                    }
-                }
-                .frame(width: frameSize.width, height: NotchContentLayout.agentStripHeight(metrics: metrics))
-                .transition(.opacity)
+            if let strip = agentStrip {
+                AgentStripView(strip: strip, notchWidth: metrics.notchWidth,
+                               notchHeight: NotchContentLayout.agentStripHeight(metrics: metrics))
+                    .frame(width: frameSize.width, height: NotchContentLayout.agentStripHeight(metrics: metrics))
+                    .transition(.opacity)
             } else {
                 Color.clear.frame(height: metrics.notchHeight)
             }

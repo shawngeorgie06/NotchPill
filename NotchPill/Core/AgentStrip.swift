@@ -55,6 +55,10 @@ struct AgentStrip: Equatable {
     /// Working or waiting sessions in all, so a second agent is not invisible.
     var activeCount: Int
     var reading: Reading?
+    /// Both standard windows for the provider selected by the reading preference.
+    var planWindows: [UsageWindow] = []
+
+    var showsPlanWindows: Bool { planWindows.contains { $0.period != .other } }
 
     /// What sits on the camera's other side.
     enum ReadingKind: String, CaseIterable, Identifiable {
@@ -91,6 +95,21 @@ struct AgentStrip: Equatable {
         /// Older than `UsageFreshness.staleAfter`: drawn grey, so a number
         /// that may have moved on does not pass for a live one.
         var isStale: Bool
+        var period: Period = .other
+
+        enum Period: String {
+            case session = "5h"
+            case weekly = "Week"
+            case other = "Limit"
+
+            var accessibilityTitle: String {
+                switch self {
+                case .session: return "five-hour"
+                case .weekly: return "weekly"
+                case .other: return "plan"
+                }
+            }
+        }
     }
 
     /// Picks the session to show and builds its reading.
@@ -118,21 +137,35 @@ struct AgentStrip: Equatable {
         }) else { return nil }
 
         let windows = usageWindows(claude: claude, codex: codex, cursor: cursor, now: now)
+        // Rank the windows the strip can actually display. Model-specific
+        // pools remain a fallback when no standard window is available.
+        let candidates = windows.filter { window in
+            window.period != .other || !windows.contains {
+                $0.agent == window.agent && $0.period != .other
+            }
+        }
         let reading: Reading?
         switch readingKind {
         case .tightestLimit:
-            reading = tightest(windows, preferring: lead.knownAgent).map(Reading.limit)
+            reading = tightest(candidates, preferring: lead.knownAgent).map(Reading.limit)
         case .agentLimit:
             reading = lead.knownAgent
-                .flatMap { agent in tightest(windows.filter { $0.agent == agent }, preferring: agent) }
+                .flatMap { agent in tightest(candidates.filter { $0.agent == agent }, preferring: agent) }
                 .map(Reading.limit)
         case .activeCount:
             reading = .count(active.count)
         case .none:
             reading = nil
         }
+        let planWindows: [UsageWindow]
+        if case .limit(let selected) = reading {
+            let standard = windows.filter { $0.agent == selected.agent && $0.period != .other }
+            planWindows = standard.isEmpty ? [selected] : standard
+        } else {
+            planWindows = []
+        }
         return AgentStrip(agent: lead.knownAgent, isWaiting: lead.isWaiting,
-                          activeCount: active.count, reading: reading)
+                          activeCount: active.count, reading: reading, planWindows: planWindows)
     }
 
     /// Every plan window that still describes the present.
@@ -143,22 +176,24 @@ struct AgentStrip: Equatable {
     static func usageWindows(claude: ClaudeQuota?, codex: CodexQuota?, cursor: CursorQuota?,
                              now: Date = Date()) -> [UsageWindow] {
         var windows: [UsageWindow] = []
-        func add(_ agent: DevReadyAlert.KnownAgent, _ percent: Int?, resetsAt: Date?, updatedAt: Date?) {
+        func add(_ agent: DevReadyAlert.KnownAgent, _ percent: Int?, resetsAt: Date?, updatedAt: Date?, period: UsageWindow.Period = .other) {
             guard let percent else { return }
             if let resetsAt, resetsAt <= now { return }
             windows.append(UsageWindow(agent: agent, percent: min(100, max(0, percent)),
-                                       isStale: UsageFreshness.isStale(updatedAt, now: now)))
+                                       isStale: UsageFreshness.isStale(updatedAt, now: now), period: period))
         }
         if let claude {
-            add(.claudeCode, claude.sessionPercent, resetsAt: claude.sessionResetsAt, updatedAt: claude.updatedAt)
-            add(.claudeCode, claude.weeklyPercent, resetsAt: claude.weeklyResetsAt, updatedAt: claude.updatedAt)
+            add(.claudeCode, claude.hasSessionWindow ? claude.sessionPercent : nil, resetsAt: claude.sessionResetsAt, updatedAt: claude.updatedAt, period: .session)
+            add(.claudeCode, claude.hasWeeklyWindow ? claude.weeklyPercent : nil, resetsAt: claude.weeklyResetsAt, updatedAt: claude.updatedAt, period: .weekly)
             for window in claude.modelWindows {
                 add(.claudeCode, window.percent, resetsAt: window.resetsAt, updatedAt: claude.updatedAt)
             }
         }
         if let codex {
-            add(.codex, codex.usedPercent, resetsAt: codex.resetsAt, updatedAt: codex.updatedAt)
-            add(.codex, codex.weeklyPercent, resetsAt: codex.weeklyResetsAt, updatedAt: codex.updatedAt)
+            add(.codex, codex.usedPercent, resetsAt: codex.resetsAt, updatedAt: codex.updatedAt,
+                period: period(length: codex.sessionWindow, fallback: codex.weeklyPercent == nil ? .other : .session))
+            add(.codex, codex.weeklyPercent, resetsAt: codex.weeklyResetsAt, updatedAt: codex.updatedAt,
+                period: period(length: codex.weeklyWindow, fallback: .weekly))
         }
         if let cursor, !cursor.isUnlimited {
             // Auto and API are separate pools with their own ceilings; either
@@ -168,6 +203,13 @@ struct AgentStrip: Equatable {
             }
         }
         return windows
+    }
+
+    private static func period(length: TimeInterval?, fallback: UsageWindow.Period) -> UsageWindow.Period {
+        guard let length else { return fallback }
+        if abs(length - 5 * 3600) < 60 { return .session }
+        if abs(length - 7 * 86_400) < 3600 { return .weekly }
+        return .other
     }
 
     /// The highest current reading. A fresh reading beats any stale one, so a

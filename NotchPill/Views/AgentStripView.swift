@@ -37,14 +37,17 @@ struct AgentStripView: View {
     let notchHeight: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var wing: CGFloat { NotchContentLayout.agentStripWingWidth }
+    private var wing: CGFloat {
+        strip.showsPlanWindows ? NotchContentLayout.agentStripPlanWingWidth : NotchContentLayout.agentStripWingWidth
+    }
     private var logoSize: CGFloat { min(18, notchHeight * 0.56) }
 
     var body: some View {
         HStack(spacing: 0) {
             leadingWing
                 .padding(.leading, 8)
-                .frame(width: wing, height: notchHeight, alignment: .leading)
+                .frame(width: NotchContentLayout.agentStripWingWidth, height: notchHeight, alignment: .leading)
+                .frame(width: wing, height: notchHeight, alignment: .trailing)
             Spacer(minLength: notchWidth)
             trailingWing
                 .padding(.trailing, 4)
@@ -83,7 +86,11 @@ struct AgentStripView: View {
     private var trailingWing: some View {
         switch strip.reading {
         case .limit(let window):
-            limitReading(window)
+            VStack(alignment: .trailing, spacing: 1) {
+                ForEach(Array((strip.planWindows.isEmpty ? [window] : strip.planWindows).enumerated()), id: \.offset) { _, window in
+                    limitReading(window)
+                }
+            }
         case .count(let count):
             Text("\(count)")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -100,16 +107,24 @@ struct AgentStripView: View {
             : AgentTint.meter(percent: window.percent,
                               agent: AgentTint.color(for: window.agent) ?? .white)
         return HStack(spacing: 2) {
-            ZStack {
-                Circle().stroke(.white.opacity(0.16), lineWidth: 2)
-                Circle()
-                    .trim(from: 0, to: CGFloat(window.percent) / 100)
-                    .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
+            if window.period == .other {
+                ZStack {
+                    Circle().stroke(.white.opacity(0.16), lineWidth: 2)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(window.percent) / 100)
+                        .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 9, height: 9)
+            } else {
+                Text(window.period.rawValue)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(NotchOpacity.secondary))
+                    .fixedSize()
+                    .frame(width: 24, alignment: .leading)
             }
-            .frame(width: 9, height: 9)
             Text("\(window.percent)%")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(.system(size: window.period == .other ? 11 : 10, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(window.isStale ? tint : .white.opacity(NotchOpacity.primary))
                 .lineLimit(1)
@@ -117,21 +132,26 @@ struct AgentStripView: View {
         }
     }
 
-    private var accessibilityText: String {
-        let name: String
-        switch strip.agent {
-        case .claudeCode: name = "Claude Code"
-        case .codex: name = "Codex"
-        case .cursor: name = "Cursor"
-        case .openCode: name = "OpenCode"
-        case nil: name = "An agent"
+    private func agentName(_ agent: DevReadyAlert.KnownAgent?) -> String {
+        switch agent {
+        case .claudeCode: return "Claude Code"
+        case .codex: return "Codex"
+        case .cursor: return "Cursor"
+        case .openCode: return "OpenCode"
+        case nil: return "An agent"
         }
-        var text = name + (strip.isWaiting ? " is waiting for you" : " is working")
+    }
+
+    private var accessibilityText: String {
+        var text = agentName(strip.agent) + (strip.isWaiting ? " is waiting for you" : " is working")
         if strip.activeCount > 1 { text += ", \(strip.activeCount) agents active" }
         switch strip.reading {
         case .limit(let window):
-            text += ", \(window.agent == strip.agent ? "its" : "closest") plan limit \(window.percent) percent used"
-            if window.isStale { text += ", cached" }
+            let windows = strip.planWindows.isEmpty ? [window] : strip.planWindows
+            for window in windows {
+                text += ", \(window.agent == strip.agent ? "its" : "\(agentName(window.agent))'s") \(window.period.accessibilityTitle) limit \(window.percent) percent used"
+                if window.isStale { text += ", cached" }
+            }
         case .count, nil: break
         }
         return text

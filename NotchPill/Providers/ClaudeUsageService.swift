@@ -76,13 +76,19 @@ actor ClaudeUsageService {
               let session = raw["session"] as? Int,
               let weekly = raw["weekly"] as? Int,
               let stamp = raw["at"] as? Double else { return nil }
+        let hasSession = raw["hasSession"] as? Bool ?? true
+        let hasWeekly = raw["hasWeekly"] as? Bool ?? true
+        guard hasSession || hasWeekly else { return nil }
         return ClaudeQuota(sessionPercent: session, weeklyPercent: weekly,
+                           hasSessionWindow: hasSession, hasWeeklyWindow: hasWeekly,
                            updatedAt: Date(timeIntervalSince1970: stamp))
     }
 
     private func persist(_ quota: ClaudeQuota) {
         store?.set(["session": quota.sessionPercent,
                     "weekly": quota.weeklyPercent,
+                    "hasSession": quota.hasSessionWindow,
+                    "hasWeekly": quota.hasWeeklyWindow,
                     "at": (quota.updatedAt ?? Date()).timeIntervalSince1970],
                    forKey: Self.cacheKey)
     }
