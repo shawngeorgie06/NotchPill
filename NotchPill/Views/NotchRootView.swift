@@ -18,6 +18,7 @@ struct NotchRootView: View {
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private static let usageClock = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
     @State private var usageDate = Date()
 
     private var collapsedChips: [CollapsedChip] {
@@ -268,7 +269,7 @@ struct NotchRootView: View {
         .animation(contentAnimation, value: state.brightnessLevel)
         .animation(contentAnimation, value: state.microphoneMuted)
         .animation(.easeOut(duration: 0.12), value: state.updateProgress?.fraction)
-        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { date in
+        .onReceive(Self.usageClock) { date in
             // Layout and content age together, including when a reset changes wing width.
             usageDate = date
         }
