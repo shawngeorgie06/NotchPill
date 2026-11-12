@@ -304,7 +304,7 @@ final class HotZoneKeyMonitor {
 
     private func handleObservedKeyDown(_ event: NSEvent) {
         guard !event.isARepeat else { return }
-        guard !IsSecureEventInputEnabled(), !hasShortcutModifiers(event.modifierFlags), !isTextInputFocused else { return }
+        guard !IsSecureEventInputEnabled(), !Self.hasShortcutModifiers(event.modifierFlags, keyCode: event.keyCode), !isTextInputFocused else { return }
         guard !noteKeyAndCheckTyping(keyCode: event.keyCode) else { return }
         _ = dispatchIfNeeded(keyCode: event.keyCode, fromTap: false)
     }
@@ -328,7 +328,7 @@ final class HotZoneKeyMonitor {
         }
 
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-        guard !IsSecureEventInputEnabled(), !hasShortcutModifiers(event.flags), !isTextInputFocused else {
+        guard !IsSecureEventInputEnabled(), !Self.hasShortcutModifiers(event.flags, keyCode: keyCode), !isTextInputFocused else {
             return Unmanaged.passUnretained(event)
         }
         let wasTyping = noteKeyAndCheckTyping(keyCode: keyCode)
@@ -393,20 +393,25 @@ final class HotZoneKeyMonitor {
         switch keyCode { case 49, 124, 123, 126, 125: return true; default: return false }
     }
 
-    private func hasShortcutModifiers(_ flags: NSEvent.ModifierFlags) -> Bool {
-        !flags.intersection([.command, .option, .control, .shift, .function]).isEmpty
+    /// macOS tags ordinary arrow keys with Function. Real shortcut modifiers
+    /// must still pass through to the focused app, including modified arrows.
+    static func hasShortcutModifiers(_ flags: NSEvent.ModifierFlags, keyCode: UInt16) -> Bool {
+        var modifiers: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+        if !(123...126).contains(keyCode) { modifiers.insert(.function) }
+        return !flags.intersection(modifiers).isEmpty
     }
 
-    private func hasShortcutModifiers(_ flags: CGEventFlags) -> Bool {
-        !flags.intersection([.maskCommand, .maskAlternate, .maskControl,
-                             .maskShift, .maskSecondaryFn]).isEmpty
+    static func hasShortcutModifiers(_ flags: CGEventFlags, keyCode: UInt16) -> Bool {
+        var modifiers: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]
+        if !(123...126).contains(keyCode) { modifiers.insert(.maskSecondaryFn) }
+        return !flags.intersection(modifiers).isEmpty
     }
 
     private func installLocalMonitor() {
         guard localMonitor == nil else { return }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, !event.isARepeat else { return event }
-            guard !IsSecureEventInputEnabled(), !self.hasShortcutModifiers(event.modifierFlags),
+            guard !IsSecureEventInputEnabled(), !Self.hasShortcutModifiers(event.modifierFlags, keyCode: event.keyCode),
                   !self.isTextInputFocused else { return event }
             guard !self.noteKeyAndCheckTyping(keyCode: event.keyCode) else { return event }
             if self.dispatchIfNeeded(keyCode: event.keyCode, fromTap: false) { return nil }
