@@ -713,6 +713,20 @@ struct TerminalStoreTests {
 
 @Suite("NotchMotion")
 struct NotchMotionTests {
+    @Test("page release carries direction and bounds near-target velocity")
+    func pageReleaseMomentum() {
+        #expect(NotchMotion.pageReleaseVelocity(from: -100, to: -400, velocity: -600) == 2)
+        #expect(NotchMotion.pageReleaseVelocity(from: 100, to: 400, velocity: 600) == 2)
+        #expect(NotchMotion.pageReleaseVelocity(from: -100, to: 0, velocity: -100) == -1)
+        #expect(NotchMotion.pageReleaseVelocity(from: 399, to: 400, velocity: 1000) == 3)
+        #expect(NotchMotion.pageReleaseVelocity(from: 400, to: 400, velocity: 1000) == 0)
+        #expect(NotchMotion.pageReleaseVelocity(from: 0, to: 100, velocity: .infinity) == 0)
+        #expect(NotchMotion.pageRelease(from: 0, to: 400, velocity: 1000, reduceMotion: true)
+                == Animation.linear(duration: 0.01))
+        #expect(NotchMotion.settings(reduceMotion: true) == Animation.linear(duration: 0.01))
+        #expect(NotchMotion.feedback(reduceMotion: true) == Animation.linear(duration: 0.01))
+    }
+
     @Test("every token collapses to the reduce-motion floor")
     func reduceMotionFloor() {
         // The floor is not "something short" — it is the exact value the rest

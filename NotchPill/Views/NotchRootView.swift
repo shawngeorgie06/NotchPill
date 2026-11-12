@@ -92,7 +92,7 @@ struct NotchRootView: View {
 
     private var peekReplacementAnimation: Animation? {
         state.renderedDevReadyAlerts.isEmpty ? nil
-            : .timingCurve(0.32, 0.72, 0.15, 1, duration: state.devReadyMotionDuration)
+            : NotchMotion.settle(reduceMotion: reduceMotion)
     }
 
     private var readabilityScale: CGFloat { contentLayout.readability }
@@ -118,7 +118,7 @@ struct NotchRootView: View {
         // This is the width's spring; the surface and its masks run each side
         // on its own (`IslandSurfaceMotion`), and the card's reveal follows
         // the width.
-        NotchMotion.surface(.width, growing: state.expansionProgress >= 0.5,
+        NotchMotion.surface(.width, growing: surfaceProgress >= 0.5,
                             travel: surfaceTravel.width, reduceMotion: reduceMotion)
     }
 
@@ -174,31 +174,19 @@ struct NotchRootView: View {
         ZStack(alignment: .top) {
             if state.isExpanded || state.isCollapsing || !state.renderedDevReadyAlerts.isEmpty || state.updateProgress != nil || state.replyCompose != nil {
                 expandedBackground
-            } else if agentStrip != nil {
-                // The wings sit beside the camera, so this surface wraps the
-                // hardware notch instead of hanging below it.
-                agentStripSurface
-            } else if !collapsedChips.isEmpty {
-                // The physical notch itself is already black. Only draw the
-                // compact island that grows from its lower edge.
-                ExpandedPillSurface(
-                    notchWidth: metrics.notchWidth,
-                    notchHeight: metrics.notchHeight,
-                    progress: 1,
-                    hasPhysicalNotch: metrics.hasPhysicalNotch
-                )
-                .frame(width: frameSize.width, height: frameSize.height)
+            } else {
+                collapsedBackground
             }
         }
         .overlay(alignment: .top) {
             if let progress = state.updateProgress {
                 updateProgressContent(progress)
                     .mask(growingSurfaceMask(progress: surfaceProgress))
-                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97)))
             } else if let compose = state.replyCompose {
                 replyComposeContent(compose)
                     .mask(growingSurfaceMask(progress: surfaceProgress))
-                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97)))
             } else if !state.renderedDevReadyAlerts.isEmpty {
                 devReadyContent(alerts: state.renderedDevReadyAlerts)
                     // Clip the text to the surface that is growing behind it.
@@ -211,7 +199,7 @@ struct NotchRootView: View {
                     // wrong size. Masked, the words are revealed by the pill as
                     // it opens and covered as it closes.
                     .mask(growingPeekMask)
-                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    .transition(.identity)
             } else if state.isExpanded || state.isCollapsing {
                 // The surface, its mask and the content's opacity all read the
                 // same animated expansionProgress, so content appears once the
@@ -226,10 +214,15 @@ struct NotchRootView: View {
                     .animation(expandAnimation, value: state.expansionProgress)
                     .mask(growingSurfaceMask(progress: state.expansionProgress))
                     .transition(.identity)
-            } else if !collapsedChips.isEmpty || agentStrip != nil {
-                collapsedContent
-                    .mask(compactContentMask)
-                    .transition(Self.chipTransition(reduceMotion: reduceMotion))
+            } else {
+                ZStack(alignment: .top) {
+                    if !collapsedChips.isEmpty || agentStrip != nil {
+                        collapsedContent
+                            .mask(compactContentMask)
+                            .transition(Self.chipTransition(reduceMotion: reduceMotion))
+                    }
+                }
+                .animation(contentAnimation, value: state.activity)
             }
         }
         // Without the cross-fade the collapsed chips were removed instantly,
@@ -245,17 +238,20 @@ struct NotchRootView: View {
             VStack(spacing: 8) {
                 if settings.showVolumeHUD, let level = state.volumeLevel {
                     VolumeHUD(level: level)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
                 }
                 if settings.showBrightnessHUD, let level = state.brightnessLevel {
                     BrightnessHUD(level: level)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
                 }
                 if settings.showMicrophoneHUD, let muted = state.microphoneMuted {
                     MicrophoneHUD(isMuted: muted)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
                 }
             }
+            .animation(contentAnimation, value: state.volumeLevel)
+            .animation(contentAnimation, value: state.brightnessLevel)
+            .animation(contentAnimation, value: state.microphoneMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .allowsHitTesting(true)
@@ -264,11 +260,7 @@ struct NotchRootView: View {
         // time lets SwiftUI interpolate a second width/position, which reads
         // as a brief sideways pop after an otherwise smooth expansion.
         .animation(expandAnimation, value: state.expansionProgress)
-        .animation(contentAnimation, value: state.activity)
-        .animation(contentAnimation, value: state.volumeLevel)
-        .animation(contentAnimation, value: state.brightnessLevel)
-        .animation(contentAnimation, value: state.microphoneMuted)
-        .animation(.easeOut(duration: 0.12), value: state.updateProgress?.fraction)
+        .animation(contentAnimation, value: state.updateProgress != nil)
         .onReceive(Self.usageClock) { date in
             // Layout and content age together, including when a reset changes wing width.
             usageDate = date
@@ -279,6 +271,7 @@ struct NotchRootView: View {
         VStack(spacing: 0) {
             Color.clear.frame(height: surfaceTop)
             UpdateProgressView(progress: progress)
+                .animation(NotchMotion.paint(reduceMotion: reduceMotion), value: progress.fraction)
                 .frame(width: frameSize.width,
                        height: surfaceContentHeight,
                        alignment: .top)
@@ -331,6 +324,21 @@ struct NotchRootView: View {
     /// shallow canvas is independent of expanded content's shoulder clearance.
     /// One rounded slab across the notch and both wings, plus the chip row
     /// when chips are on. Without a notch it floats like the chip pill does.
+    private var collapsedBackground: some View {
+        ZStack(alignment: .top) {
+            if agentStrip != nil {
+                agentStripSurface
+            } else if !collapsedChips.isEmpty {
+                ExpandedPillSurface(notchWidth: metrics.notchWidth,
+                                    notchHeight: metrics.notchHeight,
+                                    progress: 1,
+                                    hasPhysicalNotch: metrics.hasPhysicalNotch)
+                    .frame(width: frameSize.width, height: frameSize.height)
+            }
+        }
+        .animation(contentAnimation, value: state.activity)
+    }
+
     private var agentStripSurface: some View {
         let floating = !metrics.hasPhysicalNotch
         let inset = floating ? ExpandedNotchShape.floatingGap : 0
@@ -448,9 +456,8 @@ struct NotchRootView: View {
                        alignment: .top)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .top)
-        .opacity(state.devReadyPresentation)
-        .offset(y: (1 - state.devReadyPresentation) * -8)
-        .scaleEffect(0.96 + state.devReadyPresentation * 0.04, anchor: .top)
+        .modifier(SurfaceReveal(progress: state.devReadyPresentation, reduceMotion: reduceMotion))
+        .animation(expandAnimation, value: state.devReadyPresentation)
     }
 }
 
