@@ -9,6 +9,7 @@ struct PreferencesView: View {
     @ObservedObject private var integrationHealth = IntegrationHealthStore.shared
     @State private var selectedCategory = SettingsCategory.appearance
     @State private var searchText = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,7 +22,9 @@ struct PreferencesView: View {
                         .padding(.top, 14)
                     ForEach(SettingsCategory.allCases.filter(categoryMatchesSearch), id: \.self) { category in
                         Button {
-                            selectedCategory = category
+                            withAnimation(NotchMotion.settings(reduceMotion: reduceMotion)) {
+                                selectedCategory = category
+                            }
                         } label: {
                             Label(category.rawValue, systemImage: category.symbol)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -45,12 +48,17 @@ struct PreferencesView: View {
                 .frame(width: 190)
                 .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
                 Divider()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        categoryContent
+                ZStack(alignment: .topLeading) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            categoryContent
+                        }
+                        .padding(20)
                     }
-                    .padding(20)
+                    .id(selectedCategory)
+                    .transition(.opacity)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(minWidth: 760, minHeight: 640)

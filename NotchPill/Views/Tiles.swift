@@ -875,13 +875,14 @@ struct DevReadyPeekRow: View {
 }
 
 private struct DevReadyRowButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.white.opacity(configuration.isPressed ? 0.1 : 0))
             }
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(NotchMotion.feedback(reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 }
 
@@ -1065,6 +1066,7 @@ enum ExpandedActivityBuilder {
 /// right slid across to close the gap. Reserving the width means pause only
 /// fades the bars out — nothing moves.
 struct EqualizerSlot: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let isPlaying: Bool
     var scale: CGFloat = 1.0
 
@@ -1074,7 +1076,7 @@ struct EqualizerSlot: View {
     var body: some View {
         EqualizerBars(isPlaying: isPlaying, scale: scale)
             .opacity(isPlaying ? 1 : 0)
-            .animation(.easeInOut(duration: 0.18), value: isPlaying)
+            .animation(NotchMotion.feedback(reduceMotion: reduceMotion), value: isPlaying)
             .frame(width: Self.width(scale: scale))
     }
 }

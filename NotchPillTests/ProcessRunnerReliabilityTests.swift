@@ -116,7 +116,7 @@ struct ProcessRunnerReliabilityTests {
 }
 
 
-@Suite("Process descendant ownership")
+@Suite("Process descendant ownership", .serialized)
 struct ProcessRunnerDescendantTests {
     @Test("synchronous timeout kills a descendant that ignores TERM")
     func synchronousTimeout() throws {
@@ -198,7 +198,7 @@ struct ProcessRunnerDescendantTests {
             Issue.record("Unexpected error: \(error)")
         }
         // The marker proves graceful TERM handling. Observing exit may invoke
-        // ps for a zombie, so it uses the same budget as descendant observation.
+        // a native zombie-status fallback, so both observers share a budget.
         #expect(try await leaderExit.value.result.get())
         #expect(FileManager.default.fileExists(atPath: probe.directory.appendingPathComponent("term-handled").path))
         #expect(try await descendantExit.value.result.get())
@@ -269,21 +269,25 @@ private struct DescendantProbe: Sendable {
             // The native query can fail even for a real zombie. Only ESRCH
             // from kill proves absence; permission failures remain unknown.
             guard kill(pid, 0) == 0 else { return errno != ESRCH }
-            guard let output = ProcessRunner.capture(
-                "/bin/ps", ["-o", "stat=", "-p", String(pid)], timeout: 1),
-                  let state = String(data: output, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines),
-                  !state.isEmpty else {
-                return true
-            }
-            // Only a positive zombie status proves it cannot execute. Empty,
-            // failed, or unrecognized status queries must not pass the test.
-            return !state.hasPrefix("Z")
+            // Avoid starting ps inside the observation deadline.
+            return !kernelReportsZombie(pid)
         }
         // kill(pid, 0) succeeds for zombies too. They are already dead and
         // cannot retain a pipe or execute work, even if launchd has not reaped
         // them yet.
         return info.pbi_status != UInt32(SZOMB)
+    }
+
+    /// Only a complete, successful native response may prove a zombie.
+    static func kernelReportsZombie(_ pid: pid_t) -> Bool {
+        var processInfo = kinfo_proc()
+        var length = MemoryLayout<kinfo_proc>.size
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        let status = mib.withUnsafeMutableBufferPointer { names in
+            sysctl(names.baseAddress, u_int(names.count), &processInfo, &length, nil, 0)
+        }
+        guard status == 0, length == MemoryLayout<kinfo_proc>.size else { return false }
+        return processInfo.kp_proc.p_stat == Int8(SZOMB)
     }
 
     func waitUntilReady() async throws {
@@ -436,13 +440,17 @@ struct MediaSupervisorTests {
                 "the observer must classify a live unrelated process as running")
         if unreapedParent {
             // proc_pidinfo can return ESRCH for zombies even while kill -0
-            // succeeds. ps exposes their state on both macOS 15 and 27.
+            // succeeds. The kernel process table can still identify the zombie.
             #expect(kill(monitoredPID, 0) == 0)
             let status = try await ProcessRunner.run(
                 executableURL: URL(fileURLWithPath: "/bin/ps"),
                 arguments: ["-o", "stat=", "-p", String(monitoredPID)], timeout: 3)
             #expect(String(decoding: status.stdout, as: UTF8.self).contains("Z"),
                     "the supervisor must finish before the parent is reaped")
+            #expect(DescendantProbe.kernelReportsZombie(monitoredPID),
+                    "the native fallback must positively identify the unreaped parent")
+            #expect(!DescendantProbe.kernelReportsZombie(unrelated.processIdentifier),
+                    "a live process must never be classified as a zombie")
             #expect(!DescendantProbe.canRun(monitoredPID),
                     "the observer must classify the unreaped parent as dead")
         }

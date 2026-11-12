@@ -31,6 +31,30 @@ enum NotchMotion {
         reduceMotion ? floor : .spring(response: 0.40, dampingFraction: 0.90)
     }
 
+    /// The drag hands its velocity to the settling page, normalized to the
+    /// remaining distance. Cap extreme trackpad samples near the destination.
+    static func pageReleaseVelocity(from: CGFloat, to: CGFloat, velocity: CGFloat) -> Double {
+        let distance = to - from
+        guard distance.isFinite, velocity.isFinite, abs(distance) > 0.5 else { return 0 }
+        return Double(min(3, max(-3, velocity / distance)))
+    }
+
+    static func pageRelease(from: CGFloat, to: CGFloat, velocity: CGFloat, reduceMotion: Bool) -> Animation {
+        guard !reduceMotion else { return floor }
+        return .interpolatingSpring(duration: 0.40, bounce: 0.10,
+                                    initialVelocity: pageReleaseVelocity(from: from, to: to, velocity: velocity))
+    }
+
+    /// Short feedback for buttons and glyph changes.
+    static func feedback(reduceMotion: Bool) -> Animation {
+        reduceMotion ? floor : .easeOut(duration: 0.12)
+    }
+
+    /// Settings change in place, with no spatial movement.
+    static func settings(reduceMotion: Bool) -> Animation {
+        reduceMotion ? floor : .easeInOut(duration: 0.16)
+    }
+
     /// A painted surface or meter filling in. Softer than `enter` so the wash
     /// lands as colour arriving, not as an object bouncing into place.
     static func paint(reduceMotion: Bool) -> Animation {

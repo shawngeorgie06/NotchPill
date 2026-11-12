@@ -420,9 +420,7 @@ final class NotchState: ObservableObject {
         isDismissingDevReady = true
         let duration = Self.devReadyMotionDuration(for: devReadyAlerts)
         devReadyMotionDuration = duration
-        withAnimation(.timingCurve(0.32, 0.72, 0.15, 1, duration: duration)) {
-            devReadyPresentation = 0
-        }
+        devReadyPresentation = 0
         let item = DispatchWorkItem { [weak self] in
             guard let self, self.isDismissingDevReady else { return }
             self.departingDevReadyAlerts = []
@@ -444,9 +442,7 @@ final class NotchState: ObservableObject {
             guard let self, !self.devReadyAlerts.isEmpty else { return }
             let duration = Self.devReadyMotionDuration(for: self.devReadyAlerts)
             self.devReadyMotionDuration = duration
-            withAnimation(.timingCurve(0.32, 0.72, 0.15, 1, duration: duration)) {
-                self.devReadyPresentation = 1
-            }
+            self.devReadyPresentation = 1
         }
     }
 

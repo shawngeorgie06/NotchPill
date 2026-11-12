@@ -18,7 +18,7 @@ jobs:
       - name: Build MediaRemote adapter
         run: ./Scripts/setup-vendor.sh
 
-      - name: Run tests
+      - name: Run application tests
         env:
           NOTCHPILL_VISUAL_FIXTURE_DIR: ${{ github.workspace }}/build/visual-fixtures
           TEST_RUNNER_NOTCHPILL_VISUAL_FIXTURE_DIR: ${{ github.workspace }}/build/visual-fixtures
@@ -29,15 +29,27 @@ jobs:
           -destination 'platform=macOS,arch=arm64'
           -derivedDataPath build/CI
           CODE_SIGNING_ALLOWED=NO
+          -skip-testing:NotchPillTests/ProcessRunnerDescendantTests
           test
+
+      - name: Run process descendant timing tests
+        run: >-
+          xcodebuild
+          -project NotchPill.xcodeproj
+          -scheme NotchPill
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath build/CI
+          CODE_SIGNING_ALLOWED=NO
+          -only-testing:NotchPillTests/ProcessRunnerDescendantTests
+          test-without-building
 
       - name: Report test result details
         if: always()
         run: |
-          RESULT=$(find build/CI/Logs/Test -maxdepth 1 -name '*.xcresult' -type d | head -1)
-          if [[ -n "$RESULT" ]]; then
-            xcrun xcresulttool get test-results summary --path "$RESULT" --format json || true
-          fi
+          shopt -s nullglob
+          for result in build/CI/Logs/Test/*.xcresult; do
+            xcrun xcresulttool get test-results summary --path "$result" --format json || true
+          done
 
       - name: Upload test results
         if: always()

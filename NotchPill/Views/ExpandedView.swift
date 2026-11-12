@@ -35,18 +35,8 @@ struct ExpandedView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .clipped()
-        // Keyed on the track, not the whole value. `NowPlaying` carries
-        // `isPlaying`, so animating on it made pause reflow the entire deck —
-        // the sideways slide that reads as "skipped to the next song". Play and
-        // pause are now a local symbol morph instead; see `mediaCard`.
-        .animation(.easeOut(duration: 0.16), value: state.nowPlaying?.trackKey)
-        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: state.appSwitchHint)
-        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: state.frontmostApp)
-        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: state.systemVolume)
-        // Keyed on contents, not identity. Identity drives the page slide (see
-        // `ExpandedActivity.id`); this only smooths a card growing or shrinking
-        // around what changed inside it.
-        .animation(NotchMotion.settle(reduceMotion: reduceMotion), value: activities.map(\.contentKey))
+        .animation(NotchMotion.page(reduceMotion: reduceMotion), value: activities.isEmpty)
+        .animation(NotchMotion.page(reduceMotion: reduceMotion), value: activities.count > 1)
         .onChange(of: activityKinds) { _, kinds in
             swipeGeneration += 1
             pageDragOffset = 0
@@ -105,6 +95,8 @@ struct ExpandedView: View {
             }
         }
         .frame(width: width, height: height, alignment: .top)
+        .animation(NotchMotion.settle(reduceMotion: reduceMotion),
+                   value: activities.indices.contains(clampedPage) ? activities[clampedPage].id : nil)
     }
 
     private func activityCard(at index: Int, width: CGFloat, height: CGFloat) -> some View {
@@ -136,6 +128,10 @@ struct ExpandedView: View {
             .padding(.top, topInset)
             .padding(.bottom, bottomInset)
             .frame(width: width, height: height, alignment: .top)
+            // Only this card responds to its data. Playback state already has
+            // local symbol motion and must not animate the whole media layout.
+            .animation(isMedia ? nil : NotchMotion.settle(reduceMotion: reduceMotion),
+                       value: activities[index].contentKey)
             .background {
                 // The root paints the selected media page. A page entering
                 // during a drag needs its own wash (or black tray) until it
@@ -170,7 +166,10 @@ struct ExpandedView: View {
             .onEnded { value in
                 guard !showingDeckPicker, activities.count > 1,
                       abs(value.translation.width) > abs(value.translation.height) * 1.1 else {
-                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) { pageDragOffset = 0 }
+                    withAnimation(NotchMotion.pageRelease(from: pageDragOffset, to: 0,
+                                                         velocity: value.velocity.width, reduceMotion: reduceMotion)) {
+                        pageDragOffset = 0
+                    }
                     return
                 }
                 let direction = value.translation.width < 0 ? 1 : -1
@@ -179,7 +178,10 @@ struct ExpandedView: View {
                 let commits = abs(value.translation.width) > width * 0.22 ||
                     abs(projected) > width * 0.42
                 guard activities.indices.contains(target), commits else {
-                    withAnimation(NotchMotion.page(reduceMotion: reduceMotion)) { pageDragOffset = 0 }
+                    withAnimation(NotchMotion.pageRelease(from: pageDragOffset, to: 0,
+                                                         velocity: value.velocity.width, reduceMotion: reduceMotion)) {
+                        pageDragOffset = 0
+                    }
                     return
                 }
                 if reduceMotion {
@@ -189,8 +191,11 @@ struct ExpandedView: View {
                 swipeGeneration += 1
                 let generation = swipeGeneration
                 let targetKind = activities[target].kind
-                withAnimation(NotchMotion.page(reduceMotion: false), completionCriteria: .logicallyComplete) {
-                    pageDragOffset = CGFloat(-direction) * width
+                let destination = CGFloat(-direction) * width
+                withAnimation(NotchMotion.pageRelease(from: pageDragOffset, to: destination,
+                                                     velocity: value.velocity.width, reduceMotion: false),
+                              completionCriteria: .logicallyComplete) {
+                    pageDragOffset = destination
                 } completion: {
                     guard swipeGeneration == generation,
                           activities.indices.contains(target),
@@ -256,6 +261,7 @@ struct ExpandedView: View {
         .frame(height: NotchSpace.mark * readability)
         .contentShape(Rectangle())
         .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
+        .animation(NotchMotion.page(reduceMotion: reduceMotion), value: activities.count)
     }
 
     /// Scrollable overview inside the existing deck canvas. The frame is
@@ -287,6 +293,7 @@ struct ExpandedView: View {
     private var activityKinds: [String] { activities.map(\.kind) }
 
     private var pageTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
         let entering: Edge = state.expandedDeckDirection >= 0 ? .trailing : .leading
         let leaving: Edge = state.expandedDeckDirection >= 0 ? .leading : .trailing
         let scale = NotchMotion.pageScale

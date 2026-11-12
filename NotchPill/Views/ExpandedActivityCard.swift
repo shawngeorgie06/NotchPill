@@ -1944,14 +1944,15 @@ struct ExpandedActivityCard: View {
 }
 
 private struct SymbolMorph: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let enabled: Bool
     let symbol: String
 
     func body(content: Content) -> some View {
-        if enabled {
+        if enabled && !reduceMotion {
             content
                 .contentTransition(.symbolEffect(.replace))
-                .animation(.easeInOut(duration: 0.18), value: symbol)
+                .animation(NotchMotion.feedback(reduceMotion: reduceMotion), value: symbol)
         } else {
             content
         }
@@ -1959,11 +1960,12 @@ private struct SymbolMorph: ViewModifier {
 }
 
 private struct TransportButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(configuration.isPressed ? 0.45 : 1)
-            .scaleEffect(configuration.isPressed ? 0.92 : 1)
-            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? NotchMotion.press : 1)
+            .animation(NotchMotion.feedback(reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 }
 

@@ -31,6 +31,7 @@ enum LiveClockFormatting {
 
 /// Live clock with rolling second updates for collapsed and expanded notch UI.
 struct LiveClockView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     enum Style { case collapsed, expanded }
 
     var style: Style = .expanded
@@ -50,8 +51,8 @@ struct LiveClockView: View {
                     .font(.system(size: textSize(11), weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(.white)
-                    .contentTransition(.numericText())
-                    .animation(.linear(duration: 0.18), value: time)
+                    .contentTransition(reduceMotion ? .opacity : .numericText())
+                    .animation(NotchMotion.feedback(reduceMotion: reduceMotion), value: time)
             case .expanded:
                 VStack(alignment: .leading, spacing: s(NotchSpace.snug)) {
                     HStack(spacing: s(NotchSpace.snug)) {
@@ -71,8 +72,8 @@ struct LiveClockView: View {
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                        .contentTransition(.numericText())
-                        .animation(.linear(duration: 0.18), value: time)
+                        .contentTransition(reduceMotion ? .opacity : .numericText())
+                        .animation(NotchMotion.feedback(reduceMotion: reduceMotion), value: time)
                     Text(LiveClockFormatting.date(context.date))
                         .font(.system(size: textSize(NotchType.body), weight: .medium))
                         .foregroundStyle(.white.opacity(NotchOpacity.tertiary))
