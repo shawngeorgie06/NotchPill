@@ -3669,6 +3669,34 @@ struct SessionNamingTests {
     }
 }
 
+@Suite("Hover arrow shortcut modifiers")
+struct HotZoneShortcutModifierTests {
+    @Test("plain arrow events retain their system Function and numeric-pad flags", arguments: [UInt16(123), 124, 125, 126])
+    func ordinaryArrows(keyCode: UInt16) {
+        let appKit: NSEvent.ModifierFlags = [.function, .numericPad]
+        let quartz: CGEventFlags = [.maskSecondaryFn, .maskNumericPad]
+        #expect(!HotZoneKeyMonitor.hasShortcutModifiers(appKit, keyCode: keyCode))
+        #expect(!HotZoneKeyMonitor.hasShortcutModifiers(quartz, keyCode: keyCode))
+    }
+
+    @Test("modified arrow shortcuts remain with the focused app", arguments: [UInt16(123), 124, 125, 126])
+    func modifiedArrows(keyCode: UInt16) {
+        for modifier: NSEvent.ModifierFlags in [.command, .option, .control, .shift] {
+            let flags: NSEvent.ModifierFlags = [.function, .numericPad, modifier]
+            #expect(HotZoneKeyMonitor.hasShortcutModifiers(flags, keyCode: keyCode))
+            #expect(HotZoneKeyMonitor.hasShortcutModifiers(CGEventFlags(rawValue: UInt64(flags.rawValue)), keyCode: keyCode))
+        }
+    }
+
+    @Test("Function-modified Space is still a shortcut, plain Space is not")
+    func spaceModifiers() {
+        #expect(HotZoneKeyMonitor.hasShortcutModifiers(NSEvent.ModifierFlags.function, keyCode: 49))
+        #expect(HotZoneKeyMonitor.hasShortcutModifiers(CGEventFlags.maskSecondaryFn, keyCode: 49))
+        #expect(!HotZoneKeyMonitor.hasShortcutModifiers(NSEvent.ModifierFlags(), keyCode: 49))
+        #expect(!HotZoneKeyMonitor.hasShortcutModifiers(CGEventFlags(), keyCode: 49))
+    }
+}
+
 /// Codex subscription usage read from OpenAI with the token Codex already
 /// stored at login. Fixtures are the real response shape, captured from a live
 /// call on this machine (identifiers replaced).
