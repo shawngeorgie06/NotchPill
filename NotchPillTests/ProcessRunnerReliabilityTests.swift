@@ -116,7 +116,7 @@ struct ProcessRunnerReliabilityTests {
 }
 
 
-@Suite("Process descendant ownership")
+@Suite("Process descendant ownership", .serialized)
 struct ProcessRunnerDescendantTests {
     @Test("synchronous timeout kills a descendant that ignores TERM")
     func synchronousTimeout() throws {
