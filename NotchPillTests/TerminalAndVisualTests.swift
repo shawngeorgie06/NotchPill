@@ -921,8 +921,11 @@ struct NotchSurfaceMotionTests {
                             .modifier(SurfaceReveal(progress: model.progress, reduceMotion: reduceMotion))
                             .transition(.identity)
                     } else {
-                        Color(red: 1, green: 0, blue: 0)
-                            .transition(NotchRootView.chipTransition(reduceMotion: reduceMotion))
+                        ZStack(alignment: .top) {
+                            Color(red: 1, green: 0, blue: 0)
+                                .transition(NotchRootView.chipTransition(reduceMotion: reduceMotion))
+                        }
+                        .transition(NotchRootView.chipTransition(reduceMotion: reduceMotion))
                     }
                 }
                 .modifier(ProgressProbe(log: geometry, progress: model.progress, changesOpacity: false))

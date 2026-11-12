@@ -223,6 +223,7 @@ struct NotchRootView: View {
                     }
                 }
                 .animation(contentAnimation, value: state.activity)
+                .transition(Self.chipTransition(reduceMotion: reduceMotion))
             }
         }
         // Without the cross-fade the collapsed chips were removed instantly,

@@ -261,6 +261,7 @@ struct ExpandedView: View {
         .frame(height: NotchSpace.mark * readability)
         .contentShape(Rectangle())
         .animation(NotchMotion.page(reduceMotion: reduceMotion), value: clampedPage)
+        .animation(NotchMotion.page(reduceMotion: reduceMotion), value: activities.count)
     }
 
     /// Scrollable overview inside the existing deck canvas. The frame is
