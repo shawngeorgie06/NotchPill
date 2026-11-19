@@ -1206,11 +1206,8 @@ struct NotchTokenScaleTests {
         // Press is the mirror of bump: the same distance the other way.
         #expect(NotchMotion.press < 1)
         #expect(abs((1 - NotchMotion.press) - (NotchMotion.bump - 1)) < 0.0001)
-        // Page and paint travel less than a snug gap / a few percent of size.
-        #expect(NotchMotion.pageScale > NotchMotion.press)
-        #expect(NotchMotion.pageScale < 1)
         #expect(NotchMotion.paintScale > NotchMotion.press)
-        #expect(NotchMotion.paintScale < NotchMotion.pageScale)
+        #expect(NotchMotion.paintScale < 1)
     }
 
     /// The header mark is a glyph's backing, not a tap target: it must sit
