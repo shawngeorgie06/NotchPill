@@ -91,11 +91,12 @@ struct ExpandedView: View {
                 activityCard(at: clampedPage, width: width, height: height)
                     .id(activities[clampedPage].id)
                     .offset(x: pageDragOffset)
-                    .transition(pageTransition)
+                    .transition(pageTransition(width: width))
             }
         }
         .frame(width: width, height: height, alignment: .top)
-        .animation(NotchMotion.settle(reduceMotion: reduceMotion),
+        .clipped()
+        .animation(NotchMotion.page(reduceMotion: reduceMotion),
                    value: activities.indices.contains(clampedPage) ? activities[clampedPage].id : nil)
     }
 
@@ -292,19 +293,11 @@ struct ExpandedView: View {
 
     private var activityKinds: [String] { activities.map(\.kind) }
 
-    private var pageTransition: AnyTransition {
+    private func pageTransition(width: CGFloat) -> AnyTransition {
         guard !reduceMotion else { return .opacity }
-        let entering: Edge = state.expandedDeckDirection >= 0 ? .trailing : .leading
-        let leaving: Edge = state.expandedDeckDirection >= 0 ? .leading : .trailing
-        let scale = NotchMotion.pageScale
-        return .asymmetric(
-            insertion: .move(edge: entering)
-                .combined(with: .opacity)
-                .combined(with: .scale(scale: scale)),
-            removal: .move(edge: leaving)
-                .combined(with: .opacity)
-                .combined(with: .scale(scale: scale))
-        )
+        // The incoming card carries direction. The outgoing card fades in
+        // place so it cannot slide using the direction of an earlier move.
+        let offset = state.expandedDeckDirection >= 0 ? width : -width
+        return .asymmetric(insertion: .offset(x: offset), removal: .opacity)
     }
-
 }
