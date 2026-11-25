@@ -321,11 +321,30 @@ struct TokenUsageAccuracyTests {
         let line = """
         {"timestamp":"2026-08-24T12:00:00Z","message":{"id":"msg_1","model":"claude","usage":{"input_tokens":42,"output_tokens":8}}}
         """
-        var seen = Set<String>()
+        var seen: [String: TokenLedger.ClaudeResponse] = [:]
         let initial = TokenLedger.claudeBuckets(in: line, seen: &seen, bucket: { $0 })
         let appended = TokenLedger.claudeBuckets(in: line, seen: &seen, bucket: { $0 })
         #expect(initial.values.first?["claude"]?.total == 50)
         #expect(appended.isEmpty)
+    }
+
+    @Test func claudeCompletionAddsOnlyNewUsageToTheOriginalTimestamp() throws {
+        func record(timestamp: String, output: Int) -> String {
+            """
+            {"timestamp":"\(timestamp)","message":{"id":"msg_1","model":"claude","usage":{"input_tokens":100,"output_tokens":\(output)}}}
+            """
+        }
+        let partial = record(timestamp: "2026-08-24T23:59:59Z", output: 2)
+        let completed = record(timestamp: "2026-08-25T00:00:01Z", output: 500)
+        var seen: [String: TokenLedger.ClaudeResponse] = [:]
+        let first = TokenLedger.claudeBuckets(in: partial, seen: &seen, bucket: { $0 })
+        seen = try JSONDecoder().decode([String: TokenLedger.ClaudeResponse].self,
+                                        from: JSONEncoder().encode(seen))
+        let next = TokenLedger.claudeBuckets(
+            in: [completed, partial, completed].joined(separator: "\n"), seen: &seen, bucket: { $0 })
+        let timestamp = try #require(first.keys.first)
+        #expect(next == [timestamp: ["claude": TokenTally(output: 498)]])
+        #expect(TokenLedger.merge(first, next) == [timestamp: ["claude": TokenTally(input: 100, output: 500)]])
     }
 
     @Test func codexCachedInputIsOnlyCountedAsCachedAcrossReads() {

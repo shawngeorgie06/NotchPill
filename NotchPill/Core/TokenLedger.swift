@@ -60,12 +60,19 @@ enum TokenLedger {
     }
 
     static func claudeBuckets(in text: String) -> Buckets {
-        var seen = Set<String>()
+        var seen: [String: ClaudeResponse] = [:]
         return claudeBuckets(in: text, seen: &seen, bucket: day(from:))
     }
 
-    /// Claude can repeat a response's usage on its individual content blocks.
-    static func claudeBuckets<Key>(in text: String, seen: inout Set<String>, bucket: (Date) -> Key)
+    struct ClaudeResponse: Codable {
+        let timestamp: Date
+        let model: String
+        var tally: TokenTally
+    }
+
+    /// Claude can report progressively larger usage across blocks of one response.
+    /// Attribute each increase to the original response's timestamp and model.
+    static func claudeBuckets<Key>(in text: String, seen: inout [String: ClaudeResponse], bucket: (Date) -> Key)
         -> [Key: [String: TokenTally]] {
         var buckets: [Key: [String: TokenTally]] = [:]
         for line in text.split(separator: "\n") {
@@ -83,11 +90,31 @@ enum TokenLedger {
                                    cacheWrite: int(usage["cache_creation_input_tokens"]),
                                    cacheRead: int(usage["cache_read_input_tokens"]))
             guard tally.total > 0 || tally.cacheRead > 0 else { continue }
-            if let id = message["id"] as? String, !id.isEmpty,
-               !seen.insert(id).inserted { continue }
-            let key = bucket(timestamp)
-            buckets[key, default: [:]][model, default: TokenTally()] =
-                (buckets[key]?[model] ?? TokenTally()) + tally
+            let response: ClaudeResponse
+            let contribution: TokenTally
+            if let id = message["id"] as? String, !id.isEmpty {
+                if var previous = seen[id] {
+                    let earlier = previous.tally
+                    let merged = TokenTally(input: max(earlier.input, tally.input),
+                                            output: max(earlier.output, tally.output),
+                                            cacheWrite: max(earlier.cacheWrite, tally.cacheWrite),
+                                            cacheRead: max(earlier.cacheRead, tally.cacheRead))
+                    guard merged != earlier else { continue }
+                    previous.tally = merged
+                    response = previous
+                    contribution = merged.growth(since: earlier)
+                } else {
+                    response = ClaudeResponse(timestamp: timestamp, model: model, tally: tally)
+                    contribution = tally
+                }
+                seen[id] = response
+            } else {
+                response = ClaudeResponse(timestamp: timestamp, model: model, tally: tally)
+                contribution = tally
+            }
+            let key = bucket(response.timestamp)
+            buckets[key, default: [:]][response.model, default: TokenTally()] =
+                (buckets[key]?[response.model] ?? TokenTally()) + contribution
         }
         return buckets
     }

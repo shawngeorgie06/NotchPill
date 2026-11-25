@@ -101,6 +101,7 @@ final class TokenUsageStore: ObservableObject {
     private let launchedAt = Date()
     private var cache: [String: FileState] = [:]
     private var period: TokenUsagePeriod?
+    private var summaryDay: Date?
     private var isScanning = false
     private var lastScan = Date.distantPast
 
@@ -116,23 +117,23 @@ final class TokenUsageStore: ObservableObject {
         /// the last one left the total.
         var isCumulative: Bool
         var codex: TokenLedger.CodexProgress?
-        var claudeMessageIDs: Set<String>?
+        var claudeResponses: [String: TokenLedger.ClaudeResponse]?
     }
 
     private static var cacheURL: URL {
         let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".notchpill")
-        // v4 keeps exact timestamps and rebuilds the corrected provider totals.
-        return dir.appendingPathComponent("token-cache-v4.json")
+        // v5 retains Claude response totals so later blocks can refine them.
+        return dir.appendingPathComponent("token-cache-v5.json")
     }
 
     init() { loadCache() }
 
     func refresh(period: TokenUsagePeriod, force: Bool = false) {
-        if self.period != period {
-            self.period = period
-            recompute(period: period)
-        }
         let now = Date()
+        if self.period != period || summaryDay != Calendar.current.startOfDay(for: now) {
+            self.period = period
+            recompute(period: period, now: now)
+        }
         guard !isScanning, force || now.timeIntervalSince(lastScan) >= Self.minInterval else { return }
         isScanning = true
         lastScan = now
@@ -148,8 +149,9 @@ final class TokenUsageStore: ObservableObject {
         }
     }
 
-    private func recompute(period: TokenUsagePeriod) {
-        let fresh = Self.summarize(cache.values, period: period, launchedAt: launchedAt)
+    private func recompute(period: TokenUsagePeriod, now: Date = Date()) {
+        summaryDay = Calendar.current.startOfDay(for: now)
+        let fresh = Self.summarize(cache.values, period: period, launchedAt: launchedAt, now: now)
         if fresh != summary { summary = fresh }
     }
 
@@ -195,16 +197,16 @@ final class TokenUsageStore: ObservableObject {
             if let cached = out[path], cached.size == size, !cached.isCumulative { continue }
             let previous = out[path]
             // Append-only, so only the new bytes need parsing.
-            let resumable = previous?.claudeMessageIDs != nil && (previous?.size ?? 0) <= size
+            let resumable = previous?.claudeResponses != nil && (previous?.size ?? 0) <= size
             let offset = resumable ? previous?.size ?? 0 : 0
             if !resumable { out[path] = nil }
             guard let (text, consumed) = read(url, from: offset) else { continue }
-            var seen = resumable ? previous?.claudeMessageIDs ?? [] : []
+            var seen = resumable ? previous?.claudeResponses ?? [:] : [:]
             let fresh = TokenLedger.claudeBuckets(in: text, seen: &seen, bucket: { $0 })
             let base = resumable ? previous?.buckets ?? [:] : [:]
             out[path] = FileState(size: offset + consumed,
                                   buckets: TokenLedger.merge(base, fresh),
-                                  isCumulative: false, claudeMessageIDs: seen)
+                                  isCumulative: false, claudeResponses: seen)
         }
 
         for url in codex {
