@@ -259,8 +259,11 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(notchDisplayMode, forKey: Keys.notchDisplayMode) }
     }
 
-    var resolvedDisplayMode: NotchGeometry.DisplayMode {
-        NotchGeometry.DisplayMode(rawValue: notchDisplayMode) ?? .builtInThenExternal
+    func selectedNotchGeometry() -> NotchGeometry? {
+        NotchGeometry.current(
+            mode: NotchGeometry.DisplayMode(rawValue: notchDisplayMode) ?? .builtInThenExternal,
+            preferredDisplayID: NotchGeometry.preferredDisplayID(from: notchDisplayMode)
+        )
     }
 
     @Published var notchScale: Double {
@@ -711,6 +714,7 @@ final class AppSettings: ObservableObject {
         pinnedActivityKind = ""
         cardOrder = ExpandedActivity.allKinds.map(\.kind)
         notchScale = AppSettings.defaultNotchScale
+        notchDisplayMode = NotchGeometry.DisplayMode.builtInThenExternal.rawValue
         showDevReadyPings = true
         devReadyDuration = AppSettings.defaultDevReadyDuration
         devReadyPlaySound = true

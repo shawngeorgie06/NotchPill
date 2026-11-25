@@ -145,7 +145,7 @@ enum DiagnosticsReport {
                     screen.backingScaleFactor, screen.safeAreaInsets.top)
             },
             notchDescription: {
-                guard let geo = NotchGeometry.current(mode: AppSettings.shared.resolvedDisplayMode) else {
+                guard let geo = AppSettings.shared.selectedNotchGeometry() else {
                     return "none found — overlay hidden (mode: \(AppSettings.shared.notchDisplayMode))"
                 }
                 let r = geo.notchRect

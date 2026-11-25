@@ -9,6 +9,7 @@ struct PreferencesView: View {
     @ObservedObject private var integrationHealth = IntegrationHealthStore.shared
     @State private var selectedCategory = SettingsCategory.appearance
     @State private var searchText = ""
+    @State private var connectedDisplays = NotchGeometry.connectedDisplays
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -279,22 +280,42 @@ struct PreferencesView: View {
     private var displaySection: some View {
         SettingsPanel(title: "Display", subtitle: "Which screen the pill appears on") {
             Picker("Show the pill on", selection: $settings.notchDisplayMode) {
+                ForEach(connectedDisplays) { display in
+                    Text(display.name).tag(display.preference)
+                }
+                if selectedDisplayIsDisconnected {
+                    Text("Previously selected display (disconnected)").tag(settings.notchDisplayMode)
+                }
+                Divider()
                 Text("Built-in display only")
                     .tag(NotchGeometry.DisplayMode.builtInOnly.rawValue)
                 Text("Built-in, or an external display when it is unavailable")
                     .tag(NotchGeometry.DisplayMode.builtInThenExternal.rawValue)
-                Text("Whichever display has the menu bar")
+                Text("External display only")
+                    .tag(NotchGeometry.DisplayMode.externalOnly.rawValue)
+                Text("Main display (set in macOS Displays settings)")
                     .tag(NotchGeometry.DisplayMode.mainDisplay.rawValue)
             }
-            .pickerStyle(.radioGroup)
-            Text("An external display has no notch, so the pill is placed at the "
-                 + "top centre under the menu bar. With the lid closed there is no "
-                 + "built-in display at all, which is why the pill used to vanish "
-                 + "while docked.")
+            .pickerStyle(.menu)
+            if selectedDisplayIsDisconnected {
+                Text("The pill uses the default display until your selected screen reconnects.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text("On an external display, the pill floats beneath the menu bar.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .onAppear { connectedDisplays = NotchGeometry.connectedDisplays }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            connectedDisplays = NotchGeometry.connectedDisplays
+        }
+    }
+
+    private var selectedDisplayIsDisconnected: Bool {
+        NotchGeometry.preferredDisplayID(from: settings.notchDisplayMode) != nil
+            && !connectedDisplays.contains { $0.preference == settings.notchDisplayMode }
     }
 
     private var tokenSection: some View {

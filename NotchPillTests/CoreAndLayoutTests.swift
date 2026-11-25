@@ -218,6 +218,28 @@ struct DisplaySelectionTests {
         #expect(choice?.source == .measured)
     }
 
+    @Test("a named monitor wins while connected and returns after reconnecting")
+    func specificDisplayReconnects() {
+        let id = UUID()
+        let laptop = builtInNotched()
+        let primary = external(isMain: true)
+        var selected = external(isMain: false, origin: CGPoint(x: -2560, y: 0))
+        selected.displayID = id
+        let preference = NotchGeometry.DisplayOption(id: id, name: "Monitor").preference
+        let savedID = NotchGeometry.preferredDisplayID(from: preference)
+        #expect(savedID == id)
+        #expect(NotchGeometry.choose([laptop, primary, selected], mode: .builtInThenExternal, preferredDisplayID: savedID)?.index == 2)
+        #expect(NotchGeometry.choose([laptop, primary], mode: .builtInThenExternal, preferredDisplayID: savedID)?.index == 0)
+        #expect(NotchGeometry.choose([selected, laptop, primary], mode: .builtInThenExternal, preferredDisplayID: savedID)?.index == 0)
+    }
+
+    @Test("external-only mode moves the pill off the built-in main display")
+    func externalOnlyWithLaptopOpen() {
+        let screens = [builtInNotched(), external(isMain: false)]
+        #expect(NotchGeometry.choose(screens, mode: .externalOnly)?.index == 1)
+        #expect(NotchGeometry.choose([screens[0]], mode: .externalOnly) == nil)
+    }
+
     /// The bug: in clamshell the built-in screen leaves `NSScreen.screens`, so
     /// the old rule found nothing and hid the overlay entirely.
     @Test("clamshell falls back to the external display")

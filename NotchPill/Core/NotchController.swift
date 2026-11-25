@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import QuartzCore
 
 /// Owns overlay placement, hover-driven expand/collapse, keyboard input, and
 /// multi-display handling. Provider subscriptions live in its provider extension.
@@ -225,6 +226,13 @@ final class NotchController {
             .sink { [weak self] _ in self?.rebuildForCurrentDisplays() }
             .store(in: &cancellables)
 
+        AppSettings.shared.$notchDisplayMode
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.rebuildForCurrentDisplays(animateDisplayChange: true) }
+            .store(in: &cancellables)
+
         // Mirror live update progress into state so the overlay shows a bar.
         UpdateProgressStore.shared.$progress
             .receive(on: RunLoop.main)
@@ -241,7 +249,7 @@ final class NotchController {
                 self.hotZoneKeys.suspended = compose != nil
                 if compose != nil {
                     self.devReadyDismissItem?.cancel()      // hold the peek open
-                    self.window?.makeKeyAndOrderFront(nil)  // accept typing (nonactivating panel → no app switch)
+                    if self.geometry != nil { self.window?.makeKeyAndOrderFront(nil) }
                 } else {
                     // Don't call resignKey() directly (system-owned). On send,
                     // performReply activates the terminal which takes key away;
@@ -377,7 +385,8 @@ final class NotchController {
     /// nothing is showing — the most-recent *finished* agent (whose peek has since
     /// auto-dismissed). Bound to the ⌥⌘R global hotkey.
     private func openReplyForLatest() {
-        guard let alert = state.devReadyAlerts.last ?? lastFinishedAlert,
+        guard geometry != nil,
+              let alert = state.devReadyAlerts.last ?? lastFinishedAlert,
               alert.canReplyFromNotch(replyEnabled: AppSettings.shared.agentReplyEnabled)
         else { return }
         state.beginReply(to: alert)
@@ -399,10 +408,9 @@ final class NotchController {
         testMultipleDevReadyPings()
     }
 
-    /// Shows the overlay only on a built-in notched display. On external-only /
-    /// clamshell / no-notch arrangements, the window is hidden and disabled.
-    private func rebuildForCurrentDisplays() {
-        guard let geometry = NotchGeometry.current(mode: AppSettings.shared.resolvedDisplayMode) else {
+    /// Move the overlay to the selected display, or hide it if none qualifies.
+    private func rebuildForCurrentDisplays(animateDisplayChange: Bool = false) {
+        guard let geometry = AppSettings.shared.selectedNotchGeometry() else {
             // No notched display any more — clamshell, or the lid closed while
             // docked. Hiding the window is not enough: everything that decides
             // hover, click passthrough and browser-flank exclusion reads
@@ -414,6 +422,7 @@ final class NotchController {
             expandedHotZone = .zero
             menuBarStrip = .zero
             pillEngaged = false
+            hotZoneKeys.updatePointerInHotZone(false)
             state.setExpanded(false)
             window?.orderOut(nil)
             return
@@ -428,6 +437,15 @@ final class NotchController {
                          + (geometry.source == .assumed
                             ? " — could not read the notch, the pill may not line up" : ""))
         }
+        let screenNumber = NSDeviceDescriptionKey("NSScreenNumber")
+        let previousScreenNumber = self.geometry?.screen.deviceDescription[screenNumber] as? NSNumber
+        let nextScreenNumber = geometry.screen.deviceDescription[screenNumber] as? NSNumber
+        let fadesIn = animateDisplayChange && window?.isVisible == true
+            && previousScreenNumber != nil && nextScreenNumber != nil
+            && previousScreenNumber != nextScreenNumber
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if fadesIn { window?.alphaValue = 0 }
+
         self.geometry = geometry
 
         metrics = NotchMetrics(notchWidth: geometry.notchRect.width,
@@ -517,7 +535,18 @@ final class NotchController {
         }
 
         applyWindowFrame(animated: false)
-        window?.orderFrontRegardless()
+        if state.replyCompose != nil, window?.isVisible == false {
+            window?.makeKeyAndOrderFront(nil)
+        } else {
+            window?.orderFrontRegardless()
+        }
+        if fadesIn, let window {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = NotchMotion.displayArrivalDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                window.animator().alphaValue = 1
+            }
+        }
         container?.refreshTracking()
         updateMousePassthrough(pointerInHotZone: expandHoverScreenRect().contains(NSEvent.mouseLocation))
 
@@ -766,6 +795,7 @@ final class NotchController {
     ///   The reply composer still takes key explicitly when it opens, which is
     ///   the one place typing into the notch is meant to happen.
     private func engagePill(takeKey: Bool) {
+        guard geometry != nil else { return }
         // Refreshed when the pill opens rather than on a timer: the figures are
         // only ever read here, and scanning transcripts nobody is looking at is
         // work for nothing. The store rate-limits itself regardless.
@@ -1016,13 +1046,14 @@ final class NotchController {
     }
 
     private func shouldArmShortcuts(at point: NSPoint = NSEvent.mouseLocation) -> Bool {
+        guard let geometry else { return false }
         if state.isExpanded {
             if pillEngaged { return true }
             return isPointerOverPill(point)
         }
         if isPointerInBrowserFlank(point) { return false }
         return collapsedInteractionRect().insetBy(dx: -12, dy: -10).contains(point)
-            || geometry?.notchRect.insetBy(dx: -10, dy: -8).contains(point) == true
+            || geometry.notchRect.insetBy(dx: -10, dy: -8).contains(point)
     }
 
     private func isPointerInBrowserFlank(_ point: NSPoint) -> Bool {
@@ -1052,7 +1083,7 @@ final class NotchController {
 
     private func activateExpandedHotZone() {
         expandWorkItem = nil
-        guard !isPointerInBrowserFlank(NSEvent.mouseLocation) else { return }
+        guard geometry != nil, !isPointerInBrowserFlank(NSEvent.mouseLocation) else { return }
         if Self.logHover { print("HOVER expand @\(String(format: "%.3f", Date().timeIntervalSince1970))") }
         prioritizeUrgentDeckCardOnOpen()
         state.setExpanded(true)
