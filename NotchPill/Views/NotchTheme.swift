@@ -227,10 +227,6 @@ enum NotchMotion {
     /// mirror of `bump`: the same distance, the other way.
     static let press: CGFloat = 0.96
 
-    /// How far a page sits under its neighbours while sliding in, so the
-    /// swap reads as depth rather than a hard cut.
-    static let pageScale: CGFloat = 0.985
-
     /// How far a painted tile grows from while its wash lands.
     static let paintScale: CGFloat = 0.97
 
