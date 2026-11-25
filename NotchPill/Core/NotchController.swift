@@ -408,7 +408,7 @@ final class NotchController {
 
     /// Move the overlay to the selected display, or hide it if none qualifies.
     private func rebuildForCurrentDisplays() {
-        guard let geometry = NotchGeometry.current(mode: AppSettings.shared.resolvedDisplayMode) else {
+        guard let geometry = AppSettings.shared.selectedNotchGeometry() else {
             // No notched display any more — clamshell, or the lid closed while
             // docked. Hiding the window is not enough: everything that decides
             // hover, click passthrough and browser-flank exclusion reads

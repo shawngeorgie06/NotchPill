@@ -49,11 +49,40 @@ struct NotchGeometry {
         case externalOnly
     }
 
+    struct DisplayOption: Identifiable {
+        let id: UUID
+        let name: String
+
+        var preference: String { "display:" + id.uuidString }
+    }
+
+    static var connectedDisplays: [DisplayOption] {
+        let options = NSScreen.screens.compactMap { screen in
+            persistentID(for: screen).map { DisplayOption(id: $0, name: screen.localizedName) }
+        }
+        return options.enumerated().map { index, option in
+            guard options.filter({ $0.name == option.name }).count > 1 else { return option }
+            return DisplayOption(id: option.id, name: "\(option.name) (\(index + 1))")
+        }
+    }
+
+    static func preferredDisplayID(from preference: String) -> UUID? {
+        guard preference.hasPrefix("display:") else { return nil }
+        return UUID(uuidString: String(preference.dropFirst("display:".count)))
+    }
+
+    private static func persistentID(for screen: NSScreen) -> UUID? {
+        guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+              let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value)?.takeRetainedValue() else { return nil }
+        return UUID(uuidString: CFUUIDCreateString(nil, uuid) as String)
+    }
+
     /// One display, as the selection rule needs to see it.
     ///
     /// Plain values rather than `NSScreen` so the rule can be exercised against
     /// clamshell and dual-monitor layouts that cannot be attached to CI.
     struct Candidate: Equatable {
+        var displayID: UUID?
         var isBuiltIn: Bool
         var isMain: Bool
         var frame: CGRect
@@ -63,7 +92,8 @@ struct NotchGeometry {
         var right: CGRect?
 
         init(isBuiltIn: Bool, isMain: Bool, frame: CGRect, visibleFrame: CGRect,
-             safeTop: CGFloat, left: CGRect? = nil, right: CGRect? = nil) {
+             safeTop: CGFloat, left: CGRect? = nil, right: CGRect? = nil, displayID: UUID? = nil) {
+            self.displayID = displayID
             self.isBuiltIn = isBuiltIn
             self.isMain = isMain
             self.frame = frame
@@ -160,7 +190,7 @@ struct NotchGeometry {
     /// notch rect it carries is then the assumed one, and callers now have
     /// `hasPhysicalNotch` to tell the two apart instead of drawing hardware
     /// that is not there.
-    static func current(mode: DisplayMode = .builtInThenExternal) -> NotchGeometry? {
+    static func current(mode: DisplayMode = .builtInThenExternal, preferredDisplayID: UUID? = nil) -> NotchGeometry? {
         let screens = NSScreen.screens
         let candidates = screens.map { screen in
             Candidate(isBuiltIn: isBuiltIn(screen),
@@ -169,9 +199,10 @@ struct NotchGeometry {
                       visibleFrame: screen.visibleFrame,
                       safeTop: screen.safeAreaInsets.top,
                       left: screen.auxiliaryTopLeftArea,
-                      right: screen.auxiliaryTopRightArea)
+                      right: screen.auxiliaryTopRightArea,
+                      displayID: preferredDisplayID == nil ? nil : persistentID(for: screen))
         }
-        guard let choice = choose(candidates, mode: mode),
+        guard let choice = choose(candidates, mode: mode, preferredDisplayID: preferredDisplayID),
               screens.indices.contains(choice.index) else { return nil }
         return NotchGeometry(screen: screens[choice.index],
                              notchRect: choice.rect,
@@ -185,7 +216,18 @@ struct NotchGeometry {
     /// expects it. Only when there is no usable built-in display — clamshell,
     /// or a Mac mini — does an external one come into play.
     static func choose(_ candidates: [Candidate],
-                       mode: DisplayMode) -> (index: Int, rect: CGRect, source: Source)? {
+                       mode: DisplayMode, preferredDisplayID: UUID? = nil) -> (index: Int, rect: CGRect, source: Source)? {
+        if let preferredDisplayID, let index = candidates.firstIndex(where: {
+            $0.displayID == preferredDisplayID && $0.frame.width > 0
+        }) {
+            let screen = candidates[index]
+            if screen.isBuiltIn, screen.safeTop > 0,
+               let notch = resolveNotch(inFrame: screen.frame, safeTop: screen.safeTop,
+                                        left: screen.left, right: screen.right) {
+                return (index, notch.rect, notch.source)
+            }
+            return (index, placeholderNotch(for: screen), .external)
+        }
         func builtIn() -> (Int, CGRect, Source)? {
             for (index, candidate) in candidates.enumerated() {
                 guard candidate.isBuiltIn, candidate.safeTop > 0 else { continue }
