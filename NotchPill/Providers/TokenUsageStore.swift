@@ -57,7 +57,7 @@ enum TokenUsagePeriod: String, CaseIterable {
 
     var label: String {
         switch self {
-        case .session: return "This session"
+        case .session: return "Since NotchPill opened"
         case .today: return "Today"
         case .week: return "Last 7 days"
         case .all: return "All time"
@@ -67,7 +67,7 @@ enum TokenUsagePeriod: String, CaseIterable {
     /// Short enough to sit beside a number on a notch-sized card.
     var shortLabel: String {
         switch self {
-        case .session: return "session"
+        case .session: return "since launch"
         case .today: return "today"
         case .week: return "7d"
         case .all: return "all time"
@@ -89,8 +89,8 @@ enum TokenUsagePeriod: String, CaseIterable {
 /// Scans agent transcripts for token usage and keeps the answer current.
 ///
 /// There is close to a gigabyte of transcripts on a working machine, so
-/// nothing here re-reads a file it has already seen. Each file's day buckets
-/// are cached against the size they were computed at; a file that has grown is
+/// unchanged files are skipped. Each file's timestamped usage is cached
+/// against the size it was computed at; a file that has grown is
 /// read from that offset on, because JSONL is append-only.
 @MainActor
 final class TokenUsageStore: ObservableObject {
@@ -100,6 +100,7 @@ final class TokenUsageStore: ObservableObject {
 
     private let launchedAt = Date()
     private var cache: [String: FileState] = [:]
+    private var period: TokenUsagePeriod?
     private var isScanning = false
     private var lastScan = Date.distantPast
 
@@ -110,28 +111,29 @@ final class TokenUsageStore: ObservableObject {
 
     struct FileState: Codable {
         var size: Int
-        var buckets: TokenLedger.Buckets
+        var buckets: TokenLedger.Timeline
         /// Codex reports running totals, so each read continues from where
         /// the last one left the total.
         var isCumulative: Bool
         var codex: TokenLedger.CodexProgress?
+        var claudeMessageIDs: Set<String>?
     }
 
     private static var cacheURL: URL {
         let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".notchpill")
-        // v3: Codex buckets became per-day growth rather than the whole
-        // session on its last day, so older entries must be re-read.
-        return dir.appendingPathComponent("token-cache-v3.json")
+        // v4 keeps exact timestamps and rebuilds the corrected provider totals.
+        return dir.appendingPathComponent("token-cache-v4.json")
     }
 
     init() { loadCache() }
 
     func refresh(period: TokenUsagePeriod, force: Bool = false) {
-        let now = Date()
-        guard !isScanning, force || now.timeIntervalSince(lastScan) >= Self.minInterval else {
+        if self.period != period {
+            self.period = period
             recompute(period: period)
-            return
         }
+        let now = Date()
+        guard !isScanning, force || now.timeIntervalSince(lastScan) >= Self.minInterval else { return }
         isScanning = true
         lastScan = now
         let known = cache
@@ -141,29 +143,42 @@ final class TokenUsageStore: ObservableObject {
                 self.cache = scanned
                 self.isScanning = false
                 self.saveCache()
-                self.recompute(period: period)
+                self.recompute(period: self.period ?? period)
             }
         }
     }
 
-    func recompute(period: TokenUsagePeriod) {
-        let cutoff = period.cutoff(launchedAt: launchedAt)
-        var byTool: [String: [String: TokenTally]] = [:]
-        var daily: [String: [String: Int]] = [:]
-        let historyStart = TokenLedger.day(from: UsageHistory.firstDay())
-        for (path, state) in cache {
-            let tool = path.contains("/.codex/") ? TokenUsageSummary.codex : TokenUsageSummary.claude
-            for (model, tally) in TokenLedger.total(state.buckets, since: cutoff) {
-                byTool[tool, default: [:]][model, default: TokenTally()] =
-                    (byTool[tool]?[model] ?? TokenTally()) + tally
-            }
-            for (day, models) in state.buckets where day >= historyStart {
-                let tokens = models.values.reduce(0) { $0 + $1.total }
-                if tokens > 0 { daily[day, default: [:]][tool, default: 0] += tokens }
+    private func recompute(period: TokenUsagePeriod) {
+        let fresh = Self.summarize(cache.values, period: period, launchedAt: launchedAt)
+        if fresh != summary { summary = fresh }
+    }
+
+    static func summarize(_ files: some Sequence<FileState>, period: TokenUsagePeriod,
+                          launchedAt: Date, now: Date = Date()) -> TokenUsageSummary {
+        let cutoff = period.cutoff(now: now, launchedAt: launchedAt) ?? .distantPast
+        let historyStart = UsageHistory.firstDay(now: now)
+        var result = TokenUsageSummary()
+        var historyDays: [Date: String] = [:]
+        let calendar = Calendar.current
+        for state in files {
+            let tool = state.isCumulative ? TokenUsageSummary.codex : TokenUsageSummary.claude
+            for (timestamp, models) in state.buckets where timestamp <= now {
+                if timestamp >= cutoff {
+                    for (model, tally) in models {
+                        result.byTool[tool, default: [:]][model, default: TokenTally()] =
+                            (result.byTool[tool]?[model] ?? TokenTally()) + tally
+                    }
+                }
+                if timestamp >= historyStart {
+                    let dayStart = calendar.startOfDay(for: timestamp)
+                    let day = historyDays[dayStart] ?? TokenLedger.day(from: dayStart)
+                    historyDays[dayStart] = day
+                    let tokens = models.values.reduce(0) { $0 + $1.total }
+                    if tokens > 0 { result.daily[day, default: [:]][tool, default: 0] += tokens }
+                }
             }
         }
-        let fresh = TokenUsageSummary(byTool: byTool, daily: daily)
-        if fresh != summary { summary = fresh }
+        return result
     }
 
     // MARK: - Scanning
@@ -180,13 +195,16 @@ final class TokenUsageStore: ObservableObject {
             if let cached = out[path], cached.size == size, !cached.isCumulative { continue }
             let previous = out[path]
             // Append-only, so only the new bytes need parsing.
-            let offset = (previous?.isCumulative == false) ? previous?.size ?? 0 : 0
+            let resumable = previous?.claudeMessageIDs != nil && (previous?.size ?? 0) <= size
+            let offset = resumable ? previous?.size ?? 0 : 0
+            if !resumable { out[path] = nil }
             guard let (text, consumed) = read(url, from: offset) else { continue }
-            let fresh = TokenLedger.claudeBuckets(in: text)
-            let base = offset > 0 ? (previous?.buckets ?? [:]) : [:]
+            var seen = resumable ? previous?.claudeMessageIDs ?? [] : []
+            let fresh = TokenLedger.claudeBuckets(in: text, seen: &seen, bucket: { $0 })
+            let base = resumable ? previous?.buckets ?? [:] : [:]
             out[path] = FileState(size: offset + consumed,
                                   buckets: TokenLedger.merge(base, fresh),
-                                  isCumulative: false)
+                                  isCumulative: false, claudeMessageIDs: seen)
         }
 
         for url in codex {
@@ -198,9 +216,10 @@ final class TokenUsageStore: ObservableObject {
             // file that shrank was replaced, and is read again from the top.
             let resumable = previous?.codex != nil && (previous?.size ?? 0) <= size
             let offset = resumable ? previous?.size ?? 0 : 0
+            if !resumable { out[path] = nil }
             guard let (text, consumed) = read(url, from: offset) else { continue }
             let (fresh, progress) = TokenLedger.codexBuckets(
-                in: text, continuing: resumable ? previous?.codex ?? .init() : .init())
+                in: text, continuing: resumable ? previous?.codex ?? .init() : .init(), bucket: { $0 })
             var base = resumable ? previous?.buckets ?? [:] : [:]
             // Work read before the model was named went under the fallback
             // label. Name it now, so the answer does not depend on where

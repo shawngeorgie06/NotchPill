@@ -233,6 +233,16 @@ final class NotchController {
             .sink { [weak self] _ in self?.rebuildForCurrentDisplays(animateDisplayChange: true) }
             .store(in: &cancellables)
 
+        AppSettings.shared.$tokenUsagePeriod
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { rawValue in
+                guard AppSettings.shared.showTokenUsage else { return }
+                TokenUsageStore.shared.refresh(period: TokenUsagePeriod(rawValue: rawValue) ?? .today)
+            }
+            .store(in: &cancellables)
+
         // Mirror live update progress into state so the overlay shows a bar.
         UpdateProgressStore.shared.$progress
             .receive(on: RunLoop.main)
