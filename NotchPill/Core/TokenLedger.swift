@@ -39,17 +39,16 @@ struct TokenTally: Equatable, Codable {
     }
 }
 
-/// Reads token usage out of agent transcripts, bucketed by day and model.
-///
-/// Day buckets rather than a single total because the period is the user's
-/// choice — today, the last week, everything — and re-reading 850MB of
-/// transcripts to answer a different question is not an option. Any period is
-/// a sum over the buckets already on disk.
+/// Parses transcript usage into date and model buckets so the store can
+/// answer different periods without re-reading the source logs.
 enum TokenLedger {
     /// `yyyy-MM-dd` → model → tally.
     typealias Buckets = [String: [String: TokenTally]]
 
-    static func merge(_ lhs: Buckets, _ rhs: Buckets) -> Buckets {
+    typealias Timeline = [Date: [String: TokenTally]]
+
+    static func merge<Key>(_ lhs: [Key: [String: TokenTally]], _ rhs: [Key: [String: TokenTally]])
+        -> [Key: [String: TokenTally]] {
         var out = lhs
         for (day, models) in rhs {
             for (model, tally) in models {
@@ -60,26 +59,62 @@ enum TokenLedger {
         return out
     }
 
-    /// Claude Code writes one record per message, each carrying its own usage
-    /// delta, so these sum.
     static func claudeBuckets(in text: String) -> Buckets {
-        var buckets: Buckets = [:]
+        var seen: [String: ClaudeResponse] = [:]
+        return claudeBuckets(in: text, seen: &seen, bucket: day(from:))
+    }
+
+    struct ClaudeResponse: Codable {
+        let timestamp: Date
+        let model: String
+        var tally: TokenTally
+    }
+
+    /// Claude can report progressively larger usage across blocks of one response.
+    /// Attribute each increase to the original response's timestamp and model.
+    static func claudeBuckets<Key>(in text: String, seen: inout [String: ClaudeResponse], bucket: (Date) -> Key)
+        -> [Key: [String: TokenTally]] {
+        var buckets: [Key: [String: TokenTally]] = [:]
         for line in text.split(separator: "\n") {
-            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8))
+            guard line.contains("\"usage\""),
+                  let object = try? JSONSerialization.jsonObject(with: Data(line.utf8))
                     as? [String: Any],
                   let message = object["message"] as? [String: Any],
                   let usage = message["usage"] as? [String: Any],
                   let model = message["model"] as? String,
                   // Synthetic records carry no real work and no real model.
                   model != "<synthetic>", !model.isEmpty,
-                  let day = day(from: object["timestamp"]) else { continue }
+                  let timestamp = date(from: object["timestamp"]) else { continue }
             let tally = TokenTally(input: int(usage["input_tokens"]),
                                    output: int(usage["output_tokens"]),
                                    cacheWrite: int(usage["cache_creation_input_tokens"]),
                                    cacheRead: int(usage["cache_read_input_tokens"]))
             guard tally.total > 0 || tally.cacheRead > 0 else { continue }
-            buckets[day, default: [:]][model, default: TokenTally()] =
-                (buckets[day]?[model] ?? TokenTally()) + tally
+            let response: ClaudeResponse
+            let contribution: TokenTally
+            if let id = message["id"] as? String, !id.isEmpty {
+                if var previous = seen[id] {
+                    let earlier = previous.tally
+                    let merged = TokenTally(input: max(earlier.input, tally.input),
+                                            output: max(earlier.output, tally.output),
+                                            cacheWrite: max(earlier.cacheWrite, tally.cacheWrite),
+                                            cacheRead: max(earlier.cacheRead, tally.cacheRead))
+                    guard merged != earlier else { continue }
+                    previous.tally = merged
+                    response = previous
+                    contribution = merged.growth(since: earlier)
+                } else {
+                    response = ClaudeResponse(timestamp: timestamp, model: model, tally: tally)
+                    contribution = tally
+                }
+                seen[id] = response
+            } else {
+                response = ClaudeResponse(timestamp: timestamp, model: model, tally: tally)
+                contribution = tally
+            }
+            let key = bucket(response.timestamp)
+            buckets[key, default: [:]][response.model, default: TokenTally()] =
+                (buckets[key]?[response.model] ?? TokenTally()) + contribution
         }
         return buckets
     }
@@ -106,8 +141,13 @@ enum TokenLedger {
 
     static func codexBuckets(in text: String, continuing start: CodexProgress)
         -> (buckets: Buckets, progress: CodexProgress) {
+        codexBuckets(in: text, continuing: start, bucket: day(from:))
+    }
+
+    static func codexBuckets<Key>(in text: String, continuing start: CodexProgress, bucket: (Date) -> Key)
+        -> (buckets: [Key: [String: TokenTally]], progress: CodexProgress) {
         var progress = start
-        var grownByDay: [String: TokenTally] = [:]
+        var growthByBucket: [Key: TokenTally] = [:]
 
         for line in text.split(separator: "\n") {
             // Most of a rollout is conversation. Skip it before paying for JSON.
@@ -122,27 +162,30 @@ enum TokenLedger {
             guard payload["type"] as? String == "token_count",
                   let info = payload["info"] as? [String: Any],
                   let totals = info["total_token_usage"] as? [String: Any],
-                  let day = day(from: object["timestamp"]) else { continue }
+                  let timestamp = date(from: object["timestamp"]) else { continue }
             let tally = TokenTally(input: int(totals["input_tokens"]),
                                    output: int(totals["output_tokens"]),
                                    cacheWrite: int(totals["cache_write_input_tokens"]),
                                    cacheRead: int(totals["cached_input_tokens"]))
             // A zero total still counts as a reading: it is where a restart
             // begins, and skipping it would hide that the total went down.
-            let grown = tally.growth(since: progress.last)
+            var grown = tally.growth(since: progress.last)
+            // Codex includes cache reads in input_tokens. Separate the delta
+            // after differencing the cumulative counters independently.
+            grown.input = max(0, grown.input - grown.cacheRead)
             progress.last = tally
             guard grown.total > 0 || grown.cacheRead > 0 else { continue }
-            grownByDay[day] = (grownByDay[day] ?? TokenTally()) + grown
+            let key = bucket(timestamp)
+            growthByBucket[key] = (growthByBucket[key] ?? TokenTally()) + grown
         }
 
         let name = progress.model ?? "codex"
-        var buckets: Buckets = [:]
-        for (day, tally) in grownByDay { buckets[day] = [name: tally] }
-        return (buckets, progress)
+        return (growthByBucket.mapValues { [name: $0] }, progress)
     }
 
     /// Moves every tally filed under one model name to another.
-    static func relabel(_ buckets: Buckets, from old: String, to new: String) -> Buckets {
+    static func relabel<Key>(_ buckets: [Key: [String: TokenTally]], from old: String, to new: String)
+        -> [Key: [String: TokenTally]] {
         guard old != new else { return buckets }
         var out = buckets
         for (day, models) in buckets {
@@ -175,11 +218,12 @@ enum TokenLedger {
     /// through JSON unchanged, and so a period test is a string comparison
     /// rather than calendar arithmetic on every bucket.
     static func day(from raw: Any?) -> String? {
+        date(from: raw).map(day(from:))
+    }
+
+    private static func date(from raw: Any?) -> Date? {
         guard let text = raw as? String, text.count >= 10 else { return nil }
-        guard let date = isoParser.date(from: text) ?? isoParserNoFraction.date(from: text) else {
-            return nil
-        }
-        return day(from: date)
+        return isoParser.date(from: text) ?? isoParserNoFraction.date(from: text)
     }
 
     /// Builds a local date for tests and period cutoffs without pulling

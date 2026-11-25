@@ -313,3 +313,75 @@ struct AgentUsageReviewFixTests {
         #expect(dedup.shouldSuppress(claude) == true)
     }
 }
+
+
+@Suite("Token usage period accuracy")
+struct TokenUsageAccuracyTests {
+    @Test func claudeRecordsAreDeduplicatedAcrossIncrementalReads() {
+        let line = """
+        {"timestamp":"2026-08-24T12:00:00Z","message":{"id":"msg_1","model":"claude","usage":{"input_tokens":42,"output_tokens":8}}}
+        """
+        var seen: [String: TokenLedger.ClaudeResponse] = [:]
+        let initial = TokenLedger.claudeBuckets(in: line, seen: &seen, bucket: { $0 })
+        let appended = TokenLedger.claudeBuckets(in: line, seen: &seen, bucket: { $0 })
+        #expect(initial.values.first?["claude"]?.total == 50)
+        #expect(appended.isEmpty)
+    }
+
+    @Test func claudeCompletionAddsOnlyNewUsageToTheOriginalTimestamp() throws {
+        func record(timestamp: String, output: Int) -> String {
+            """
+            {"timestamp":"\(timestamp)","message":{"id":"msg_1","model":"claude","usage":{"input_tokens":100,"output_tokens":\(output)}}}
+            """
+        }
+        let partial = record(timestamp: "2026-08-24T23:59:59Z", output: 2)
+        let completed = record(timestamp: "2026-08-25T00:00:01Z", output: 500)
+        var seen: [String: TokenLedger.ClaudeResponse] = [:]
+        let first = TokenLedger.claudeBuckets(in: partial, seen: &seen, bucket: { $0 })
+        seen = try JSONDecoder().decode([String: TokenLedger.ClaudeResponse].self,
+                                        from: JSONEncoder().encode(seen))
+        let next = TokenLedger.claudeBuckets(
+            in: [completed, partial, completed].joined(separator: "\n"), seen: &seen, bucket: { $0 })
+        let timestamp = try #require(first.keys.first)
+        #expect(next == [timestamp: ["claude": TokenTally(output: 498)]])
+        #expect(TokenLedger.merge(first, next) == [timestamp: ["claude": TokenTally(input: 100, output: 500)]])
+    }
+
+    @Test func codexCachedInputIsOnlyCountedAsCachedAcrossReads() {
+        func record(_ minute: String, input: Int, cached: Int, output: Int) -> String {
+            """
+            {"timestamp":"2026-08-24T12:\(minute):00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":\(input),"cached_input_tokens":\(cached),"output_tokens":\(output)}}}}
+            """
+        }
+        let first = TokenLedger.codexBuckets(
+            in: record("00", input: 100, cached: 70, output: 10), continuing: .init(), bucket: { $0 })
+        let next = TokenLedger.codexBuckets(
+            in: record("01", input: 150, cached: 100, output: 20), continuing: first.progress, bucket: { $0 })
+        #expect(first.buckets.values.first?["codex"] == TokenTally(input: 30, output: 10, cacheRead: 70))
+        #expect(next.buckets.values.first?["codex"] == TokenTally(input: 20, output: 10, cacheRead: 30))
+    }
+
+    @Test @MainActor func totalsUseExactLaunchTimeAndLocalCalendarBoundaries() throws {
+        let calendar = Calendar.current
+        let today = try #require(calendar.date(from: DateComponents(year: 2026, month: 8, day: 24)))
+        let launch = today.addingTimeInterval(3_600)
+        let now = launch.addingTimeInterval(3_600)
+        let oldest = try #require(calendar.date(byAdding: .day, value: -6, to: today))
+        let file = TokenUsageStore.FileState(size: 0, buckets: [
+            oldest.addingTimeInterval(-1): ["model": TokenTally(input: 100)],
+            oldest: ["model": TokenTally(input: 20)],
+            launch.addingTimeInterval(-1): ["model": TokenTally(input: 10)],
+            launch: ["model": TokenTally(input: 3)],
+            now.addingTimeInterval(1): ["model": TokenTally(input: 200)]
+        ], isCumulative: true)
+
+        func total(_ period: TokenUsagePeriod) -> Int {
+            TokenUsageStore.summarize([file], period: period, launchedAt: launch, now: now)
+                .total(for: TokenUsageSummary.codex)
+        }
+        #expect(total(.session) == 3)
+        #expect(total(.today) == 13)
+        #expect(total(.week) == 33)
+        #expect(total(.all) == 133)
+    }
+}
