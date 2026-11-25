@@ -384,7 +384,8 @@ final class NotchController {
     /// nothing is showing — the most-recent *finished* agent (whose peek has since
     /// auto-dismissed). Bound to the ⌥⌘R global hotkey.
     private func openReplyForLatest() {
-        guard let alert = state.devReadyAlerts.last ?? lastFinishedAlert,
+        guard geometry != nil,
+              let alert = state.devReadyAlerts.last ?? lastFinishedAlert,
               alert.canReplyFromNotch(replyEnabled: AppSettings.shared.agentReplyEnabled)
         else { return }
         state.beginReply(to: alert)
@@ -524,7 +525,11 @@ final class NotchController {
         }
 
         applyWindowFrame(animated: false)
-        window?.orderFrontRegardless()
+        if state.replyCompose != nil, window?.isVisible == false {
+            window?.makeKeyAndOrderFront(nil)
+        } else {
+            window?.orderFrontRegardless()
+        }
         container?.refreshTracking()
         updateMousePassthrough(pointerInHotZone: expandHoverScreenRect().contains(NSEvent.mouseLocation))
 
@@ -1024,13 +1029,14 @@ final class NotchController {
     }
 
     private func shouldArmShortcuts(at point: NSPoint = NSEvent.mouseLocation) -> Bool {
+        guard let geometry else { return false }
         if state.isExpanded {
             if pillEngaged { return true }
             return isPointerOverPill(point)
         }
         if isPointerInBrowserFlank(point) { return false }
         return collapsedInteractionRect().insetBy(dx: -12, dy: -10).contains(point)
-            || geometry?.notchRect.insetBy(dx: -10, dy: -8).contains(point) == true
+            || geometry.notchRect.insetBy(dx: -10, dy: -8).contains(point)
     }
 
     private func isPointerInBrowserFlank(_ point: NSPoint) -> Bool {
