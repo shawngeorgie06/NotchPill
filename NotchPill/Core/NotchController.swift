@@ -225,6 +225,13 @@ final class NotchController {
             .sink { [weak self] _ in self?.rebuildForCurrentDisplays() }
             .store(in: &cancellables)
 
+        AppSettings.shared.$notchDisplayMode
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.rebuildForCurrentDisplays() }
+            .store(in: &cancellables)
+
         // Mirror live update progress into state so the overlay shows a bar.
         UpdateProgressStore.shared.$progress
             .receive(on: RunLoop.main)
@@ -399,8 +406,7 @@ final class NotchController {
         testMultipleDevReadyPings()
     }
 
-    /// Shows the overlay only on a built-in notched display. On external-only /
-    /// clamshell / no-notch arrangements, the window is hidden and disabled.
+    /// Move the overlay to the selected display, or hide it if none qualifies.
     private func rebuildForCurrentDisplays() {
         guard let geometry = NotchGeometry.current(mode: AppSettings.shared.resolvedDisplayMode) else {
             // No notched display any more — clamshell, or the lid closed while
@@ -414,6 +420,7 @@ final class NotchController {
             expandedHotZone = .zero
             menuBarStrip = .zero
             pillEngaged = false
+            hotZoneKeys.updatePointerInHotZone(false)
             state.setExpanded(false)
             window?.orderOut(nil)
             return

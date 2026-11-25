@@ -283,14 +283,14 @@ struct PreferencesView: View {
                     .tag(NotchGeometry.DisplayMode.builtInOnly.rawValue)
                 Text("Built-in, or an external display when it is unavailable")
                     .tag(NotchGeometry.DisplayMode.builtInThenExternal.rawValue)
-                Text("Whichever display has the menu bar")
+                Text("External display only")
+                    .tag(NotchGeometry.DisplayMode.externalOnly.rawValue)
+                Text("Main display")
                     .tag(NotchGeometry.DisplayMode.mainDisplay.rawValue)
             }
             .pickerStyle(.radioGroup)
-            Text("An external display has no notch, so the pill is placed at the "
-                 + "top centre under the menu bar. With the lid closed there is no "
-                 + "built-in display at all, which is why the pill used to vanish "
-                 + "while docked.")
+            Text("On an external display, the pill floats beneath the menu bar. "
+                 + "External display only hides the pill when no external monitor is connected.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

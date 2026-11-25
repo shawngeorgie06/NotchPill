@@ -220,6 +220,13 @@ struct DisplaySelectionTests {
 
     /// The bug: in clamshell the built-in screen leaves `NSScreen.screens`, so
     /// the old rule found nothing and hid the overlay entirely.
+    @Test("external-only mode moves the pill off the built-in main display")
+    func externalOnlyWithLaptopOpen() {
+        let screens = [builtInNotched(), external(isMain: false)]
+        #expect(NotchGeometry.choose(screens, mode: .externalOnly)?.index == 1)
+        #expect(NotchGeometry.choose([screens[0]], mode: .externalOnly) == nil)
+    }
+
     @Test("clamshell falls back to the external display")
     func clamshellUsesExternal() {
         let screens = [external(isMain: true)]

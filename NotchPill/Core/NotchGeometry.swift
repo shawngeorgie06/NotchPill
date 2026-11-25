@@ -45,6 +45,7 @@ struct NotchGeometry {
         /// Wherever the menu bar is. For a desk where the monitor is primary
         /// and the laptop is off to one side.
         case mainDisplay
+        case externalOnly
     }
 
     /// One display, as the selection rule needs to see it.
@@ -162,7 +163,7 @@ struct NotchGeometry {
         let screens = NSScreen.screens
         let candidates = screens.map { screen in
             Candidate(isBuiltIn: isBuiltIn(screen),
-                      isMain: screen == NSScreen.main,
+                      isMain: (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == CGMainDisplayID(),
                       frame: screen.frame,
                       visibleFrame: screen.visibleFrame,
                       safeTop: screen.safeAreaInsets.top,
@@ -207,6 +208,10 @@ struct NotchGeometry {
         }
 
         switch mode {
+        case .externalOnly:
+            let monitors = candidates.enumerated().filter { !$0.element.isBuiltIn && $0.element.frame.width > 0 }
+            guard let picked = monitors.first(where: { $0.element.isMain }) ?? monitors.first else { return nil }
+            return (picked.offset, placeholderNotch(for: picked.element), .external)
         case .builtInOnly:
             return builtIn().map { ($0.0, $0.1, $0.2) }
         case .builtInThenExternal:
