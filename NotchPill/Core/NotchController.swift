@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import QuartzCore
 
 /// Owns overlay placement, hover-driven expand/collapse, keyboard input, and
 /// multi-display handling. Provider subscriptions live in its provider extension.
@@ -229,7 +230,7 @@ final class NotchController {
             .removeDuplicates()
             .dropFirst()
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.rebuildForCurrentDisplays() }
+            .sink { [weak self] _ in self?.rebuildForCurrentDisplays(animateDisplayChange: true) }
             .store(in: &cancellables)
 
         // Mirror live update progress into state so the overlay shows a bar.
@@ -408,7 +409,7 @@ final class NotchController {
     }
 
     /// Move the overlay to the selected display, or hide it if none qualifies.
-    private func rebuildForCurrentDisplays() {
+    private func rebuildForCurrentDisplays(animateDisplayChange: Bool = false) {
         guard let geometry = AppSettings.shared.selectedNotchGeometry() else {
             // No notched display any more — clamshell, or the lid closed while
             // docked. Hiding the window is not enough: everything that decides
@@ -436,6 +437,15 @@ final class NotchController {
                          + (geometry.source == .assumed
                             ? " — could not read the notch, the pill may not line up" : ""))
         }
+        let screenNumber = NSDeviceDescriptionKey("NSScreenNumber")
+        let previousScreenNumber = self.geometry?.screen.deviceDescription[screenNumber] as? NSNumber
+        let nextScreenNumber = geometry.screen.deviceDescription[screenNumber] as? NSNumber
+        let fadesIn = animateDisplayChange && window?.isVisible == true
+            && previousScreenNumber != nil && nextScreenNumber != nil
+            && previousScreenNumber != nextScreenNumber
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if fadesIn { window?.alphaValue = 0 }
+
         self.geometry = geometry
 
         metrics = NotchMetrics(notchWidth: geometry.notchRect.width,
@@ -529,6 +539,13 @@ final class NotchController {
             window?.makeKeyAndOrderFront(nil)
         } else {
             window?.orderFrontRegardless()
+        }
+        if fadesIn, let window {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = NotchMotion.displayArrivalDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                window.animator().alphaValue = 1
+            }
         }
         container?.refreshTracking()
         updateMousePassthrough(pointerInHotZone: expandHoverScreenRect().contains(NSEvent.mouseLocation))

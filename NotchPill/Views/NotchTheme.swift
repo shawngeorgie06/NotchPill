@@ -12,6 +12,8 @@ import SwiftUI
 /// accessibility floor can be asserted in a unit test instead of only in a
 /// rendered view.
 enum NotchMotion {
+    static let displayArrivalDuration: TimeInterval = 0.20
+
     /// The panel opening, or a card appearing. Enough overshoot to read as an
     /// arrival, not enough to wobble on a surface this small.
     static func enter(reduceMotion: Bool) -> Animation {
