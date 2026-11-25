@@ -248,7 +248,7 @@ final class NotchController {
                 self.hotZoneKeys.suspended = compose != nil
                 if compose != nil {
                     self.devReadyDismissItem?.cancel()      // hold the peek open
-                    self.window?.makeKeyAndOrderFront(nil)  // accept typing (nonactivating panel → no app switch)
+                    if self.geometry != nil { self.window?.makeKeyAndOrderFront(nil) }
                 } else {
                     // Don't call resignKey() directly (system-owned). On send,
                     // performReply activates the terminal which takes key away;
@@ -773,6 +773,7 @@ final class NotchController {
     ///   The reply composer still takes key explicitly when it opens, which is
     ///   the one place typing into the notch is meant to happen.
     private func engagePill(takeKey: Bool) {
+        guard geometry != nil else { return }
         // Refreshed when the pill opens rather than on a timer: the figures are
         // only ever read here, and scanning transcripts nobody is looking at is
         // work for nothing. The store rate-limits itself regardless.
@@ -1059,7 +1060,7 @@ final class NotchController {
 
     private func activateExpandedHotZone() {
         expandWorkItem = nil
-        guard !isPointerInBrowserFlank(NSEvent.mouseLocation) else { return }
+        guard geometry != nil, !isPointerInBrowserFlank(NSEvent.mouseLocation) else { return }
         if Self.logHover { print("HOVER expand @\(String(format: "%.3f", Date().timeIntervalSince1970))") }
         prioritizeUrgentDeckCardOnOpen()
         state.setExpanded(true)

@@ -45,6 +45,7 @@ struct NotchGeometry {
         /// Wherever the menu bar is. For a desk where the monitor is primary
         /// and the laptop is off to one side.
         case mainDisplay
+        /// Use a connected external monitor, or hide the pill if none is available.
         case externalOnly
     }
 

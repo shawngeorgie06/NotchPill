@@ -285,7 +285,7 @@ struct PreferencesView: View {
                     .tag(NotchGeometry.DisplayMode.builtInThenExternal.rawValue)
                 Text("External display only")
                     .tag(NotchGeometry.DisplayMode.externalOnly.rawValue)
-                Text("Main display")
+                Text("Main display (set in macOS Displays settings)")
                     .tag(NotchGeometry.DisplayMode.mainDisplay.rawValue)
             }
             .pickerStyle(.radioGroup)
